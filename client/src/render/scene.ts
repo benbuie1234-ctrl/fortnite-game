@@ -1,7 +1,5 @@
 import * as THREE from "three";
-import { TILE } from "@shared/constants";
-import { ARENA_HALF_TILES } from "@shared/arena";
-import { getTextures } from "./textures";
+import { createLandscape } from "./landscape";
 
 export interface Renderer {
   renderer: THREE.WebGLRenderer;
@@ -30,9 +28,9 @@ export function createRenderer(mount: HTMLElement): Renderer {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x8fc4e8);
-  scene.fog = new THREE.Fog(0x8fc4e8, 60, 190);
+  scene.fog = new THREE.Fog(0x8fc4e8, 120, 370);
 
-  const camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.1, 400);
+  const camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.1, 850);
 
   // --- lighting -------------------------------------------------------------
   // Hemisphere for cheap ambient bounce, one directional for shape and shadow.
@@ -48,7 +46,7 @@ export function createRenderer(mount: HTMLElement): Renderer {
   sun.castShadow = true;
   // The arena is small and fixed, so the shadow frustum can wrap it tightly.
   // That keeps a 1024 map looking sharp instead of blocky.
-  const reach = (ARENA_HALF_TILES + 3) * TILE;
+  const reach = 60;
   sun.shadow.camera.left = -reach;
   sun.shadow.camera.right = reach;
   sun.shadow.camera.top = reach;
@@ -61,72 +59,8 @@ export function createRenderer(mount: HTMLElement): Renderer {
   scene.add(sun);
   scene.add(sun.target);
 
-  // --- ground ---------------------------------------------------------------
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
-  const tex = getTextures(anisotropy);
-
-  const groundSize = (ARENA_HALF_TILES + 1) * TILE * 2;
-  const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
-  // A PlaneGeometry's UVs span 0..1 across the whole plane, so scale them to
-  // get one grass tile every couple of metres instead of one enormous stretch.
-  tileUVs(groundGeo, groundSize, groundSize, 2.5);
-  const ground = new THREE.Mesh(
-    groundGeo,
-    new THREE.MeshLambertMaterial({ map: tex.grass }),
-  );
-  ground.rotation.x = -Math.PI / 2;
-  ground.receiveShadow = true;
-  scene.add(ground);
-
-  // A subtle grid makes the build lattice readable, which matters a lot when
-  // you are learning where a wall is about to land.
-  const grid = new THREE.GridHelper(
-    groundSize, groundSize / TILE, 0x4e6b3f, 0x5c7a4b,
-  );
-  grid.position.y = 0.02;
-  (grid.material as THREE.Material).opacity = 0.16;
-  (grid.material as THREE.Material).transparent = true;
-  scene.add(grid);
-
-  // Skirt beyond the arena so the horizon is not an abrupt edge.
-  const skirtGeo = new THREE.PlaneGeometry(900, 900);
-  tileUVs(skirtGeo, 900, 900, 2.5);
-  const skirt = new THREE.Mesh(
-    skirtGeo,
-    new THREE.MeshLambertMaterial({ map: tex.grass, color: 0xbfc9b4 }),
-  );
-  skirt.rotation.x = -Math.PI / 2;
-  skirt.position.y = -0.4;
-  scene.add(skirt);
-
-  // Ground markings distinguish four routes without introducing collision obstacles.
-  const laneMaterial=new THREE.MeshLambertMaterial({color:0xc5b18a});
-  for(const angle of [0,Math.PI/2]) {
-    const lane=new THREE.Mesh(new THREE.PlaneGeometry(5,groundSize-5),laneMaterial);
-    lane.rotation.set(-Math.PI/2,0,angle);lane.position.y=.025;lane.receiveShadow=true;scene.add(lane);
-  }
-  for(const [x,z,color] of [[-21,0,0x38b8e5],[21,0,0xf2ad52],[0,-21,0x8f78d8],[0,21,0x65c890]]) {
-    const pad=new THREE.Mesh(new THREE.RingGeometry(5,6,32),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide}));
-    pad.rotation.x=-Math.PI/2;pad.position.set(x,.035,z);scene.add(pad);
-  }
-  // Stylized clouds stay above the arena and share geometry/material.
-  const cloudGeo=new THREE.IcosahedronGeometry(1,1);
-  const cloudMat=new THREE.MeshLambertMaterial({color:0xf3f8ff});
-  for(let i=0;i<10;i++) {
-    const cloud=new THREE.Mesh(cloudGeo,cloudMat);
-    cloud.position.set(Math.cos(i*2.4)*90,30+(i%3)*5,Math.sin(i*2.4)*90);
-    cloud.scale.set(10+i%4,2,5);scene.add(cloud);
-  }
-
-  // Low-poly landscape beyond the collision arena provides a readable skyline.
-  const hillMaterial = new THREE.MeshLambertMaterial({ color: 0x507c88, flatShading: true });
-  for (let i = 0; i < 18; i++) {
-    const angle = i * Math.PI * 2 / 18;
-    const hill = new THREE.Mesh(new THREE.ConeGeometry(17 + (i % 4) * 5, 18 + (i % 3) * 9, 5), hillMaterial);
-    hill.position.set(Math.cos(angle) * 108, 3, Math.sin(angle) * 108);
-    hill.rotation.y = angle;
-    scene.add(hill);
-  }
+  createLandscape(scene);
 
   function resize(): void {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -138,7 +72,11 @@ export function createRenderer(mount: HTMLElement): Renderer {
   return {
     renderer, scene, camera,
     maxAnisotropy: anisotropy,
-    render: () => renderer.render(scene, camera),
+    render: () => {
+      sun.position.set(camera.position.x+38,camera.position.y+62,camera.position.z+26);
+      sun.target.position.set(camera.position.x,camera.position.y,camera.position.z);
+      renderer.render(scene,camera);
+    },
     resize,
     setFov(fov: number) {
       if (Math.abs(camera.fov - fov) < 0.01) return;
@@ -146,18 +84,4 @@ export function createRenderer(mount: HTMLElement): Renderer {
       camera.updateProjectionMatrix();
     },
   };
-}
-
-/** Scale a plane's 0..1 UVs so one texture tile covers `metersPerTile`. */
-function tileUVs(
-  geo: THREE.BufferGeometry, w: number, h: number, metersPerTile: number,
-): void {
-  const uv = geo.getAttribute("uv");
-  if (!uv) return;
-  const ru = w / metersPerTile;
-  const rv = h / metersPerTile;
-  for (let i = 0; i < uv.count; i++) {
-    uv.setXY(i, uv.getX(i) * ru, uv.getY(i) * rv);
-  }
-  uv.needsUpdate = true;
 }

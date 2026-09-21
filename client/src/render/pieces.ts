@@ -1,8 +1,9 @@
+import { buildingAt } from "@shared/map";
 import * as THREE from "three";
 import { TILE, PIECE_THICKNESS, MATERIALS } from "@shared/constants";
 import {
   SLOT_FLOOR, SLOT_RAMP, SLOT_WALL_X, SLOT_WALL_Z,
-  Slot, Facing, currentHp,
+  Slot, Facing, currentHp, type Piece,
 } from "@shared/build";
 import type { World } from "@shared/world";
 import { ARENA_OWNER } from "@shared/arena";
@@ -171,6 +172,8 @@ function placeMesh(mesh: THREE.Object3D, piece: {
  * every frame; only touches meshes whose piece actually changed.
  */
 export class PieceRenderer {
+  private staticReady=false;
+  private staticChunks:THREE.Group[]=[];
   private meshes = new Map<number, THREE.Mesh>();
   private flashes = new Map<number, number>();
   private flashMaterial=new THREE.MeshLambertMaterial({color:0xffb266});
@@ -184,9 +187,45 @@ export class PieceRenderer {
     scene.add(this.group);
   }
 
+  private buildStatic(world:World):void {
+    const batches=new Map<string,Piece[]>();
+    for(const p of world.pieces.values()) {
+      if(p.ownerId!==ARENA_OWNER)continue;
+      const key=`${Math.floor(p.gx/16)},${Math.floor(p.gz/16)},${p.slot}`;
+      const list=batches.get(key)??[];list.push(p);batches.set(key,list);
+    }
+    const transform=new THREE.Object3D();
+    const material=new THREE.MeshLambertMaterial({color:0xffffff});
+    for(const list of batches.values()) {
+      const batch=new THREE.InstancedMesh(geometryFor(list[0].slot),material,list.length);
+      list.forEach((p,i)=>{
+        transform.rotation.set(0,0,0);placeMesh(transform,p);transform.updateMatrix();batch.setMatrixAt(i,transform.matrix);
+        const building=buildingAt(p.gx,p.gz);
+        let color=building?.color??0x648e91;
+        if(p.slot===SLOT_FLOOR)color=0xd5cfb8;
+        if(p.slot===SLOT_RAMP)color=building&&(building.style==='house'||building.style==='cabin')&&p.gy>=building.base+building.floors?0x985943:0x9a9d98;
+        batch.setColorAt(i,new THREE.Color(color));
+      });
+      batch.instanceMatrix.needsUpdate=true;
+      batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;
+      const chunk=new THREE.Group();chunk.add(batch);this.staticChunks.push(chunk);this.group.add(chunk);
+    }
+    this.staticReady=true;
+  }
+  updateVisibility(x:number,z:number):void {
+    for(const chunk of this.staticChunks) {
+      const mesh=chunk.children[0] as THREE.InstancedMesh;
+      const center=mesh.boundingSphere!.center;
+      const distance=Math.hypot(center.x-x,center.z-z);
+      chunk.visible=distance<300+mesh.boundingSphere!.radius;
+      mesh.castShadow=distance<75;
+    }
+  }
   sync(world: World, nowSec: number): void {
+    if(!this.staticReady)this.buildStatic(world);
     // Add or update.
     for (const [key, piece] of world.pieces) {
+      if(piece.ownerId===ARENA_OWNER)continue;
       let mesh = this.meshes.get(key);
       const isArena = piece.ownerId === ARENA_OWNER;
 

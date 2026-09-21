@@ -1,100 +1,68 @@
-import { TILE } from "./constants";
-import {
-  Piece, Slot, SLOT_FLOOR, SLOT_WALL_X, SLOT_WALL_Z, SLOT_RAMP, Facing, packKey,
-} from "./build";
-import { World } from "./world";
-
-/** Pieces owned by the arena itself. Indestructible, never sent over the wire. */
-export const ARENA_OWNER = 255;
-const ARENA_HP = Number.POSITIVE_INFINITY;
-
-export const ARENA_HALF_TILES = 12;   // 15x15 tiles of playable floor
-export const ARENA_WALL_HEIGHT = 2;  // tiles
-
-export function isArenaPiece(p: Piece): boolean {
-  return p.ownerId === ARENA_OWNER;
+import { TILE } from './constants';
+import { Piece,Slot,SLOT_FLOOR,SLOT_WALL_X,SLOT_WALL_Z,SLOT_RAMP,Facing,packKey } from './build';
+import { World } from './world';
+import { MAP_HALF,BUILDINGS,terrainHeight } from './map';
+export const ARENA_OWNER=255;
+export const ARENA_HALF_TILES=MAP_HALF/TILE;
+export const ARENA_WALL_HEIGHT=0;
+export function isArenaPiece(p:Piece):boolean{return p.ownerId===ARENA_OWNER;}
+function place(w:World,x:number,y:number,z:number,slot:Slot,facing:Facing=0):void {
+ const key=packKey(x,y,z,slot);
+ w.set({key,gx:x,gy:y,gz:z,slot,facing,mat:2,hp:Infinity,maxHp:Infinity,placedAt:-1e9,ownerId:ARENA_OWNER});
 }
-
-function place(
-  world: World, gx: number, gy: number, gz: number,
-  slot: Slot, facing: Facing = 0,
-): void {
-  const key = packKey(gx, gy, gz, slot);
-  world.pieces.set(key, {
-    key, slot, gx, gy, gz,
-    mat: 2, facing,
-    hp: ARENA_HP, maxHp: ARENA_HP,
-    placedAt: -1e9, // long since fully built
-    ownerId: ARENA_OWNER,
-  });
-}
-
-/**
- * Deterministic small-map arena: a walled box with a raised centre platform and
- * ramps up to it. Client and server both call this with the same seed, so the
- * static geometry never needs to be transmitted or reconciled.
- */
-export function buildArena(world: World, _seed = 1): void {
-  const H = ARENA_HALF_TILES;
-
-  // Boundary walls. Walls are canonicalised onto the -X / -Z face of a cell,
-  // so the far edges are placed on the cell one past the playable area.
-  for (let g = -H; g <= H; g++) {
-    for (let y = 0; y < ARENA_WALL_HEIGHT; y++) {
-      place(world, -H, y, g, SLOT_WALL_X);
-      place(world, H + 1, y, g, SLOT_WALL_X);
-      place(world, g, y, -H, SLOT_WALL_Z);
-      place(world, g, y, H + 1, SLOT_WALL_Z);
+/** Enterable buildings with front/back doors, open windows and continuous stairwells. */
+export function buildArena(world:World,_seed=1):void {
+ world.terrainEnabled=true;
+ for(const b of BUILDINGS) {
+  const door=Math.floor(b.w/2);
+  for(let level=0;level<=b.floors;level++) {
+   const gy=b.base+level;
+   for(let x=0;x<b.w;x++)for(let z=0;z<b.d;z++) {
+    // Hole over the stairs. The neighboring landing remains solid.
+    if(level>0&&x===1&&z===1)continue;
+    place(world,b.x+x,gy,b.z+z,SLOT_FLOOR);
+   }
+   if(level===b.floors)continue;
+   for(let x=0;x<b.w;x++) {
+    for(const side of [0,b.d]) {
+     if(level===0&&x===door)continue;
+     if(level>0&&x%3===1)continue;
+     place(world,b.x+x,gy,b.z+side,SLOT_WALL_Z);
     }
+   }
+   for(let z=0;z<b.d;z++)for(const side of [0,b.w]) {
+    if(z%3===1)continue; // Full-height window openings double as escape routes.
+    place(world,b.x+side,gy,b.z+z,SLOT_WALL_X);
+   }
+   place(world,b.x+1,gy,b.z+1,SLOT_RAMP,1);
   }
-
-  // Centre platform: 3x3 tiles one storey up, with ramps on two sides.
-  for (let gx = -1; gx <= 1; gx++) {
-    for (let gz = -1; gz <= 1; gz++) {
-      place(world, gx, 1, gz, SLOT_FLOOR);
-    }
+  if(b.style==='house'||b.style==='cabin') {
+   for(let z=0;z<b.d;z++)for(let x=0;x<b.w;x++) {
+    const rise=Math.min(x,b.w-1-x);
+    place(world,b.x+x,b.base+b.floors+rise,b.z+z,SLOT_RAMP,x<b.w/2?0:2);
+   }
   }
-  place(world, -2, 0, 0, SLOT_RAMP, 0); // rises toward +X
-  place(world, 2, 0, 0, SLOT_RAMP, 2);  // rises toward -X
-
-  // Four raised side platforms with accessible ramp approaches.
-  for (const [cx,cz] of [[-7,0],[7,0],[0,-7],[0,7]]) {
-    for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++)place(world,cx+dx,1,cz+dz,SLOT_FLOOR);
-    place(world,cx-2,0,cz,SLOT_RAMP,0);
-    place(world,cx+2,0,cz,SLOT_RAMP,2);
+ }
+ // Docks run toward the shallow lake. Broad decking has matching collision.
+ for(let x=-80;x<=-67;x++)for(let z=50;z<54;z++)place(world,x,0,z,SLOT_FLOOR);
+ // Cargo stacks form short-range cover between the warehouses and docks.
+ for(let i=0;i<12;i++) {
+  const x=-70+(i%4)*8,z=72+Math.floor(i/4)*4;
+  for(let dx=0;dx<5;dx++) {
+   place(world,x+dx,0,z,SLOT_WALL_Z);place(world,x+dx,0,z+2,SLOT_WALL_Z);
+   for(let dz=0;dz<2;dz++)place(world,x+dx,1,z+dz,SLOT_FLOOR);
   }
-  // Low cover along outer lanes leaves sightlines between landmarks.
-  for(const g of [-9,-5,5,9]) {
-    place(world,g,0,-9,SLOT_WALL_Z); place(world,g,0,9,SLOT_WALL_Z);
-    place(world,-9,0,g,SLOT_WALL_X); place(world,9,0,g,SLOT_WALL_X);
-  }
-
-  // Four corner cover blocks: a wall pair each, so there is something to
-  // fight around before anyone starts building.
-  const corners: Array<[number, number]> = [[-4, -4], [4, -4], [-4, 4], [4, 4]];
-  for (const [cx, cz] of corners) {
-    for (let y = 0; y < 2; y++) {
-      place(world, cx, y, cz, SLOT_WALL_X);
-      place(world, cx, y, cz, SLOT_WALL_Z);
-    }
-  }
+  for(let dz=0;dz<2;dz++){place(world,x,0,z+dz,SLOT_WALL_X);place(world,x+5,0,z+dz,SLOT_WALL_X);}
+ }
+ // Crossroads rest stop keeps the centre useful for small groups.
+ for(const x of [-4,3])for(const z of [-4,3]) {
+  place(world,x,0,z,SLOT_WALL_X);place(world,x,0,z,SLOT_WALL_Z);
+ }
 }
-
-/** Spawn points, spread around the ring so nobody spawns on top of anyone. */
-export function arenaSpawns(): Array<{ x: number; y: number; z: number; yaw: number }> {
-  const r = (ARENA_HALF_TILES - 1.5) * TILE;
-  return [
-    { x: 0, y: 0.05, z: -r, yaw: 0 },
-    { x: 0, y: 0.05, z: r, yaw: Math.PI },
-    // forwardVector(yaw) is (-sin yaw, 0, cos yaw), so the west spawn needs
-    // -PI/2 to look toward +X and the east spawn +PI/2 to look toward -X.
-    { x: -r, y: 0.05, z: 0, yaw: -Math.PI / 2 },
-    { x: r, y: 0.05, z: 0, yaw: Math.PI / 2 },
-  ];
+export function arenaSpawns():Array<{x:number;y:number;z:number;yaw:number}> {
+ // Start close together at the central hub; the four districts are exploration routes.
+ return [[0,-21],[0,21],[-21,0],[21,0]].map(([x,z])=>({x,y:terrainHeight(x,z)+.05,z,yaw:Math.atan2(x,-z)}));
 }
-
-/** Outside this, a player has escaped the map and is teleported back. */
-export function isOutOfBounds(x: number, y: number, z: number): boolean {
-  const limit = (ARENA_HALF_TILES + 2) * TILE;
-  return x < -limit || x > limit || z < -limit || z > limit || y < -20 || y > 200;
+export function isOutOfBounds(x:number,y:number,z:number):boolean {
+ return Math.abs(x)>MAP_HALF+12||Math.abs(z)>MAP_HALF+12||y< -20||y>220;
 }

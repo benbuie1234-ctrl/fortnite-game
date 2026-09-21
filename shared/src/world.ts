@@ -1,3 +1,4 @@
+import { terrainHeight } from "./map";
 import { TILE } from "./constants";
 import {
   Piece, Box, Slot, SLOT_COUNT, SLOT_RAMP,
@@ -20,6 +21,8 @@ export class World {
   readonly pieces = new Map<number, Piece>();
   /** Flat arena floor sits at y=0; below that is the void. */
   readonly groundY = 0;
+  terrainEnabled=false;
+  groundAt(x:number,z:number):number { return this.terrainEnabled?terrainHeight(x,z):this.groundY; }
 
   get(gx: number, gy: number, gz: number, slot: Slot): Piece | undefined {
     return this.pieces.get(packKey(gx, gy, gz, slot));

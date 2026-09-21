@@ -252,6 +252,7 @@ summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#1
 #crosshair.shotgun {border:2px solid #fff9;border-radius:50%;} #crosshair.shotgun::before,#crosshair.shotgun::after {display:none;}
 #structureHealth {display:none;position:absolute;left:50%;top:57%;transform:translateX(-50%);width:190px;text-align:center;font-size:11px;font-weight:800;text-shadow:0 1px 3px black;}
 #structureHealth .bar {margin-top:6px;height:7px;} #structureFill {background:#ffd653;}
+#locationBadge {position:absolute;left:50%;top:72px;transform:translateX(-50%);padding:5px 12px;border-radius:4px;background:#10243dcc;color:#eaf6ff;font-size:11px;font-weight:800;letter-spacing:1.5px;text-shadow:0 1px 3px #000;}
 </style>
 </head>
 <body>
@@ -260,6 +261,7 @@ summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#1
   <div id="hud" class="hidden">
     <div id="netstat"></div>
     <div id="score"></div>
+    <div id="locationBadge"></div>
     <div id="killfeed"></div>
     <div id="crosshair"></div><div id="structureHealth"><div id="structureLabel"></div><div class="bar"><i id="structureFill"></i></div></div>
     <div id="hitmarker">

@@ -36,6 +36,7 @@ export class Hud {
   private netstat = el("netstat");
   private crosshair = el("crosshair");
   private buildPreview = el("buildPreview");
+  private locationBadge = el("locationBadge");
   private matBoxes = [el("matWoodBox"), el("matBrickBox"), el("matMetalBox")];
   private matValues = [el("matWood"), el("matBrick"), el("matMetal")];
 
@@ -79,6 +80,7 @@ export class Hud {
   }
   show(): void { this.hud.classList.remove("hidden"); }
   hide(): void { this.hud.classList.add("hidden"); }
+  setLocation(name: string): void { this.locationBadge.textContent = name; }
 
   setVitals(hp: number, shield: number): void {
     el("hpValue").textContent = String(Math.ceil(hp));

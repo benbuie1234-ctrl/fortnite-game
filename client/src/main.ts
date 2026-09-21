@@ -4,6 +4,7 @@ import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE } from "@shared/constants";
 import { resolvePlacement } from "@shared/placement";
 import { packKey, unpackKey } from "@shared/build";
 import { weaponById, ARENA_LOADOUT, W_SNIPER, W_PICKAXE } from "@shared/weapons";
+import { locationAt } from "@shared/map";
 import { SKINS } from "@shared/skins";
 import {
   EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
@@ -377,9 +378,11 @@ function frame(now: number): void {
   updateCamera(aiming, dt);
   sound.setListener(self.x, self.y + EYE_HEIGHT, self.z, controls.yaw);
   pieces.sync(conn.world, nowSec);
+  pieces.updateVisibility(self.x, self.z);
   const direction=view.camera.getWorldDirection(new THREE.Vector3());
   const targetPiece=conn.world.raycast(view.camera.position.x,view.camera.position.y,view.camera.position.z,direction.x,direction.y,direction.z,18,nowSec);
   hud.setStructure(targetPiece?.piece??null,nowSec);
+  hud.setLocation(locationAt(self.x, self.z));
   const aimPoint=view.camera.position.clone().addScaledVector(direction,targetPiece?.t??100);
   effects.update(dt);
 

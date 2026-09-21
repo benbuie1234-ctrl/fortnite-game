@@ -13,6 +13,7 @@ export function cameraPose(p: {x:number;y:number;z:number;yaw:number;pitch:numbe
   const length = Math.hypot(...offset);
   const hit = world.raycast(...eye,offset[0]/length,offset[1]/length,offset[2]/length,length+.3,now);
   if(hit) offset = offset.map(v=>v*Math.max(0,hit.t-.25)/length);
-  if(eye[1]+offset[1]<.2 && offset[1]<0) offset=offset.map(v=>v*Math.max(0,(eye[1]-.2)/-offset[1]));
+  const floor=world.groundAt(eye[0]+offset[0],eye[2]+offset[2])+.2;
+  if(eye[1]+offset[1]<floor && offset[1]<0) offset=offset.map(v=>v*Math.max(0,(eye[1]-floor)/-offset[1]));
   return {origin:eye.map((v,i)=>v+offset[i]) as [number,number,number],forward};
 }

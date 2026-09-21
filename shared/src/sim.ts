@@ -225,9 +225,10 @@ function moveAndCollide(s: MovementState, world: World, dt: number, input:InputC
   }
 
   // --- arena floor ---
-  if (s.y <= world.groundY) {
+  const ground = world.groundAt(s.x,s.z);
+  if (s.y <= ground) {
     if (!s.grounded && s.vy < 0) s.lastLandingSpeed = Math.abs(s.vy);
-    s.y = world.groundY;
+    s.y = ground;
     s.vy = 0;
     s.grounded = true;
   }
