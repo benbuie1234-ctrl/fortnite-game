@@ -19,6 +19,13 @@ export interface RayHit {
  */
 export class World {
   readonly pieces = new Map<number, Piece>();
+  private obstacles=new Map<string, Array<{box:Box;piece:Piece}>>();
+  addObstacle(box:Box,key:number):void {
+    const item={box,piece:{key,gx:0,gy:0,gz:0,slot:0 as Slot,facing:0 as const,mat:2,hp:Infinity,maxHp:Infinity,placedAt:-1e9,ownerId:255}};
+    for(let x=Math.floor(box[0]/TILE);x<=Math.floor(box[3]/TILE);x++)for(let z=Math.floor(box[2]/TILE);z<=Math.floor(box[5]/TILE);z++) {
+      const cell=`${x},${z}`,list=this.obstacles.get(cell)??[];list.push(item);this.obstacles.set(cell,list);
+    }
+  }
   /** Flat arena floor sits at y=0; below that is the void. */
   readonly groundY = 0;
   terrainEnabled=false;
@@ -38,6 +45,7 @@ export class World {
 
   clear(): void {
     this.pieces.clear();
+    this.obstacles.clear();
   }
 
   /**
@@ -59,6 +67,10 @@ export class World {
     const cy1 = Math.floor(maxY / TILE) + 1;
     const cz0 = Math.floor(minZ / TILE) - 1;
     const cz1 = Math.floor(maxZ / TILE) + 1;
+    const found=new Set<Box>();
+    for(let x=cx0;x<=cx1;x++)for(let z=cz0;z<=cz1;z++)for(const item of this.obstacles.get(`${x},${z}`)??[]) {
+      if(!found.has(item.box)&&item.box[4]>=minY&&item.box[1]<=maxY){outBoxes.push(item.box);found.add(item.box);}
+    }
 
     for (let gx = cx0; gx <= cx1; gx++) {
       for (let gy = cy0; gy <= cy1; gy++) {
@@ -121,9 +133,13 @@ export class World {
     let tMaxZ = dz !== 0 ? (nextBoundary(gz, stepZ) - oz) * invDz : Infinity;
 
     let travelled = 0;
-    let best: RayHit | null = null;
+    let best: RayHit | null = this.terrainEnabled ? this.terrainRay(ox,oy,oz,dx,dy,dz,maxDist) : null;
     // Neighbour cells too: a wall on a cell face belongs to the +X/+Z cell.
     for (let guard = 0; guard < 512 && travelled <= maxDist; guard++) {
+      for(const item of this.obstacles.get(`${gx},${gz}`)??[]) {
+        const hit=rayVsBox(item.box,ox,oy,oz,dx,dy,dz);
+        if(hit&&hit.t<=maxDist&&(!best||hit.t<best.t))best={...hit,piece:item.piece};
+      }
 
       for (let ox2 = 0; ox2 <= 1; ox2++) {
         for (let oz2 = 0; oz2 <= 1; oz2++) {
@@ -154,6 +170,18 @@ export class World {
       }
     }
     return best;
+  }
+
+  private terrainRay(ox:number,oy:number,oz:number,dx:number,dy:number,dz:number,max:number):RayHit|null {
+    if(oy<this.groundAt(ox,oz)-.05)return null;
+    for(let t=.5;t<=max+.5;t+=.5) {
+      const end=Math.min(max,t);
+      if(oy+dy*end>this.groundAt(ox+dx*end,oz+dz*end))continue;
+      let lo=Math.max(0,t-.5),hi=end;
+      for(let n=0;n<10;n++){const mid=(lo+hi)/2;if(oy+dy*mid>this.groundAt(ox+dx*mid,oz+dz*mid))lo=mid;else hi=mid;}
+      return {t:hi,point:[ox+dx*hi,oy+dy*hi,oz+dz*hi],normal:[0,1,0],piece:{key:-1,gx:0,gy:0,gz:0,slot:0,facing:0,mat:2,hp:Infinity,maxHp:Infinity,placedAt:-1e9,ownerId:255}};
+    }
+    return null;
   }
 }
 

@@ -11,7 +11,7 @@ import {
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
 import { ServerPlayer, hitBoxes } from "./player";
-import { resolvePlacement } from "@shared/placement";
+import { resolvePlacement, placementIssue } from "@shared/placement";
 import { cameraPose } from "@shared/camera";
 import { ARENA_OWNER } from "@shared/arena";
 
@@ -196,6 +196,7 @@ export function tryPlace(
 
   const target = resolvePlacement(p, world);
   if (!target) return false;
+  if (placementIssue(p,target,world)) return false;
   const { gx, gy, gz, slot, facing } = target;
 
   if (!inGridBounds(gx, gy, gz)) return false;

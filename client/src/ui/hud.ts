@@ -41,6 +41,8 @@ export class Hud {
   private matValues = [el("matWood"), el("matBrick"), el("matMetal")];
 
   private slotNodes: HTMLElement[] = [];
+  private buildReason='';
+  setBuildReason(reason:string):void {this.buildReason=reason;}
   private flashUntil = 0;
   private hitUntil = 0;
 
@@ -56,11 +58,11 @@ export class Hud {
 
   setStructure(piece:Piece|null,now:number):void {
     const box=el("structureHealth");
-    box.style.display=piece?"block":"none";
+    box.style.display=piece&&piece.key!==-1?"block":"none";
     if(!piece)return;
     const arena=piece.ownerId===ARENA_OWNER;
     const hp=arena?1:Math.max(0,currentHp(piece,now));
-    el("structureLabel").textContent=arena?"ARENA · INDESTRUCTIBLE":`${MATERIALS[piece.mat].name.toUpperCase()} · ${Math.ceil(hp)} / ${piece.maxHp}`;
+    el("structureLabel").textContent=arena?(piece.key<0?'SCENERY · SOLID COVER':'MAP STRUCTURE · INDESTRUCTIBLE'):`${MATERIALS[piece.mat].name.toUpperCase()} · ${Math.ceil(hp)} / ${piece.maxHp}`;
     el("structureFill").style.width=`${arena?100:100*hp/piece.maxHp}%`;
   }
   showDamage(amount:number, headshot:boolean):void {
@@ -108,7 +110,7 @@ export class Hud {
     if (building) {
       const mat = MATERIALS[0];
       void mat;
-      this.buildPreview.textContent = SLOT_LABELS[index]?.name ?? "";
+      this.buildPreview.textContent = this.buildReason || SLOT_LABELS[index]?.name || '';
     } else {
       this.buildPreview.textContent = "";
     }

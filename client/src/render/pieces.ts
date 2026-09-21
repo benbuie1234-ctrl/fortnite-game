@@ -7,7 +7,7 @@ import {
 } from "@shared/build";
 import type { World } from "@shared/world";
 import { ARENA_OWNER } from "@shared/arena";
-import { getTextures, scaleBoxUVs, planarUVs } from "./textures";
+import { getTextures, planarUVs } from "./textures";
 
 const T = PIECE_THICKNESS;
 
@@ -20,14 +20,102 @@ const METERS_PER_TILE = 1.0;
 // wall and a 0.25 m floor slab.
 // ---------------------------------------------------------------------------
 
-const geoFloor = new THREE.BoxGeometry(TILE, T, TILE);
-scaleBoxUVs(geoFloor, TILE, T, TILE, METERS_PER_TILE);
+const geoFloor = buildPieceBox(TILE, T, TILE);
+const geoWallX = buildPieceBox(T, TILE, TILE);
+const geoWallZ = buildPieceBox(TILE, TILE, T);
 
-const geoWallX = new THREE.BoxGeometry(T, TILE, TILE);
-scaleBoxUVs(geoWallX, T, TILE, TILE, METERS_PER_TILE);
+/**
+ * A box for one build piece: subdivided, UV-mapped in world space, and with
+ * soft occlusion baked into its vertex colours.
+ *
+ * The subdivision exists purely so the occlusion has somewhere to live. A
+ * plain BoxGeometry has nothing but corner vertices, and every corner is an
+ * edge, so a darkening pass would flatten the whole piece uniformly instead of
+ * shading a border.
+ */
+function buildPieceBox(w: number, h: number, d: number): THREE.BufferGeometry {
+  // Roughly one segment every 40 cm, which is enough to resolve the falloff
+  // below without adding vertices that never get used.
+  const seg = (n: number) => Math.max(1, Math.min(8, Math.round(n / 0.4)));
+  const geo = new THREE.BoxGeometry(w, h, d, seg(w), seg(h), seg(d));
+  // Project UVs from position rather than scaling the stock 0..1 set: the
+  // stock layout assumes exactly four vertices per face, which subdivision
+  // breaks.
+  planarUVs(geo, METERS_PER_TILE);
+  bakeEdgeAO(geo);
+  return geo;
+}
 
-const geoWallZ = new THREE.BoxGeometry(TILE, TILE, T);
-scaleBoxUVs(geoWallZ, TILE, TILE, T, METERS_PER_TILE);
+/**
+ * Darken vertices near the border of each face, fading to full brightness
+ * toward the middle.
+ *
+ * This is the cheap stand-in for screen-space ambient occlusion, and it is how
+ * stylised games have always done it: the shading lives in the mesh, costs
+ * nothing at runtime, and -- unlike painting shadow into the texture -- it
+ * survives a texture that tiles several times across one piece. It also gives
+ * every piece a soft dark seam against its neighbours, which is what makes a
+ * built structure read as separate pieces rather than one blob.
+ */
+function bakeEdgeAO(geo: THREE.BufferGeometry, falloff = 0.45, minShade = 0.62): void {
+  const pos = geo.getAttribute("position");
+  const normal = geo.getAttribute("normal");
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb || !normal) return;
+
+  const half = [
+    (bb.max.x - bb.min.x) / 2,
+    (bb.max.y - bb.min.y) / 2,
+    (bb.max.z - bb.min.z) / 2,
+  ];
+
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const p = [pos.getX(i), pos.getY(i), pos.getZ(i)];
+    const n = [Math.abs(normal.getX(i)), Math.abs(normal.getY(i)), Math.abs(normal.getZ(i))];
+
+    // Which axis this face points along; the other two span the face.
+    let axis = 0;
+    if (n[1] >= n[0] && n[1] >= n[2]) axis = 1;
+    else if (n[2] >= n[0]) axis = 2;
+
+    // Distance to the nearest face border, along whichever tangent axis is
+    // closest to one.
+    let edgeDist = Infinity;
+    for (let a = 0; a < 3; a++) {
+      if (a === axis) continue;
+      edgeDist = Math.min(edgeDist, half[a] - Math.abs(p[a]));
+    }
+
+    const t = Math.max(0, Math.min(1, edgeDist / falloff));
+    const eased = t * t * (3 - 2 * t); // smoothstep
+    const shade = minShade + (1 - minShade) * eased;
+    colors[i * 3] = shade;
+    colors[i * 3 + 1] = shade;
+    colors[i * 3 + 2] = shade;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
+
+/** Vertical gradient for shapes that have no flat faces to border-shade. */
+function bakeVerticalAO(geo: THREE.BufferGeometry, minShade = 0.66): void {
+  const pos = geo.getAttribute("position");
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  if (!bb) return;
+
+  const span = Math.max(1e-6, bb.max.y - bb.min.y);
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) {
+    const t = (pos.getY(i) - bb.min.y) / span;
+    const shade = minShade + (1 - minShade) * t;
+    colors[i * 3] = shade;
+    colors[i * 3 + 1] = shade;
+    colors[i * 3 + 2] = shade;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
 
 const geoRamp = makeRampGeometry();
 // Half-height pyramid, matching the collision box in build.ts exactly. A cone
@@ -64,6 +152,9 @@ function makeRampGeometry(): THREE.BufferGeometry {
   geo.computeVertexNormals();
   // The wedge has no UVs of its own; project them from the dominant axis.
   planarUVs(geo, METERS_PER_TILE);
+  // Only six vertices, all of them corners, so border shading has nowhere to
+  // go. A base-to-top gradient reads correctly on a slope anyway.
+  bakeVerticalAO(geo);
   return geo;
 }
 
@@ -73,6 +164,8 @@ function makeConeGeometry(): THREE.BufferGeometry {
   // grid; square it up and sit it on the cell floor.
   geo.rotateY(Math.PI / 4);
   geo.translate(0, TILE * 0.25, 0);
+  planarUVs(geo, METERS_PER_TILE);
+  bakeVerticalAO(geo);
   return geo;
 }
 
@@ -103,6 +196,8 @@ function materials(anisotropy: number): MaterialPool {
       DAMAGE_BUCKETS.map((mul) =>
         new THREE.MeshLambertMaterial({
           map: tex.build[i] ?? tex.build[0],
+          // Multiplies the baked occlusion in bakeEdgeAO over the texture.
+          vertexColors: true,
           // The texture already carries the material's colour, so the tint
           // here must start at white and only darken for damage. Multiplying
           // by def.color would apply the colour twice.
@@ -110,7 +205,9 @@ function materials(anisotropy: number): MaterialPool {
         }),
       ),
     ),
-    arena: new THREE.MeshLambertMaterial({ map: tex.concrete, color: 0xffffff }),
+    arena: new THREE.MeshLambertMaterial({
+      map: tex.concrete, color: 0xffffff, vertexColors: true,
+    }),
   };
   return pool;
 }

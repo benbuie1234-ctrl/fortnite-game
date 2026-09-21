@@ -1,7 +1,24 @@
 import * as THREE from 'three';
-import { MAP_HALF,terrainHeight,BUILDINGS,LOCATIONS } from '@shared/map';
+import { MAP_HALF,terrainHeight,BUILDINGS,LOCATIONS,SCENERY,PROPS } from '@shared/map';
 
 export function createLandscape(scene:THREE.Scene):void {
+ const trunkGeo=new THREE.BoxGeometry(.56,1,.56),rockGeo=new THREE.BoxGeometry(1,1,1),leafGeo=new THREE.ConeGeometry(1,1,7);
+ const solidMaterial=new THREE.MeshLambertMaterial({color:0xffffff});
+ const treeList=SCENERY.filter(p=>p.kind==='tree'),rockList=SCENERY.filter(p=>p.kind==='rock');
+ const trunks=new THREE.InstancedMesh(trunkGeo,solidMaterial,treeList.length);
+ const leaves=new THREE.InstancedMesh(leafGeo,solidMaterial,treeList.length*2);
+ const rocks=new THREE.InstancedMesh(rockGeo,solidMaterial,rockList.length+PROPS.length);
+ const matrix=new THREE.Object3D();
+ treeList.forEach((p,i)=>{
+   matrix.position.set(p.x,p.y+p.size/2,p.z);matrix.scale.set(1,p.size,1);matrix.updateMatrix();trunks.setMatrixAt(i,matrix.matrix);trunks.setColorAt(i,new THREE.Color(0x806445));
+   for(let tier=0;tier<2;tier++){
+     matrix.position.set(p.x,p.y+p.size*.85+tier*p.size*.38,p.z);matrix.scale.set(p.size*(.6-tier*.17),p.size*.95,p.size*(.6-tier*.17));matrix.updateMatrix();
+     leaves.setMatrixAt(i*2+tier,matrix.matrix);leaves.setColorAt(i*2+tier,new THREE.Color(i%3===0?0x497c59:0x67964e));
+   }
+ });
+ rockList.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.size*.25,p.z);matrix.scale.set(p.size*.6,p.size*.5,p.size*.6);matrix.updateMatrix();rocks.setMatrixAt(i,matrix.matrix);rocks.setColorAt(i,new THREE.Color(0x91a098));});
+ PROPS.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.h/2,p.z);matrix.scale.set(p.w,p.h,p.d);matrix.updateMatrix();rocks.setMatrixAt(rockList.length+i,matrix.matrix);rocks.setColorAt(rockList.length+i,new THREE.Color(p.color));});
+ for(const batch of [trunks,leaves,rocks]){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
  const size=MAP_HALF*2;
  const ground=new THREE.PlaneGeometry(size,size,240,240);ground.rotateX(-Math.PI/2);
  const positions=ground.getAttribute('position');const colors=[];
@@ -41,9 +58,21 @@ export function createLandscape(scene:THREE.Scene):void {
    for(const side of [0,b.d])details.push({x:(b.x+x+.5)*3,y:(b.base+level)*3+1.8,z:(b.z+side)*3+(side===0?-.14:.14),sx:1.65,sy:1.1,sz:.03,color:0x4a7384});
   }
   details.push({x:(b.x+b.w/2)*3,y:b.base*3+2.65,z:b.z*3-.7,sx:3.6,sy:.16,sz:1.6,color:b.style==='house'?0xf3e4c6:0x4b6978});
+  if(b.style==='house') {
+   // Fascia, front steps and a contrasting door surround make each home legible.
+   details.push({x:(b.x+b.w/2)*3,y:b.floors*3-.1,z:b.z*3-.18,sx:b.w*3+.3,sy:.2,sz:.2,color:0xf2e6c9});
+   for(const dx of [-1.6,1.6])details.push({x:(b.x+Math.floor(b.w/2)+.5)*3+dx,y:1.4,z:b.z*3-.18,sx:.13,sy:2.8,sz:.13,color:0xf2e6c9});
+  }
  }
  const facade=new THREE.InstancedMesh(box,mat,details.length),dummy=new THREE.Object3D();
  details.forEach((d,i)=>{dummy.position.set(d.x,d.y,d.z);dummy.scale.set(d.sx,d.sy,d.sz);dummy.updateMatrix();facade.setMatrixAt(i,dummy.matrix);facade.setColorAt(i,new THREE.Color(d.color));});facade.computeBoundingSphere();scene.add(facade);
+ // Door numbers and a pair of street names give the neighborhood useful callouts.
+ BUILDINGS.filter(b=>b.style==='house').forEach((b,i)=>{
+   const canvas=document.createElement('canvas');canvas.width=128;canvas.height=64;
+   const ctx=canvas.getContext('2d')!;ctx.fillStyle='#24454d';ctx.fillRect(0,0,128,64);ctx.fillStyle='#fff4d8';ctx.font='bold 34px system-ui';ctx.textAlign='center';ctx.fillText(String(101+i),64,45);
+   const sign=new THREE.Mesh(new THREE.PlaneGeometry(.65,.325),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(canvas),side:THREE.DoubleSide}));
+   sign.position.set((b.x+Math.floor(b.w/2)+.5)*3,2.5,b.z*3-.19);sign.rotation.y=Math.PI;scene.add(sign);
+ });
  // Names on the landscape are visible approach landmarks.
  for(const poi of LOCATIONS){
   const canvas=document.createElement('canvas');canvas.width=512;canvas.height=80;const ctx=canvas.getContext('2d')!;

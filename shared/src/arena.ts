@@ -1,7 +1,7 @@
 import { TILE } from './constants';
 import { Piece,Slot,SLOT_FLOOR,SLOT_WALL_X,SLOT_WALL_Z,SLOT_RAMP,Facing,packKey } from './build';
 import { World } from './world';
-import { MAP_HALF,BUILDINGS,terrainHeight } from './map';
+import { MAP_HALF,BUILDINGS,SCENERY,PROPS,terrainHeight } from './map';
 export const ARENA_OWNER=255;
 export const ARENA_HALF_TILES=MAP_HALF/TILE;
 export const ARENA_WALL_HEIGHT=0;
@@ -13,6 +13,11 @@ function place(w:World,x:number,y:number,z:number,slot:Slot,facing:Facing=0):voi
 /** Enterable buildings with front/back doors, open windows and continuous stairwells. */
 export function buildArena(world:World,_seed=1):void {
  world.terrainEnabled=true;
+ SCENERY.forEach((p,i)=>{
+   const r=p.kind==='tree'?.28:p.size*.3,h=p.kind==='tree'?p.size:p.size*.5;
+   world.addObstacle([p.x-r,p.y,p.z-r,p.x+r,p.y+h,p.z+r],-i-2);
+ });
+ PROPS.forEach((p,i)=>world.addObstacle([p.x-p.w/2,p.y,p.z-p.d/2,p.x+p.w/2,p.y+p.h,p.z+p.d/2],-10000-i));
  for(const b of BUILDINGS) {
   const door=Math.floor(b.w/2);
   for(let level=0;level<=b.floors;level++) {

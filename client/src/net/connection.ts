@@ -158,6 +158,8 @@ export class Connection {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
+  get canAcceptInput():boolean {return this.connected&&this.pending.length<90;}
+
   sendChat(text: string): void {
     if (!this.connected) return;
     this.ws!.send(JSON.stringify({ t: C_CHAT, text }));
@@ -198,6 +200,7 @@ export class Connection {
    * billed message count.
    */
   pushInput(cmd: InputCommand): void {
+    if (!this.connected || this.pending.length >= 90) return;
     if (this.self.alive) {
       stepPlayer(this.self, cmd, this.world, TICK_DT);
     }
@@ -205,7 +208,8 @@ export class Connection {
     this.unsent.push(cmd);
     // Bound the replay list if the server goes quiet, so a stall cannot turn
     // into an unbounded replay when it comes back.
-    if (this.pending.length > 120) this.pending.splice(0, this.pending.length - 120);
+    // Stop prediction during a prolonged outage rather than deleting replay
+    // history and continuing to walk farther from the server's position.
 
     if (this.unsent.length >= INPUTS_PER_MESSAGE) this.flush();
   }

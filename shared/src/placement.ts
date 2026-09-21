@@ -1,9 +1,26 @@
-import { SLOT_FLOOR, SLOT_RAMP, SLOT_CONE, SLOT_WALL_X, SLOT_WALL_Z, Slot, Facing, worldToCell, packKey } from './build';
-import { TILE, EYE_HEIGHT, BUILD_RANGE } from './constants';
+import { SLOT_FLOOR, SLOT_RAMP, SLOT_CONE, SLOT_WALL_X, SLOT_WALL_Z, Slot, Facing, worldToCell, packKey, makePiece, pieceBox, rampHeightAt, inGridBounds } from './build';
+import { TILE, EYE_HEIGHT, BUILD_RANGE, PLAYER_RADIUS, PLAYER_HEIGHT, STEP_HEIGHT } from './constants';
 import { quadrantFromYaw, forwardVector } from './vec';
 import type { World } from './world';
 export const BUILD_WALL=5, BUILD_FLOOR=6, BUILD_RAMP=7, BUILD_CONE=8;
 export interface PlacementTarget { gx:number;gy:number;gz:number;slot:Slot;facing:Facing; }
+
+/** Same rejection reasons drive the ghost and server placement. */
+export function placementIssue(p:{x:number;y:number;z:number}, target:PlacementTarget, world:World):string|null {
+  if(!inGridBounds(target.gx,target.gy,target.gz))return 'Outside build area';
+  if(world.pieces.has(packKey(target.gx,target.gy,target.gz,target.slot)))return 'Already occupied';
+  const cx=(target.gx+.5)*TILE,cy=target.gy*TILE,cz=(target.gz+.5)*TILE;
+  if(Math.hypot(cx-p.x,cy+TILE*.5-p.y-EYE_HEIGHT,cz-p.z)>BUILD_RANGE)return 'Out of reach';
+  if(cy+.3<world.groundAt(cx,cz))return 'Blocked by terrain';
+  const piece=makePiece(target.gx,target.gy,target.gz,target.slot,0,target.facing,0,0);
+  const box=pieceBox(piece);
+  if(box&&p.x+PLAYER_RADIUS>box[0]&&p.x-PLAYER_RADIUS<box[3]&&p.z+PLAYER_RADIUS>box[2]&&p.z-PLAYER_RADIUS<box[5]&&p.y+PLAYER_HEIGHT>box[1]&&p.y<box[4]) {
+    if(target.slot!==SLOT_FLOOR||box[4]-p.y>STEP_HEIGHT)return 'Move clear of the piece';
+  }
+  const ramp=rampHeightAt(piece,p.x,p.z);
+  if(ramp!==null&&ramp>p.y+STEP_HEIGHT&&p.y+PLAYER_HEIGHT>cy)return 'Move clear of the ramp';
+  return null;
+}
 
 /** Pitch controls the build layer; looking down places at your feet.
  * Floors and ramps share a layer at ramp exits, allowing continuous climbs. */

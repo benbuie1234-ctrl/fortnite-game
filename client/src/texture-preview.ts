@@ -57,13 +57,17 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(mount.clientWidth, 460);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Mirror the game's tone mapping and lighting so this page stays an honest
+// reference rather than a prettier lie.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 mount.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x8fc4e8);
-scene.add(new THREE.HemisphereLight(0xbfdcf5, 0x4a5a48, 1.15));
-scene.add(new THREE.AmbientLight(0xffffff, 0.42));
-const sun = new THREE.DirectionalLight(0xfff2d8, 1.9);
+scene.background = new THREE.Color(0x9fd0f5);
+scene.add(new THREE.HemisphereLight(0xa8d4ff, 0x7a8a5c, 0.9));
+scene.add(new THREE.AmbientLight(0x7d9ecb, 0.28));
+const sun = new THREE.DirectionalLight(0xfff0cc, 3.0);
 sun.position.set(38, 62, 26);
 scene.add(sun);
 

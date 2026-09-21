@@ -16,6 +16,10 @@ import * as THREE from "three";
 
 const SIZE = 256;
 
+// Palette note: these are deliberately brighter and more saturated than the
+// colours they depict. ACES tone mapping compresses midtones and the baked
+// edge occlusion multiplies over the top, so a "correct" brown comes out mud.
+
 function canvas(): { cv: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const cv = document.createElement("canvas");
   cv.width = SIZE;
@@ -79,7 +83,7 @@ function woodCanvas(): HTMLCanvasElement {
   const { cv, ctx } = canvas();
   const rand = rng(0x5eed01);
 
-  ctx.fillStyle = "#c08a4a";
+  ctx.fillStyle = "#d99a55";
   ctx.fillRect(0, 0, SIZE, SIZE);
 
   // Vertical planks with darker seams between them.
@@ -88,7 +92,7 @@ function woodCanvas(): HTMLCanvasElement {
   for (let i = 0; i < planks; i++) {
     const x = i * plankW;
     const shade = 0.88 + rand() * 0.24;
-    ctx.fillStyle = tint(0xc08a4a, shade);
+    ctx.fillStyle = tint(0xd99a55, shade);
     ctx.fillRect(x, 0, plankW, SIZE);
 
     // Grain: long wavering strokes down the plank.
@@ -96,7 +100,7 @@ function woodCanvas(): HTMLCanvasElement {
       const gx = x + rand() * plankW;
       const amp = 1 + rand() * 2.5;
       const period = 40 + rand() * 90;
-      ctx.strokeStyle = tint(0xc08a4a, 0.72 + rand() * 0.2, 0.5);
+      ctx.strokeStyle = tint(0xd99a55, 0.72 + rand() * 0.2, 0.5);
       ctx.lineWidth = 0.7 + rand() * 1.4;
       ctx.beginPath();
       for (let y = 0; y <= SIZE; y += 4) {
@@ -121,7 +125,7 @@ function brickCanvas(): HTMLCanvasElement {
   const rand = rng(0x5eed02);
 
   // Mortar base.
-  ctx.fillStyle = "#6f6a64";
+  ctx.fillStyle = "#8a847c";
   ctx.fillRect(0, 0, SIZE, SIZE);
 
   const rows = 8;
@@ -136,7 +140,7 @@ function brickCanvas(): HTMLCanvasElement {
     for (let b = -1; b < 5; b++) {
       const x = b * brickW + offset;
       const shade = 0.82 + rand() * 0.3;
-      ctx.fillStyle = tint(0x9a5f4a, shade);
+      ctx.fillStyle = tint(0xc06b4f, shade);
       ctx.fillRect(x + gap / 2, y + gap / 2, brickW - gap, h - gap);
 
       // A little grit per brick.
@@ -155,13 +159,13 @@ function metalCanvas(): HTMLCanvasElement {
   const { cv, ctx } = canvas();
   const rand = rng(0x5eed03);
 
-  ctx.fillStyle = "#6f7d8c";
+  ctx.fillStyle = "#8798aa";
   ctx.fillRect(0, 0, SIZE, SIZE);
 
   // Brushed horizontal streaks.
   for (let i = 0; i < 320; i++) {
     const y = rand() * SIZE;
-    ctx.strokeStyle = tint(0x6f7d8c, 0.82 + rand() * 0.34, 0.35);
+    ctx.strokeStyle = tint(0x8798aa, 0.82 + rand() * 0.34, 0.35);
     ctx.lineWidth = 0.6 + rand() * 1.3;
     ctx.beginPath();
     ctx.moveTo(0, y);
@@ -219,11 +223,11 @@ function concreteCanvas(): HTMLCanvasElement {
   const { cv, ctx } = canvas();
   const rand = rng(0x5eed05);
 
-  ctx.fillStyle = "#828b97";
+  ctx.fillStyle = "#a3acba";
   ctx.fillRect(0, 0, SIZE, SIZE);
 
   for (let i = 0; i < 260; i++) {
-    ctx.fillStyle = tint(0x828b97, 0.88 + rand() * 0.22, 0.4);
+    ctx.fillStyle = tint(0xa3acba, 0.88 + rand() * 0.22, 0.4);
     wrapDot(ctx, rand() * SIZE, rand() * SIZE, 3 + rand() * 16);
   }
   for (let i = 0; i < 900; i++) {

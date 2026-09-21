@@ -46,6 +46,8 @@ export class ServerPlayer implements MovementState {
 
   inputQueue: InputCommand[] = [];
   lastSeq = 0;
+  lastReceivedSeq = 0;
+  receivedInput = false;
   lastInputAtMs = 0;
   rttMs = 60;
 

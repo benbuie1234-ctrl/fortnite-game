@@ -1,8 +1,8 @@
 import { cameraPose } from "@shared/camera";
 import * as THREE from "three";
 import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE } from "@shared/constants";
-import { resolvePlacement } from "@shared/placement";
-import { packKey, unpackKey } from "@shared/build";
+import { resolvePlacement, placementIssue } from "@shared/placement";
+import { unpackKey } from "@shared/build";
 import { weaponById, ARENA_LOADOUT, W_SNIPER, W_PICKAXE } from "@shared/weapons";
 import { locationAt } from "@shared/map";
 import { SKINS } from "@shared/skins";
@@ -158,6 +158,7 @@ document.getElementById("quality")!.addEventListener("change", e => {
   const quality = (e.target as HTMLSelectElement).value;
   view.renderer.setPixelRatio(Math.min(devicePixelRatio, quality === "low" ? 1 : quality === "high" ? 2 : 1.5));
   view.renderer.shadowMap.enabled = quality !== "low";
+  view.setBloom(quality !== "low");
   view.scene.traverse(o => { if (o instanceof THREE.Mesh) {
     const materials = Array.isArray(o.material) ? o.material : [o.material];
     for (const m of materials) m.needsUpdate = true;
@@ -392,15 +393,16 @@ function frame(now: number): void {
       x: self.x, y: self.y, z: self.z, yaw: controls.yaw, pitch: controls.pitch, buildSlot: controls.slot,
     }, conn.world);
     if (target) {
-      const occupied = conn.world.pieces.has(
-        packKey(target.gx, target.gy, target.gz, target.slot),
-      );
-      ghost.show(target, occupied);
+      const issue=placementIssue(self,target,conn.world);
+      ghost.show(target,issue!==null||self.mats<10);
+      hud.setBuildReason(issue??(self.mats<10?'Not enough materials':''));
     } else {
       ghost.hide();
+      hud.setBuildReason('Out of reach');
     }
   } else {
     ghost.hide();
+    hud.setBuildReason('');
   }
 
   // --- local jump and landing, from grounded transitions ---
@@ -499,7 +501,7 @@ setInterval(() => {
   // Cap the catch-up: after a long stall we want to resync, not replay a
   // second of banked movement.
   while (tickAccumulator >= TICK_DT && steps < 6) {
-    conn.pushInput(controls.sample());
+    if(conn.canAcceptInput) conn.pushInput(controls.sample());
     tickAccumulator -= TICK_DT;
     steps++;
   }

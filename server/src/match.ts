@@ -6,7 +6,7 @@ import {
 import {
   C_HELLO, C_INPUT, C_PING, C_CHAT,
   S_WELCOME, S_PONG, S_FULL_WORLD, S_MATCH, S_CHAT, S_KICK,
-  EV_DEATH, EV_RESPAWN,
+  EV_DEATH, EV_RESPAWN, EV_PIECE_REMOVE,
   Reader, Writer, readInputBatch,
   PF_ALIVE, PF_GROUNDED, PF_AIMING, PF_CROUCH, PF_FIRING, PF_MOVING,
 } from "@shared/protocol";
@@ -123,7 +123,15 @@ export class MatchRoom implements DurableObject {
         const rtt = ((Date.now() >>> 0) - batch.clientTimeMs) >>> 0;
         if (rtt < 1000) player.rttMs = player.rttMs * 0.8 + rtt * 0.2;
         for (const cmd of batch.commands) {
-          if (player.inputQueue.length < 32) player.inputQueue.push(cmd);
+          const ahead = (cmd.seq - player.lastReceivedSeq) & 0xffff;
+          if (player.receivedInput && (ahead === 0 || ahead > 0x8000)) continue;
+          if (player.inputQueue.length >= 128) {
+            player.socket.close(1008, "Input backlog exceeded; please reconnect");
+            return;
+          }
+          player.receivedInput = true;
+          player.lastReceivedSeq = cmd.seq;
+          player.inputQueue.push(cmd);
         }
         break;
       }
@@ -251,7 +259,10 @@ export class MatchRoom implements DurableObject {
 
   private resetBuilds(): void {
     for (const [key, piece] of [...this.world.pieces]) {
-      if (piece.ownerId !== ARENA_OWNER) this.world.pieces.delete(key);
+      if (piece.ownerId !== ARENA_OWNER) {
+        this.world.pieces.delete(key);
+        this.events.push({ kind: EV_PIECE_REMOVE, key });
+      }
     }
   }
 
@@ -334,7 +345,8 @@ export class MatchRoom implements DurableObject {
     // The queue should hover near empty. A persistent backlog means the client
     // is sending faster than the tick rate, so drop the excess rather than
     // letting it bank up movement.
-    if (player.inputQueue.length > 12) player.inputQueue.length = 0;
+    // Keep unprocessed inputs for the next tick. Discarding this backlog made
+    // the next acknowledgement erase movement already predicted by clients.
   }
 
   private applySlot(player: ServerPlayer, slot: number): void {
