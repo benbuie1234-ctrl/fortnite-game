@@ -232,31 +232,24 @@ export function rayVsRamp(
   ox: number, oy: number, oz: number,
   dx: number, dy: number, dz: number,
 ): Omit<RayHit, "piece"> | null {
-  // The wedge's bounding box gives us the entry/exit window to search in.
-  const bounds = rayVsBox(rampUnderBox(piece), ox, oy, oz, dx, dy, dz);
-  if (!bounds) return null;
-
-  // March the short span inside the cell and find where the ray crosses the
-  // slope surface. The span is at most one tile, so this stays cheap and exact
-  // enough that players never shoot through a ramp they are standing on.
-  const steps = 12;
-  const span = TILE * 1.75;
-  let prevAbove: boolean | null = null;
-  for (let i = 0; i <= steps; i++) {
-    const t = bounds.t + (span * i) / steps;
-    const px = ox + dx * t;
-    const py = oy + dy * t;
-    const pz = oz + dz * t;
-    const h = rampHeightAt(piece, px, pz);
-    if (h === null) { prevAbove = null; continue; }
-    const above = py > h;
-    if (prevAbove === true && !above) {
-      const nrm = rampNormal(piece);
-      return { t, point: [px, py, pz], normal: nrm };
-    }
-    prevAbove = above;
+  const b=rampUnderBox(piece),n=rampNormal(piece);
+  const h=rampHeightAt(piece,b[0],b[2])!;
+  const planes:Array<[number,number,number,number]>=[
+    [-1,0,0,-b[0]],[1,0,0,b[3]],[0,-1,0,-b[1]],
+    [0,0,-1,-b[2]],[0,0,1,b[5]],
+    [n[0],n[1],n[2],n[0]*b[0]+n[1]*h+n[2]*b[2]],
+  ];
+  let enter=0,exit=Infinity;
+  let normal:[number,number,number]=[0,1,0];
+  for(const [nx,ny,nz,limit] of planes) {
+    const distance=limit-nx*ox-ny*oy-nz*oz,rate=nx*dx+ny*dy+nz*dz;
+    if(Math.abs(rate)<1e-9){if(distance<0)return null;continue;}
+    const t=distance/rate;
+    if(rate<0){if(t>enter){enter=t;normal=[nx,ny,nz];}}
+    else exit=Math.min(exit,t);
+    if(enter>exit)return null;
   }
-  return null;
+  return {t:enter,point:[ox+dx*enter,oy+dy*enter,oz+dz*enter],normal};
 }
 
 function rampNormal(piece: Piece): [number, number, number] {

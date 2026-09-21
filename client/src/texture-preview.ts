@@ -164,9 +164,30 @@ button("death", () => sound.death(0, 0, 4));
 button("respawn", () => sound.respawn());
 button("round win", () => sound.win());
 
+button("reload", () => sound.reload());
+button("weapon swap", () => sound.swap());
+button("ui click", () => sound.ui("click"));
+button("ui hover", () => sound.ui("hover"));
+
 // Panning check: the same sound from the left, centre and right.
 button("pan L-C-R", () => {
   sound.shot(0, -12, 0, 0);
   setTimeout(() => sound.shot(0, 0, 0, 12), 380);
   setTimeout(() => sound.shot(0, 12, 0, 0), 760);
+});
+
+// The headline change: the same shot at four ranges. It should not just get
+// quieter, it should get progressively duller and wetter as air absorption
+// eats the high frequencies and more of it arrives as reflections.
+button("distance 5m / 20m / 45m / 80m", () => {
+  [5, 20, 45, 80].forEach((d, i) => {
+    setTimeout(() => sound.shot(2, 0, 0, d), i * 700);
+  });
+});
+
+// Same idea across every weapon, so voicing differences are obvious.
+button("all weapons, close", () => {
+  ARENA_LOADOUT.forEach((id, i) => {
+    setTimeout(() => sound.shot(id, 0, 0, 4), i * 520);
+  });
 });

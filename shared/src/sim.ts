@@ -252,38 +252,31 @@ function moveAndCollide(s: MovementState, world: World, dt: number, input:InputC
 function sweepAxis(s: MovementState, axis: 0 | 1 | 2, delta: number): boolean {
   if (delta === 0) return false;
   const before = axis === 0 ? s.x : axis === 1 ? s.y : s.z;
-  if (axis === 0) s.x += delta;
-  else if (axis === 1) s.y += delta;
-  else s.z += delta;
-
+  const low=[s.x-PLAYER_RADIUS,s.y,s.z-PLAYER_RADIUS];
+  const high=[s.x+PLAYER_RADIUS,s.y+PLAYER_HEIGHT,s.z+PLAYER_RADIUS];
+  let allowed=delta;
   let blocked = false;
-  // Bounds are recomputed per box: resolving against one collider can push us
-  // into another, and grid geometry routinely stacks two at a seam.
   for (const b of scratchBoxes) {
-    const minX = s.x - PLAYER_RADIUS, maxX = s.x + PLAYER_RADIUS;
-    const minY = s.y,                 maxY = s.y + PLAYER_HEIGHT;
-    const minZ = s.z - PLAYER_RADIUS, maxZ = s.z + PLAYER_RADIUS;
-    if (!overlaps(minX, minY, minZ, maxX, maxY, maxZ, b)) continue;
-    // Floors and ramp landings can overlap the feet slightly (including
-    // snapshot float rounding). Never resolve that overlap sideways across
-    // an entire floor tile; only stop a horizontal move at a crossed face.
-    if (axis !== 1) {
-      const near = b[axis], far = b[axis + 3];
-      if (delta > 0 ? before + PLAYER_RADIUS > near + EPS : before - PLAYER_RADIUS < far - EPS) continue;
-    }
-    blocked = true;
-    if (axis === 0) {
-      s.x = delta > 0 ? b[0] - PLAYER_RADIUS - EPS : b[3] + PLAYER_RADIUS + EPS;
-      s.vx = 0;
-    } else if (axis === 1) {
-      // delta > 0 means we rose into the underside of a piece; otherwise we
-      // landed on top of one.
-      s.y = delta > 0 ? b[1] - PLAYER_HEIGHT - EPS : b[4] + EPS;
+    // Sweep the entire travelled interval, not just the destination. Thin
+    // floors must still catch a fast fall even when a tick crosses them fully.
+    const a=(axis+1)%3,c=(axis+2)%3;
+    if(high[a]<=b[a]||low[a]>=b[a+3]||high[c]<=b[c]||low[c]>=b[c+3])continue;
+    if(delta>0) {
+      const gap=b[axis]-high[axis];
+      if(gap>=-EPS&&gap<allowed){allowed=Math.max(0,gap-EPS);blocked=true;}
     } else {
-      s.z = delta > 0 ? b[2] - PLAYER_RADIUS - EPS : b[5] + PLAYER_RADIUS + EPS;
-      s.vz = 0;
+      const gap=b[axis+3]-low[axis];
+      if(gap<=EPS&&gap>allowed){allowed=Math.min(0,gap+EPS);blocked=true;}
+      // Recover a shallow floor penetration upward only. An overlapping
+      // ceiling must never launch the player onto its roof.
+      if(axis===1&&gap>EPS&&gap<=STEP_HEIGHT&&low[axis]>=b[axis]) {
+        allowed=Math.max(allowed,gap+EPS);blocked=true;
+      }
     }
   }
+  if(axis===0){s.x=before+allowed;if(blocked)s.vx=0;}
+  else if(axis===1)s.y=before+allowed;
+  else {s.z=before+allowed;if(blocked)s.vz=0;}
   return blocked;
 }
 
