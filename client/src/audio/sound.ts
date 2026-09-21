@@ -63,10 +63,15 @@ export class Sound {
   private recent = 0;
   private recentResetAt = 0;
   private ambienceTimer: ReturnType<typeof setTimeout> | null = null;
+  private ambienceNodes: AudioNode[] = [];
+  /** Off by default. Constant background noise is fatiguing, and it is the
+   *  kind of thing a player should opt into rather than have imposed. */
+  private ambienceEnabled = false;
 
   constructor() {
     try {
       this.muted = localStorage.getItem("clutch.muted") === "1";
+      this.ambienceEnabled = localStorage.getItem("clutch.ambience") === "1";
       const v = localStorage.getItem("clutch.volume");
       if (v !== null) this.volume = Math.max(0, Math.min(1, Number(v)));
     } catch {
@@ -125,7 +130,7 @@ export class Sound {
       this.reverbIn = reverbIn;
       this.noise = buf;
 
-      this.startAmbience();
+      if (this.ambienceEnabled) this.startAmbience();
     } catch {
       // No audio available; the game stays fully playable in silence.
     }
@@ -151,6 +156,16 @@ export class Sound {
     this.volume = Math.max(0, Math.min(1, v));
     if (this.master && !this.muted) this.master.gain.value = this.volume;
     try { localStorage.setItem("clutch.volume", String(this.volume)); } catch { /* ignore */ }
+  }
+
+  get ambience(): boolean { return this.ambienceEnabled; }
+
+  /** Turn the wind bed and birdsong on or off. */
+  setAmbience(enabled: boolean): void {
+    this.ambienceEnabled = enabled;
+    try { localStorage.setItem("clutch.ambience", enabled ? "1" : "0"); } catch { /* ignore */ }
+    if (enabled) this.startAmbience();
+    else this.stopAmbience();
   }
 
   /** Update where the player is hearing from. `yaw` matches the game's convention. */
@@ -492,40 +507,44 @@ export class Sound {
   private startAmbience(): void {
     const ctx = this.ctx;
     const master = this.master;
-    if (!ctx || !master || !this.noise) return;
+    if (!ctx || !master || this.ambienceNodes.length > 0) return;
 
     const src = ctx.createBufferSource();
-    src.buffer = this.noise;
+    src.buffer = windBuffer(ctx, 8);
     src.loop = true;
 
-    // Band-limited noise reads as wind; a slow LFO on the cutoff makes it
-    // breathe instead of sitting there as static hiss.
-    const band = ctx.createBiquadFilter();
-    band.type = "bandpass";
-    band.frequency.value = 420;
-    band.Q.value = 0.55;
-
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.07;
-    const lfoDepth = ctx.createGain();
-    lfoDepth.gain.value = 190;
-    lfo.connect(lfoDepth);
-    lfoDepth.connect(band.frequency);
+    // Brown noise is already dark; this just shaves the last of the hiss off
+    // the top so nothing in it reads as static.
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 480;
+    lp.Q.value = 0.3;
 
     const gain = ctx.createGain();
-    gain.gain.value = 0.05;
+    gain.gain.value = 0.016;
 
-    src.connect(band);
-    band.connect(gain);
+    // Gusts. Modulating LEVEL rather than filter cutoff is the difference
+    // between wind and a synthesiser sweep: a real gust gets louder, it does
+    // not change pitch.
+    const gust = ctx.createOscillator();
+    gust.frequency.value = 0.045;
+    const gustDepth = ctx.createGain();
+    gustDepth.gain.value = 0.009;
+    gust.connect(gustDepth);
+    gustDepth.connect(gain.gain);
+
+    src.connect(lp);
+    lp.connect(gain);
     gain.connect(master);
     src.start();
-    lfo.start();
+    gust.start();
+    this.ambienceNodes.push(src, gust, gain, lp, gustDepth);
 
     const scheduleBird = (): void => {
       this.ambienceTimer = setTimeout(() => {
         this.birdCall();
         scheduleBird();
-      }, 5000 + Math.random() * 13000);
+      }, 8000 + Math.random() * 16000);
     };
     scheduleBird();
   }
@@ -536,9 +555,17 @@ export class Sound {
    * master gain.
    */
   stopAmbience(): void {
-    if (this.ambienceTimer === null) return;
-    clearTimeout(this.ambienceTimer);
-    this.ambienceTimer = null;
+    if (this.ambienceTimer !== null) {
+      clearTimeout(this.ambienceTimer);
+      this.ambienceTimer = null;
+    }
+    for (const node of this.ambienceNodes) {
+      try {
+        if ("stop" in node) (node as OscillatorNode).stop();
+        node.disconnect();
+      } catch { /* already stopped */ }
+    }
+    this.ambienceNodes.length = 0;
   }
 
   /** A short two or three note chirp, panned somewhere off to the side. */
@@ -563,7 +590,7 @@ export class Sound {
 
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.0001, t);
-      g.gain.exponentialRampToValueAtTime(0.035, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.022, t + 0.008);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
 
       osc.connect(g);
@@ -603,6 +630,43 @@ const VOICES: Record<number, GunVoice> = {
 };
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Brown noise, in a buffer that loops without a click.
+ *
+ * Two fixes over the previous attempt, which sounded like static because it
+ * was static:
+ *
+ *  - White noise has equal energy at every frequency, so filtering it leaves
+ *    hiss. Brown noise (white, integrated) falls off at 6 dB per octave and
+ *    is mostly low-frequency energy, which is what wind actually is.
+ *  - A one-second loop of raw noise clicks audibly every time it wraps,
+ *    because the last sample and the first are unrelated. The tail is
+ *    crossfaded back over the head so the seam is continuous.
+ */
+function windBuffer(ctx: AudioContext, seconds: number): AudioBuffer {
+  const rate = ctx.sampleRate;
+  const len = Math.floor(rate * seconds);
+  const fade = Math.floor(rate * 0.75);
+
+  const raw = new Float32Array(len + fade);
+  let last = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const white = Math.random() * 2 - 1;
+    // Leaky integrator: the leak keeps it from wandering off as a DC drift.
+    last = (last + 0.018 * white) / 1.018;
+    raw[i] = last * 3.2;
+  }
+
+  for (let i = 0; i < fade; i++) {
+    const t = i / fade;
+    raw[i] = raw[i] * t + raw[len + i] * (1 - t);
+  }
+
+  const buffer = ctx.createBuffer(1, len, rate);
+  buffer.copyToChannel(raw.subarray(0, len), 0);
+  return buffer;
+}
 
 /**
  * Generate a reverb impulse response: decaying noise, independently random per
