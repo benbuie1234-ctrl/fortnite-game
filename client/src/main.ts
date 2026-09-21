@@ -21,6 +21,7 @@ import { Connection, type MatchPlayerInfo } from "./net/connection";
 import { Hud } from "./ui/hud";
 import { FrameLimiter, type FpsTarget } from "./render/framelimiter";
 import { Sound } from "./audio/sound";
+import { ViewEffects } from "./render/viewfx";
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -43,6 +44,7 @@ const pieces = new PieceRenderer(view.scene, view.maxAnisotropy);
 const ghost = new BuildGhost(view.scene);
 const effects = new Effects(view.scene);
 const sound = new Sound();
+const viewfx = new ViewEffects();
 const limiter = new FrameLimiter();
 
 const characters = new Map<number, Character>();
@@ -260,6 +262,9 @@ function handleEvents(events: readonly GameEvent[]): void {
           if(e.shooter===conn.selfId) selfCharacter?.fire();
           else characters.get(e.shooter)?.fire();
           sound.shot(e.weapon, e.ox, e.oy, e.oz);
+          if (e.weapon !== W_PICKAXE) effects.spawnMuzzleFlash(e.ox, e.oy, e.oz);
+          // Only your own shots kick your own camera.
+          if (e.shooter === conn.selfId) viewfx.fire(e.weapon);
         }
         break;
       }
@@ -274,8 +279,13 @@ function handleEvents(events: readonly GameEvent[]): void {
       }
       case EV_PIECE_REMOVE: {
         const c = unpackKey(e.key);
-        effects.breakBurst((c.gx+.5)*TILE,(c.gy+.5)*TILE,(c.gz+.5)*TILE);
-        sound.destroy((c.gx + 0.5) * TILE, (c.gy + 0.5) * TILE, (c.gz + 0.5) * TILE);
+        const bx = (c.gx + 0.5) * TILE, by = (c.gy + 0.5) * TILE, bz = (c.gz + 0.5) * TILE;
+        effects.breakBurst(bx, by, bz);
+        sound.destroy(bx, by, bz);
+        // A piece breaking nearby should register physically, falling off with
+        // distance so the whole map does not shake every time anyone builds.
+        const dist = Math.hypot(bx - conn.self.x, by - conn.self.y, bz - conn.self.z);
+        if (dist < 18) viewfx.bump(0.22 * (1 - dist / 18));
         break;
       }
       case EV_HIT:
@@ -288,6 +298,7 @@ function handleEvents(events: readonly GameEvent[]): void {
         if (e.target === conn.selfId) {
           hud.flashDamage();
           sound.damage();
+          viewfx.damage(e.damage);
         }
         break;
       case EV_DEATH: {
@@ -329,8 +340,16 @@ function updateCamera(aiming: boolean, dt: number): void {
   cameraDistance=aiming?safe:easeCameraDistance(cameraDistance,safe,dt);
   view.camera.position.copy(eye).addScaledVector(boom,safe>0?cameraDistance/safe:0);
   view.camera.rotation.order = "YXZ";
-  view.camera.rotation.set(controls.pitch,Math.PI-controls.yaw,0);
-  const fov=aiming&&!controls.inBuildMode?78/weapon.adsZoom:78;
+  // Recoil is added to the CAMERA only. The shot the server traces still uses
+  // the player's real aim, so the kick is something you feel rather than
+  // something that silently moves your crosshair off target.
+  view.camera.rotation.set(
+    controls.pitch + viewfx.pitchOffset,
+    Math.PI - (controls.yaw + viewfx.yawOffset),
+    0,
+  );
+  viewfx.applyShake(view.camera);
+  const fov=(aiming&&!controls.inBuildMode?78/weapon.adsZoom:78)+viewfx.fovOffset;
   view.setFov(view.camera.fov+(fov-view.camera.fov)*(1-Math.exp(-18*dt)));
 }
 
@@ -391,6 +410,7 @@ function frame(now: number): void {
   if(!renderReady || distance>3) { Object.assign(renderSelf,{x:self.x,y:self.y,z:self.z});renderReady=true; }
   else { renderSelf.x+=(self.x-renderSelf.x)*blend;renderSelf.y+=(self.y-renderSelf.y)*blend;renderSelf.z+=(self.z-renderSelf.z)*blend; }
   updateCamera(aiming, dt);
+  viewfx.update(dt);
   sound.setListener(self.x, self.y + EYE_HEIGHT, self.z, controls.yaw);
   pieces.sync(conn.world, nowSec);
   pieces.updateVisibility(self.x, self.z);
@@ -424,6 +444,7 @@ function frame(now: number): void {
   if (self.alive) {
     if (!prevGrounded && self.grounded) {
       sound.land(self.x, self.y, self.z, Math.abs(prevVy));
+      viewfx.land(Math.abs(prevVy));
     } else if (prevGrounded && !self.grounded && self.vy > 2) {
       sound.jump(self.x, self.y, self.z);
     }

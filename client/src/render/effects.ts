@@ -81,6 +81,22 @@ export class Effects {
     mesh.visible = true;
   }
 
+  /**
+   * Muzzle flash: a brief bright puff at the barrel. Short and bright rather
+   * than large and soft -- it should register as a flash, not a glow.
+   */
+  spawnMuzzleFlash(x: number, y: number, z: number): void {
+    const mesh = this.impacts[this.nextImpact];
+    this.impactLife[this.nextImpact] = 0.055;
+    this.nextImpact = (this.nextImpact + 1) % IMPACT_COUNT;
+
+    mesh.position.set(x, y, z);
+    mesh.scale.setScalar(2.6);
+    (mesh.material as THREE.MeshBasicMaterial).color.setHex(0xfff3c4);
+    (mesh.material as THREE.MeshBasicMaterial).opacity = 1;
+    mesh.visible = true;
+  }
+
   spawnImpact(x: number, y: number, z: number, color = 0xffd27a): void {
     const mesh = this.impacts[this.nextImpact];
     this.impactLife[this.nextImpact] = IMPACT_LIFE;

@@ -178,6 +178,10 @@ function makeConeGeometry(): THREE.BufferGeometry {
 // buckets = 12 total, no matter how much anyone builds.
 // ---------------------------------------------------------------------------
 
+/** A freshly placed piece bulges briefly, so building has some snap to it. */
+const POP_SECONDS = 0.17;
+const POP_AMOUNT = 0.15;
+
 const DAMAGE_BUCKETS = [1.0, 0.82, 0.63, 0.45];
 
 /**
@@ -372,8 +376,17 @@ export class PieceRenderer {
 
       if (isArena) continue;
 
-      // Keep the visible shape aligned with its full-size collision from placement.
-      mesh.scale.setScalar(1);
+      // Keep the visible shape aligned with its full-size collision from
+      // placement -- a piece must never look smaller than the box you can be
+      // shot through. The pop below only ever overshoots ABOVE 1, so it adds
+      // snap without ever under-representing the collision.
+      const age = nowSec - piece.placedAt;
+      if (age >= 0 && age < POP_SECONDS) {
+        const t = age / POP_SECONDS;
+        mesh.scale.setScalar(1 + POP_AMOUNT * Math.sin(Math.PI * t) * (1 - t));
+      } else {
+        mesh.scale.setScalar(1);
+      }
 
       // Swap to a darker shared material only when the damage bucket changes.
       const hpFrac = Math.max(0, Math.min(1, currentHp(piece, nowSec) / piece.maxHp));
