@@ -1,5 +1,5 @@
 import { World } from "../shared/src/world";
-import { stepPlayer, type InputCommand, type MovementState } from "../shared/src/sim";
+import { stepPlayer, newMovementState, type InputCommand, type MovementState } from "../shared/src/sim";
 import { makePiece, SLOT_FLOOR, SLOT_RAMP, SLOT_WALL_X } from "../shared/src/build";
 import { TILE, PIECE_THICKNESS, PLAYER_RADIUS, TICK_DT } from "../shared/src/constants";
 
@@ -10,10 +10,7 @@ function check(name: string, cond: boolean, detail = ""): void {
 }
 
 function newPlayer(x: number, y: number, z: number): MovementState {
-  return {
-    x, y, z, vx: 0, vy: 0, vz: 0,
-    yaw: 0, pitch: 0, grounded: false, lastLandingSpeed: 0,
-  };
+  return { ...newMovementState(), x, y, z };
 }
 
 function input(moveX: number, moveZ: number, buttons = 0): InputCommand {
@@ -53,11 +50,13 @@ console.log("walls block movement");
 console.log("floors are standable");
 {
   const world = new World();
-  // Floor across cell (0,1,0): its top face sits at y = 3 + thickness.
+  // Floor across cell (0,1,0). The slab hangs below its cell line, so the
+  // surface you stand on is the cell line itself -- which is what makes a
+  // floor and a ramp anchored to the same cell meet.
   world.set(makePiece(0, 1, 0, SLOT_FLOOR, 0, 0, 1, 0));
   const p = newPlayer(1.5, 6, 1.5);
   run(p, world, input(0, 0), 90);
-  const top = TILE + PIECE_THICKNESS;
+  const top = TILE;
   check("rests on the floor piece", Math.abs(p.y - top) < 0.02, `y=${p.y} expected=${top}`);
   check("grounded on the piece", p.grounded === true);
 }

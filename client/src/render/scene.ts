@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { createLandscape } from "./landscape";
+import { createLandscape, type Landscape } from "./landscape";
 import { createSky } from "./sky";
 import type { ModelLibrary } from "./models";
 import { createGradePass } from "./grade";
@@ -22,6 +22,8 @@ export interface Renderer {
   setBloom(enabled: boolean): void;
   /** Passed to the texture builder; depends on the GPU. */
   maxAnisotropy: number;
+  /** Tree fading, for canopy cover. */
+  landscape: Landscape;
 }
 
 export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Renderer {
@@ -116,7 +118,7 @@ export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Rende
   scene.add(sun.target);
 
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
-  createLandscape(scene, models);
+  const landscape = createLandscape(scene, models);
 
   // --- bloom ----------------------------------------------------------------
   //
@@ -155,6 +157,7 @@ export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Rende
   return {
     renderer, scene, camera,
     maxAnisotropy: anisotropy,
+    landscape,
     render: () => {
       // Keep the shadow frustum centred on the player while holding the sun's
       // true direction, so shadows stay crisp wherever you are on the map.
@@ -164,7 +167,7 @@ export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Rende
         camera.position.z + sunDir.z * SUN_DISTANCE,
       );
       sun.target.position.copy(camera.position);
-      skySystem.update(clock.getDelta());
+      skySystem.update(clock.getDelta(), camera);
       if (bloomEnabled) composer.render();
       else renderer.render(scene, camera);
     },

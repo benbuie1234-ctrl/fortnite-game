@@ -185,6 +185,16 @@ const POP_AMOUNT = 0.15;
 const DAMAGE_BUCKETS = [1.0, 0.82, 0.63, 0.45];
 
 /**
+ * How solid a piece looks at each damage bucket.
+ *
+ * Darkening alone made a damaged wall read as a different MATERIAL rather than
+ * as a wall about to fall over. Letting the light through as it breaks up is
+ * the readable signal, and it is tactically honest: a wall you can start to
+ * see through is a wall that is nearly gone.
+ */
+const DAMAGE_OPACITY = [1.0, 1.0, 0.72, 0.42];
+
+/**
  * Physical surface response per build material, indexed to MATERIALS.
  *
  * This is what a switch to MeshStandardMaterial actually buys: metal can be
@@ -213,7 +223,7 @@ function materials(anisotropy: number): MaterialPool {
 
   pool = {
     build: MATERIALS.map((_def, i) =>
-      DAMAGE_BUCKETS.map((mul) =>
+      DAMAGE_BUCKETS.map((mul, bucket) =>
         new THREE.MeshStandardMaterial({
           map: tex.build[i] ?? tex.build[0],
           // Multiplies the baked occlusion in bakeEdgeAO over the texture.
@@ -225,6 +235,11 @@ function materials(anisotropy: number): MaterialPool {
           roughness: SURFACE[i]?.roughness ?? 0.9,
           metalness: SURFACE[i]?.metalness ?? 0,
           envMapIntensity: 0.85,
+          transparent: DAMAGE_OPACITY[bucket] < 1,
+          opacity: DAMAGE_OPACITY[bucket],
+          // Depth writing stays on. A breaking wall is still a wall, and
+          // turning it off would let everything behind it sort in front.
+          depthWrite: true,
         }),
       ),
     ),
@@ -271,7 +286,9 @@ function placeMesh(mesh: THREE.Object3D, piece: {
 
   switch (piece.slot) {
     case SLOT_FLOOR:
-      mesh.position.set(x0 + TILE / 2, y0 + T / 2, z0 + TILE / 2);
+      // Matches pieceBox(): the slab hangs below the cell line so its top face
+      // is the cell line itself.
+      mesh.position.set(x0 + TILE / 2, y0 - T / 2, z0 + TILE / 2);
       break;
     case SLOT_WALL_X:
       mesh.position.set(x0, y0 + TILE / 2, z0 + TILE / 2);

@@ -12,9 +12,84 @@ const SLOT_FLOOR = 6;
 const SLOT_RAMP = 7;
 const SLOT_CONE = 8;
 
+/** The build pieces, in the order the scroll wheel cycles them. */
+export const BUILD_SLOTS = [SLOT_WALL, SLOT_FLOOR, SLOT_RAMP, SLOT_CONE];
+
+/**
+ * Every rebindable action.
+ *
+ * Kept as one flat list so the settings UI can be generated from it and a new
+ * action cannot be added without also getting a default and a label.
+ */
+export type Action =
+  | "forward" | "back" | "left" | "right"
+  | "jump" | "crouch" | "sprint" | "reload" | "edit"
+  | "weapon1" | "weapon2" | "weapon3" | "weapon4" | "weapon5"
+  | "wall" | "floor" | "ramp" | "cone"
+  | "matWood" | "matBrick" | "matMetal";
+
+export const ACTION_LABELS: ReadonlyArray<readonly [Action, string]> = [
+  ["forward", "Move forward"],
+  ["back", "Move back"],
+  ["left", "Strafe left"],
+  ["right", "Strafe right"],
+  ["jump", "Jump / climb"],
+  ["crouch", "Crouch / slide"],
+  ["sprint", "Sprint"],
+  ["reload", "Reload"],
+  ["edit", "Edit piece"],
+  ["weapon1", "Pickaxe"],
+  ["weapon2", "Shotgun"],
+  ["weapon3", "Assault rifle"],
+  ["weapon4", "SMG"],
+  ["weapon5", "Sniper"],
+  ["wall", "Build wall"],
+  ["floor", "Build floor"],
+  ["ramp", "Build ramp"],
+  ["cone", "Build cone"],
+  ["matWood", "Wood"],
+  ["matBrick", "Brick"],
+  ["matMetal", "Metal"],
+];
+
+export const DEFAULT_BINDS: Readonly<Record<Action, string>> = {
+  forward: "KeyW", back: "KeyS", left: "KeyA", right: "KeyD",
+  jump: "Space", crouch: "ControlLeft", sprint: "ShiftLeft",
+  reload: "KeyG", edit: "KeyT",
+  weapon1: "Digit1", weapon2: "Digit2", weapon3: "Digit3",
+  weapon4: "Digit4", weapon5: "Digit5",
+  wall: "KeyQ", floor: "KeyE", ramp: "KeyR", cone: "KeyF",
+  matWood: "KeyZ", matBrick: "KeyX", matMetal: "KeyC",
+};
+
+const BINDS_STORAGE_KEY = "clutch.binds";
+
+/** Human-readable name for a KeyboardEvent.code. */
+export function keyLabel(code: string): string {
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Numpad")) return `Num ${code.slice(6)}`;
+  switch (code) {
+    case "Space": return "Space";
+    case "ControlLeft": return "L Ctrl";
+    case "ControlRight": return "R Ctrl";
+    case "ShiftLeft": return "L Shift";
+    case "ShiftRight": return "R Shift";
+    case "AltLeft": return "L Alt";
+    case "AltRight": return "R Alt";
+    case "ArrowUp": return "Up";
+    case "ArrowDown": return "Down";
+    case "ArrowLeft": return "Left";
+    case "ArrowRight": return "Right";
+    default: return code;
+  }
+}
+
 export interface ControlsOptions {
   sensitivity: number;
   onPointerLockChange(locked: boolean): void;
+  /** Tab is held, not toggled, so the scoreboard behaves like every other. */
+  onScoreboard?(open: boolean): void;
 }
 
 export class Controls {
@@ -26,6 +101,7 @@ export class Controls {
   slot = 2;
   material = 0;
 
+  private binds: Record<Action, string> = { ...DEFAULT_BINDS };
   private keys = new Set<string>();
   private mouseDown = false;
   private rightDown = false;
@@ -41,12 +117,19 @@ export class Controls {
   private touchFire = false;
   private touchAim = false;
   private touchJump = false;
+  private touchCrouch = false;
+  private touchSprint = false;
+  private scoreboard = false;
+  /** So the BUILD button can toggle back to whatever you were holding. */
+  private lastWeaponSlot = 2;
+  private lastBuildSlot = SLOT_WALL;
 
   constructor(
     private canvas: HTMLElement,
     private opts: ControlsOptions,
   ) {
     this.sensitivity = opts.sensitivity;
+    this.loadBinds();
     this.attach();
   }
 
@@ -54,8 +137,61 @@ export class Controls {
   get inBuildMode(): boolean { return this.slot >= SLOT_WALL; }
   /** Read-only view for the camera. sample() advances the sequence number, so
    *  callers that only want to observe must not go through it. */
-  get aiming(): boolean { return this.rightDown; }
-  get firing(): boolean { return this.mouseDown; }
+  get aiming(): boolean { return this.rightDown || this.touchAim; }
+  get firing(): boolean { return this.mouseDown || this.touchFire; }
+  get scoreboardOpen(): boolean { return this.scoreboard; }
+
+  // -------------------------------------------------------------------------
+  // Key bindings
+  // -------------------------------------------------------------------------
+
+  get bindings(): Readonly<Record<Action, string>> { return this.binds; }
+
+  /**
+   * Rebind one action. A code already used by another action is cleared from
+   * it first, because two actions on one key is never what anybody meant and
+   * silently firing both is worse than dropping the old binding.
+   */
+  setBinding(action: Action, code: string): void {
+    for (const other of Object.keys(this.binds) as Action[]) {
+      if (other !== action && this.binds[other] === code) this.binds[other] = "";
+    }
+    this.binds[action] = code;
+    this.saveBinds();
+  }
+
+  resetBindings(): void {
+    this.binds = { ...DEFAULT_BINDS };
+    this.saveBinds();
+  }
+
+  private loadBinds(): void {
+    try {
+      const raw = localStorage.getItem(BINDS_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Partial<Record<Action, string>>;
+      // Merged over the defaults rather than replacing them, so a binding set
+      // saved before a new action existed does not leave that action dead.
+      for (const [action] of ACTION_LABELS) {
+        const code = saved[action];
+        if (typeof code === "string") this.binds[action] = code;
+      }
+    } catch { /* corrupt or unavailable storage: keep the defaults */ }
+  }
+
+  private saveBinds(): void {
+    try { localStorage.setItem(BINDS_STORAGE_KEY, JSON.stringify(this.binds)); }
+    catch { /* private mode; bindings just will not persist */ }
+  }
+
+  private down(action: Action): boolean {
+    const code = this.binds[action];
+    return code !== "" && this.keys.has(code);
+  }
+
+  // -------------------------------------------------------------------------
+  // Touch
+  // -------------------------------------------------------------------------
 
   setTouchMove(x: number, z: number): void {
     this.touchMoveX = Math.max(-1, Math.min(1, x));
@@ -65,12 +201,47 @@ export class Controls {
     this.yaw += dx * this.sensitivity * 1.7;
     this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch - dy * this.sensitivity * 1.7));
   }
-  setTouchAction(action: string, on: boolean): void {
-    if (action === "fire") this.touchFire = on;
-    else if (action === "aim") this.touchAim = on;
-    else if (action === "jump") this.touchJump = on;
-    if (action === "reload" && on) this.edgeReload = true;
+  /**
+   * Handle an on-screen control.
+   *
+   * Aim and sprint are TOGGLES on touch rather than holds. A thumb that has to
+   * stay on the aim button is a thumb that cannot also be on the stick, which
+   * is the single biggest reason touch shooters feel unplayable; the same
+   * applies to sprint. Fire, jump and crouch stay momentary, because those you
+   * genuinely want to release.
+   */
+  setTouchAction(action: string, on: boolean): boolean {
+    switch (action) {
+      case "fire": this.touchFire = on; return on;
+      case "jump": this.touchJump = on; return on;
+      case "crouch": this.touchCrouch = on; return on;
+      case "scores": this.setScoreboard(on); return on;
+      case "aim":
+        if (on) this.touchAim = !this.touchAim;
+        return this.touchAim;
+      case "sprint":
+        if (on) this.touchSprint = !this.touchSprint;
+        return this.touchSprint;
+      case "reload":
+        if (on) this.edgeReload = true;
+        return on;
+      case "build":
+        if (on) this.selectSlot(this.inBuildMode ? this.lastWeaponSlot : this.lastBuildSlot);
+        return this.inBuildMode;
+      default: return on;
+    }
   }
+
+  /** Select a weapon (0-4) or a build piece (5-8). Used by the on-screen slot
+   *  bar as well as the keyboard. */
+  selectSlot(slot: number): void {
+    if (slot < 0 || slot > 8) return;
+    this.slot = slot;
+    if (slot >= SLOT_WALL) this.lastBuildSlot = slot;
+    else this.lastWeaponSlot = slot;
+  }
+
+  selectMaterialPublic(material: number): void { this.selectMaterial(material); }
 
   requestLock(): void {
     // Returns a promise in current browsers, and rejects when the document is
@@ -87,6 +258,7 @@ export class Controls {
         this.keys.clear();
         this.mouseDown = false;
         this.rightDown = false;
+        this.setScoreboard(false);
       }
       this.opts.onPointerLockChange(this.locked);
     });
@@ -111,12 +283,23 @@ export class Controls {
       if (e.button === 0) this.mouseDown = false;
       if (e.button === 2) this.rightDown = false;
     });
+
     document.addEventListener("wheel", (e) => {
-      if (!this.locked || this.inBuildMode) return;
+      if (!this.locked) return;
       e.preventDefault();
       const dir = e.deltaY > 0 ? 1 : -1;
-      this.slot = (this.slot + dir + 5) % 5;
+      if (this.inBuildMode) {
+        // The wheel used to do nothing at all in build mode, so the only way
+        // through the four pieces was four separate keys -- which is most of
+        // what made the build bar feel broken.
+        const index = BUILD_SLOTS.indexOf(this.slot);
+        const next = (index + dir + BUILD_SLOTS.length) % BUILD_SLOTS.length;
+        this.selectSlot(BUILD_SLOTS[next]);
+      } else {
+        this.selectSlot((this.slot + dir + 5) % 5);
+      }
     }, { passive: false });
+
     document.addEventListener("contextmenu", (e) => {
       if (this.locked) e.preventDefault();
     });
@@ -125,10 +308,12 @@ export class Controls {
       if (!this.locked) return;
       // Stop the browser scrolling or quick-finding under the game.
       if (["Space", "Tab", "Slash", "Quote"].includes(e.code)) e.preventDefault();
+      if (e.code === "Tab") { this.setScoreboard(true); return; }
       this.keys.add(e.code);
       this.handleSelection(e.code);
     });
     document.addEventListener("keyup", (e) => {
+      if (e.code === "Tab") this.setScoreboard(false);
       this.keys.delete(e.code);
     });
 
@@ -136,26 +321,31 @@ export class Controls {
       this.keys.clear();
       this.mouseDown = false;
       this.rightDown = false;
+      this.setScoreboard(false);
     });
   }
 
+  private setScoreboard(open: boolean): void {
+    if (this.scoreboard === open) return;
+    this.scoreboard = open;
+    this.opts.onScoreboard?.(open);
+  }
+
   private handleSelection(code: string): void {
-    switch (code) {
-      case "Digit1": this.slot = 0; break;
-      case "Digit2": this.slot = 1; break;
-      case "Digit3": this.slot = 2; break;
-      case "Digit4": this.slot = 3; break;
-      case "Digit5": this.slot = 4; break;
-      case "KeyQ": this.slot = SLOT_WALL; break;
-      case "KeyE": this.slot = SLOT_FLOOR; break;
-      case "KeyR": this.slot = SLOT_RAMP; break;
-      case "KeyF": this.slot = SLOT_CONE; break;
-      case "KeyZ": this.selectMaterial(0); break;
-      case "KeyX": this.selectMaterial(1); break;
-      case "KeyC": this.selectMaterial(2); break;
-      case "KeyG": this.edgeReload = true; break;
-      default: break;
-    }
+    const hit = (action: Action) => this.binds[action] !== "" && this.binds[action] === code;
+    if (hit("weapon1")) this.selectSlot(0);
+    else if (hit("weapon2")) this.selectSlot(1);
+    else if (hit("weapon3")) this.selectSlot(2);
+    else if (hit("weapon4")) this.selectSlot(3);
+    else if (hit("weapon5")) this.selectSlot(4);
+    else if (hit("wall")) this.selectSlot(SLOT_WALL);
+    else if (hit("floor")) this.selectSlot(SLOT_FLOOR);
+    else if (hit("ramp")) this.selectSlot(SLOT_RAMP);
+    else if (hit("cone")) this.selectSlot(SLOT_CONE);
+    else if (hit("matWood")) this.selectMaterial(0);
+    else if (hit("matBrick")) this.selectMaterial(1);
+    else if (hit("matMetal")) this.selectMaterial(2);
+    else if (hit("reload")) this.edgeReload = true;
   }
 
   private selectMaterial(mat: number): void {
@@ -172,23 +362,27 @@ export class Controls {
    */
   sample(): InputCommand {
     let buttons = 0;
-    if (this.keys.has("Space") || this.touchJump) buttons |= BTN_JUMP;
+    if (this.down("jump") || this.touchJump) buttons |= BTN_JUMP;
     if (this.mouseDown || this.touchFire) buttons |= BTN_FIRE;
     if (this.rightDown || this.touchAim) buttons |= BTN_AIM;
-    if (this.keys.has("ControlLeft") || this.keys.has("KeyV")) buttons |= BTN_CROUCH;
-    if (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight")) buttons |= BTN_SPRINT;
+    if (this.down("crouch") || this.touchCrouch) buttons |= BTN_CROUCH;
+    if (this.down("sprint") || this.touchSprint) buttons |= BTN_SPRINT;
     if (this.edgeReload) { buttons |= BTN_RELOAD; this.edgeReload = false; }
-    if (this.keys.has("KeyT")) buttons |= BTN_EDIT;
+    if (this.down("edit")) buttons |= BTN_EDIT;
     if (this.edgeReset) { buttons |= BTN_RESET; this.edgeReset = false; }
 
     let moveX = 0;
     let moveZ = 0;
-    if (this.keys.has("KeyW")) moveZ += 1;
-    if (this.keys.has("KeyS")) moveZ -= 1;
-    if (this.keys.has("KeyD")) moveX += 1;
-    if (this.keys.has("KeyA")) moveX -= 1;
+    if (this.down("forward")) moveZ += 1;
+    if (this.down("back")) moveZ -= 1;
+    if (this.down("right")) moveX += 1;
+    if (this.down("left")) moveX -= 1;
     moveX += this.touchMoveX;
     moveZ += this.touchMoveZ;
+    // The wire format carries one of -1, 0 or 1 per axis, so an analogue stick
+    // has to be squared off here rather than silently truncated on send.
+    moveX = Math.sign(Math.abs(moveX) > 0.35 ? moveX : 0);
+    moveZ = Math.sign(Math.abs(moveZ) > 0.35 ? moveZ : 0);
 
     const slot = this.slotOverrides.length > 0
       ? this.slotOverrides.shift()!

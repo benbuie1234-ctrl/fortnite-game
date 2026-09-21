@@ -45,7 +45,7 @@ export interface SkySystem {
   readonly sunDirection: THREE.Vector3;
   /** Sampled horizon colour, for fog that actually dissolves into the sky. */
   readonly horizonColor: THREE.Color;
-  update(dt: number): void;
+  update(dt: number, camera: THREE.Camera): void;
   dispose(): void;
 }
 
@@ -114,8 +114,8 @@ export function createSky(
   return {
     sunDirection,
     horizonColor,
-    update(dt: number) {
-      clouds.update(dt);
+    update(dt: number, camera: THREE.Camera) {
+      clouds.update(dt, camera);
     },
     dispose() {
       scene.remove(sky, clouds.mesh);
@@ -216,40 +216,62 @@ function halfToFloat(h: number): number {
 
 interface CloudLayer {
   mesh: THREE.Mesh;
-  update(dt: number): void;
+  update(dt: number, camera: THREE.Camera): void;
   dispose(): void;
 }
 
 /**
- * A single large plane high above the map carrying a soft procedural cloud
- * texture, drifting slowly. Cheap, and enough to stop the sky reading as an
- * empty gradient.
+ * A flattened dome of cloud, locked to the camera.
+ *
+ * This was a flat 9 km plane parked at y = 900. The camera's far plane is 850,
+ * so the plane was cut by it: looking up you saw cloud stop dead at a hard
+ * circular edge partway to the zenith, with clear sky beyond -- clouds sitting
+ * "slightly out of the field of view". Moving the plane closer would only have
+ * moved the edge, because a finite horizontal plane always ends somewhere.
+ *
+ * A dome has no edge to find. It rides with the camera, so it is effectively
+ * infinitely far away while staying well inside the far plane, and it is
+ * squashed vertically so the clouds still read as a high flat ceiling rather
+ * than a bowl.
  */
 function createCloudLayer(): CloudLayer {
   const texture = cloudTexture();
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(4, 4);
+  // Repeat is baked into the UVs below instead, so that the drift offset still
+  // works on top of a projection this code controls.
+  texture.repeat.set(1, 1);
 
   const material = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
     opacity: 0.85,
     depthWrite: false,
+    // Seen from the inside.
+    side: THREE.BackSide,
     // Clouds must not receive fog, or they fade out along with the terrain.
     fog: false,
   });
 
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000), material);
-  mesh.rotation.x = Math.PI / 2; // face downward, seen from below
-  mesh.position.y = 900;
+  // Zenith down to just under the horizon, so there is no gap where the dome
+  // meets the skyline.
+  const geometry = new THREE.SphereGeometry(RADIUS, 40, 20, 0, Math.PI * 2, 0, Math.PI * 0.54);
+  projectCloudUVs(geometry);
+  const mesh = new THREE.Mesh(geometry, material);
+  // Flattened hard: a hemisphere of cloud would wrap down around the player.
+  mesh.scale.set(1, 0.34, 1);
   mesh.renderOrder = -1;
+  // Never culled: its bounding sphere is centred on the camera, which the
+  // frustum test does not handle gracefully.
+  mesh.frustumCulled = false;
 
   return {
     mesh,
-    update(dt: number) {
+    update(dt: number, camera: THREE.Camera) {
       texture.offset.x += dt * 0.0035;
       texture.offset.y += dt * 0.0012;
+      // Ride with the camera so the dome can never be reached or clipped.
+      mesh.position.copy(camera.position);
     },
     dispose() {
       mesh.geometry.dispose();
@@ -257,6 +279,31 @@ function createCloudLayer(): CloudLayer {
       texture.dispose();
     },
   };
+}
+
+/** Comfortably inside the camera's 850 m far plane. */
+const RADIUS = 560;
+
+/** Metres of sky per repeat of the cloud texture. */
+const CLOUD_TILE = 210;
+
+/**
+ * Re-project the dome's UVs straight down from above.
+ *
+ * A sphere's own UVs converge on its pole, so every cloud tile met at the
+ * zenith in a visible starburst -- look straight up and the sky had a seam
+ * exactly where the eye goes. Projecting from the XZ plane instead has no
+ * singularity anywhere, and it is also what clouds should look like: a flat
+ * ceiling seen in perspective, stretching as it approaches the horizon.
+ */
+function projectCloudUVs(geometry: THREE.BufferGeometry): void {
+  const position = geometry.getAttribute("position");
+  const uv = new Float32Array(position.count * 2);
+  for (let i = 0; i < position.count; i++) {
+    uv[i * 2] = position.getX(i) / CLOUD_TILE;
+    uv[i * 2 + 1] = position.getZ(i) / CLOUD_TILE;
+  }
+  geometry.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
 }
 
 /** Soft, seamless cumulus-ish blobs on transparent background. */

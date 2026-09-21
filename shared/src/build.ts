@@ -126,7 +126,14 @@ export function pieceBox(piece: Piece): Box | null {
 
   switch (piece.slot) {
     case SLOT_FLOOR:
-      return [x0, y0, z0, x0 + TILE, y0 + T, z0 + TILE];
+      // The slab hangs BELOW its cell line, so the surface you stand on is
+      // exactly y0. It used to sit on top of the line, which put the walking
+      // surface a quarter of a metre above every other piece anchored to the
+      // same cell: a ramp starts at y0 and ends at y0+TILE, and a wall spans
+      // y0..y0+TILE, so a floor whose surface was y0+T lined up with nothing.
+      // That mismatch is why a floor and a ramp placed at the same spot did
+      // not meet, and why walls appeared to sink into floors.
+      return [x0, y0 - T, z0, x0 + TILE, y0, z0 + TILE];
     case SLOT_WALL_X:
       return [x0 - T * 0.5, y0, z0, x0 + T * 0.5, y0 + TILE, z0 + TILE];
     case SLOT_WALL_Z:

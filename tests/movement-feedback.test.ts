@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { World } from '../shared/src/world';
 import { makePiece,currentHp,SLOT_RAMP,SLOT_WALL_Z,SLOT_FLOOR } from '../shared/src/build';
-import { stepPlayer,BTN_JUMP,MovementState } from '../shared/src/sim';
-const fresh=()=>({x:1.5,y:0,z:1.5,vx:0,vy:0,vz:0,yaw:0,pitch:0,grounded:true,lastLandingSpeed:0});
+import { stepPlayer,BTN_JUMP,MovementState, newMovementState } from '../shared/src/sim';
+const fresh=()=>({...newMovementState(),x:1.5,y:0,z:1.5,grounded:true});
 const command={seq:1,moveX:0,moveZ:1,yaw:0,pitch:0,buttons:BTN_JUMP,slot:2};
 {
  const w=new World();w.set(makePiece(0,1,0,SLOT_RAMP,0,1,0,0));
@@ -21,7 +21,9 @@ const command={seq:1,moveX:0,moveZ:1,yaw:0,pitch:0,buttons:BTN_JUMP,slot:2};
  assert.ok(highest>=3,'jump and forward mantles a reachable wall');
 }
 {
- const w=new World();w.set(makePiece(0,0,1,SLOT_WALL_Z,0,0,0,0));w.set(makePiece(0,1,1,SLOT_FLOOR,0,0,0,0));w.set(makePiece(0,1,0,SLOT_FLOOR,0,0,0,0));
+ // Two walls stacked: the lower one's top has the upper one standing on it, so
+ // there is nowhere to pull up to and the top of the stack is out of reach.
+ const w=new World();w.set(makePiece(0,0,1,SLOT_WALL_Z,0,0,0,0));w.set(makePiece(0,1,1,SLOT_WALL_Z,0,0,0,0));
  const s=fresh();let highest=0;
  for(let i=0;i<60;i++){stepPlayer(s,command,w);highest=Math.max(highest,s.y);}
  assert.ok(highest<3,'ceiling blocks mantle');

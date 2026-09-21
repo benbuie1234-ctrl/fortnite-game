@@ -1,9 +1,47 @@
 import * as THREE from 'three';
 import { MAP_HALF,terrainHeight,BUILDINGS,LOCATIONS,SCENERY,PROPS } from '@shared/map';
+import { treePerchHeight } from '@shared/arena';
+import { TREE_PERCH_RADIUS,TREE_PERCH_THICKNESS } from '@shared/constants';
 import { getTextures, planarUVs } from './textures';
 import { InstancedModel, type ModelLibrary } from './models';
 
-export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
+export interface Landscape {
+  /** Fade one tree, addressed by its index in SCENERY. 1 = fully solid. */
+  setTreeAlpha(sceneryIndex:number,alpha:number):void;
+}
+
+/**
+ * Foliage gets its own material with a per-instance alpha attribute.
+ *
+ * Trees have to be able to fade one at a time -- the one you are hiding in,
+ * for you, and any tree somebody has shot the leaves off, for everybody. An
+ * InstancedMesh shares a single material across every instance, so the alpha
+ * has to travel as instance data and be applied in the shader; there is no
+ * per-instance opacity otherwise, short of a draw call per tree.
+ */
+function makeFoliageMaterial(base:THREE.MeshStandardMaterial):THREE.MeshStandardMaterial {
+ const material=base.clone();
+ material.transparent=true;
+ // Depth writing stays on. Foliage renders after the opaque pass, so anything
+ // behind a faded tree has already been drawn and shows through the blend;
+ // turning it off would only let trees sort through each other.
+ material.depthWrite=true;
+ material.onBeforeCompile=shader=>{
+  shader.vertexShader='attribute float aAlpha;\nvarying float vAlpha;\n'+
+   shader.vertexShader.replace('void main() {','void main() {\n\tvAlpha = aAlpha;');
+  shader.fragmentShader='varying float vAlpha;\n'+
+   shader.fragmentShader.replace('#include <dithering_fragment>','#include <dithering_fragment>\n\tgl_FragColor.a *= vAlpha;');
+ };
+ return material;
+}
+
+function addAlphaAttribute(geometry:THREE.BufferGeometry,count:number):THREE.InstancedBufferAttribute {
+ const attribute=new THREE.InstancedBufferAttribute(new Float32Array(count).fill(1),1);
+ geometry.setAttribute('aAlpha',attribute);
+ return attribute;
+}
+
+export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscape {
  // Tapered trunk and irregular rock, rather than plain boxes. A cylinder that
  // is wider at the base reads as a tree from any angle; a box only ever reads
  // as a box.
@@ -13,11 +51,23 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
  // with the rocks turned every container into a boulder.
  const propGeo=new THREE.BoxGeometry(1,1,1);
  const leafGeo=new THREE.ConeGeometry(1,1,7);
+ // A flattened disc of branches at the perch height, so the platform you can
+ // stand on is something you can see before you try to climb onto it.
+ const branchGeo=new THREE.CylinderGeometry(TREE_PERCH_RADIUS,TREE_PERCH_RADIUS*.8,TREE_PERCH_THICKNESS,7);
  const detail=getTextures(1).detail;
  const solidMaterial=new THREE.MeshStandardMaterial({color:0xffffff,map:detail,roughness:0.88,metalness:0,envMapIntensity:0.9});
  const treeList=SCENERY.filter(p=>p.kind==='tree'),rockList=SCENERY.filter(p=>p.kind==='rock');
- const trunks=new THREE.InstancedMesh(trunkGeo,solidMaterial,treeList.length);
- const leaves=new THREE.InstancedMesh(leafGeo,solidMaterial,treeList.length*3);
+ const foliageMaterial=makeFoliageMaterial(solidMaterial);
+ const trunks=new THREE.InstancedMesh(trunkGeo,foliageMaterial,treeList.length);
+ const leaves=new THREE.InstancedMesh(leafGeo,foliageMaterial,treeList.length*3);
+ const branches=new THREE.InstancedMesh(branchGeo,foliageMaterial,treeList.length);
+ const trunkAlpha=addAlphaAttribute(trunkGeo,treeList.length);
+ const leafAlpha=addAlphaAttribute(leafGeo,treeList.length*3);
+ const branchAlpha=addAlphaAttribute(branchGeo,treeList.length);
+ // SCENERY holds trees and rocks interleaved; everything downstream addresses
+ // a tree by its SCENERY index, so keep the translation in one place.
+ const treeSlotBySceneryIndex=new Map<number,number>();
+ SCENERY.forEach((p,i)=>{if(p.kind==='tree')treeSlotBySceneryIndex.set(i,treeSlotBySceneryIndex.size);});
  const rocks=new THREE.InstancedMesh(rockGeo,solidMaterial,rockList.length);
  const props=new THREE.InstancedMesh(propGeo,solidMaterial,PROPS.length);
  const matrix=new THREE.Object3D();
@@ -41,6 +91,8 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
  const useProceduralTrees=!treeInstances?.valid;
  if(useProceduralTrees) treeList.forEach((p,i)=>{
    matrix.position.set(p.x,p.y+p.size/2,p.z);matrix.scale.set(1,p.size,1);matrix.updateMatrix();trunks.setMatrixAt(i,matrix.matrix);trunks.setColorAt(i,new THREE.Color(0x806445));
+   matrix.position.set(p.x,p.y+treePerchHeight(p.size)+TREE_PERCH_THICKNESS/2,p.z);matrix.scale.set(1,1,1);matrix.updateMatrix();
+   branches.setMatrixAt(i,matrix.matrix);branches.setColorAt(i,new THREE.Color(0x6a5238));
    for(let tier=0;tier<3;tier++){
      const spread=p.size*(.66-tier*.17);
      matrix.position.set(p.x,p.y+p.size*(.72+tier*.34),p.z);
@@ -60,7 +112,7 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
  PROPS.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.h/2,p.z);matrix.scale.set(p.w,p.h,p.d);matrix.updateMatrix();props.setMatrixAt(i,matrix.matrix);props.setColorAt(i,new THREE.Color(p.color));});
  // Rocks always use the procedural boxes; trunks and leaves only when no
  // tree model was supplied, or they would be drawn on top of the real trees.
- for(const batch of (useProceduralTrees?[trunks,leaves,rocks,props]:[rocks,props])){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
+ for(const batch of (useProceduralTrees?[trunks,leaves,branches,rocks,props]:[rocks,props])){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
  const size=MAP_HALF*2;
  const ground=new THREE.PlaneGeometry(size,size,240,240);ground.rotateX(-Math.PI/2);
  const positions=ground.getAttribute('position');const colors=[];
@@ -129,4 +181,19 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
   const a=i*Math.PI*2/20;const mountain=new THREE.Mesh(new THREE.ConeGeometry(55,60+i%4*18,5),new THREE.MeshStandardMaterial({color:i%2?0x688693:0x789b9f}));
   mountain.position.set(Math.cos(a)*520,14,Math.sin(a)*520);scene.add(mountain);
  }
+
+ return {
+  setTreeAlpha(sceneryIndex,alpha) {
+   const slot=treeSlotBySceneryIndex.get(sceneryIndex);
+   if(slot===undefined||!useProceduralTrees)return;
+   const clamped=Math.max(0.12,Math.min(1,alpha));
+   if(trunkAlpha.getX(slot)===clamped)return;
+   trunkAlpha.setX(slot,clamped);trunkAlpha.needsUpdate=true;
+   branchAlpha.setX(slot,clamped);branchAlpha.needsUpdate=true;
+   // Leaves fade harder than the trunk: the canopy is what blocks the view,
+   // and a trunk you can see straight through reads as a bug rather than cover.
+   for(let tier=0;tier<3;tier++)leafAlpha.setX(slot*3+tier,Math.max(0.08,clamped*0.72));
+   leafAlpha.needsUpdate=true;
+  },
+ };
 }

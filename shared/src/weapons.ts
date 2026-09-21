@@ -1,3 +1,9 @@
+import {
+  MATERIALS, BLOOM_MOVE_RATE, BLOOM_PER_SHOT, BLOOM_RECOVER_RATE,
+  BLOOM_STILL_BONUS, BLOOM_MAX, BLOOM_STILL_SPEED, MOVE_SPEED,
+  BULLET_DROP_START, BULLET_DROP_RATE, BULLET_SEGMENT,
+} from "./constants";
+
 export interface WeaponDef {
   readonly id: number;
   readonly name: string;
@@ -54,7 +60,10 @@ export const WEAPONS: readonly WeaponDef[] = [
     damage: 80, headMult: 2.5, fireInterval: 1.5, auto: false, pellets: 1,
     magSize: 1, reloadTime: 2.6,
     spreadHip: 0.09, spreadAds: 0.0,
-    range: 400, falloffStart: 400, falloffEnd: 400, falloffMult: 1.0,
+    // Used to have no falloff at all, so a 300 m body shot hit exactly as hard
+    // as a point-blank one. It still reaches further and hits harder than
+    // anything else; it just no longer ignores distance entirely.
+    range: 400, falloffStart: 90, falloffEnd: 260, falloffMult: 0.72,
     buildDamage: 1.3, adsZoom: 3.2, recoil: 3.0,
   },
   {
@@ -99,3 +108,139 @@ export function damageAtRange(w: WeaponDef, dist: number): number {
 export const ARENA_LOADOUT: readonly number[] = [
   W_PICKAXE, W_SHOTGUN, W_AR, W_SMG, W_SNIPER,
 ];
+
+
+// ---------------------------------------------------------------------------
+// Structure damage
+// ---------------------------------------------------------------------------
+
+/**
+ * Sniper rounds against build materials, as a fraction of that material's full
+ * HP: one shot takes wood down, leaves brick a hair from breaking, and takes
+ * half off metal.
+ *
+ * Written as fractions rather than damage multipliers on purpose. A multiplier
+ * only holds the rule for as long as nobody retunes MATERIALS; a fraction of
+ * max HP means the rule survives that.
+ */
+export const SNIPER_MATERIAL_FRACTION: readonly number[] = [1.0, 0.99, 0.5];
+
+/**
+ * Damage one shot does to a build piece.
+ *
+ * Deliberately NOT distance-scaled. Falloff models a bullet losing energy
+ * against a body; a wall does not care how far away the shooter stood, and
+ * making structure damage fall off would mean a sniper stops one-shotting wood
+ * at exactly the range a sniper is for.
+ */
+export function pieceDamage(w: WeaponDef, mat: number): number {
+  if (w.id === W_SNIPER) {
+    const def = MATERIALS[mat] ?? MATERIALS[0];
+    const fraction = SNIPER_MATERIAL_FRACTION[mat] ?? 1;
+    // The nudge on the one-shot case covers the grow-in rounding, so a fresh
+    // wall is never left standing on a fractional hit point.
+    return def.maxHp * fraction + (fraction >= 1 ? 1 : 0);
+  }
+  return w.damage * w.buildDamage;
+}
+
+// ---------------------------------------------------------------------------
+// Bloom
+//
+// Spread is state, not a constant. It grows while you move and while you fire,
+// and settles back toward the weapon's floor when you stand still. Both sides
+// run this same integrator over the same inputs, so the cone the server traces
+// is the cone the crosshair draws.
+// ---------------------------------------------------------------------------
+
+/** Cone half-angle for a shot, in radians. */
+export function spreadFor(w: WeaponDef, aiming: boolean, bloom: number): number {
+  const base = aiming ? w.spreadAds : w.spreadHip;
+  return base + w.spreadHip * Math.max(0, bloom);
+}
+
+/**
+ * Advance the bloom value by one tick.
+ *
+ * `speed` is the player's horizontal speed. Recovery is tiered rather than
+ * linear so the three states the player is asked to feel -- moving, slowing,
+ * stopped -- are actually distinguishable: standing still recovers markedly
+ * faster than merely walking slowly.
+ */
+export function stepBloom(bloom: number, speed: number, dt: number): number {
+  const moving = Math.min(1, speed / MOVE_SPEED);
+  let next = bloom;
+  if (speed > BLOOM_STILL_SPEED) {
+    next += BLOOM_MOVE_RATE * moving * dt;
+    // Even while moving, slowing down should start paying the cone back.
+    next -= BLOOM_RECOVER_RATE * (1 - moving) * dt;
+  } else {
+    next -= BLOOM_RECOVER_RATE * BLOOM_STILL_BONUS * dt;
+  }
+  return Math.max(0, Math.min(BLOOM_MAX, next));
+}
+
+/** Bloom added by pulling the trigger once. */
+export function bloomPerShot(w: WeaponDef): number {
+  // Slower weapons kick the cone harder per shot, so a sniper's second shot is
+  // punished while an SMG's spread comes from the stream rather than any one
+  // round in it.
+  return BLOOM_PER_SHOT * Math.min(2.5, Math.max(0.5, w.fireInterval / 0.15));
+}
+
+// ---------------------------------------------------------------------------
+// Ballistics
+// ---------------------------------------------------------------------------
+
+/**
+ * Trace a shot as a chain of straight segments with gravity applied between
+ * them, instead of one infinite straight line.
+ *
+ * Shots stay perfectly flat out to BULLET_DROP_START, so nothing about close
+ * and mid range changes; past that the path bends and long shots have to be
+ * led high. `visit` gets each segment and returns the hit distance along it,
+ * or null to keep going. The distance returned is measured along the path,
+ * which is what damage falloff should use.
+ */
+export function traceWithDrop(
+  ox: number, oy: number, oz: number,
+  dx: number, dy: number, dz: number,
+  maxDist: number,
+  visit: (
+    x: number, y: number, z: number,
+    sx: number, sy: number, sz: number,
+    length: number, travelled: number,
+  ) => number | null,
+): { t: number; x: number; y: number; z: number; hit: boolean } {
+  let x = ox, y = oy, z = oz;
+  let vx = dx, vy = dy, vz = dz;
+  let travelled = 0;
+
+  while (travelled < maxDist) {
+    const length = Math.min(BULLET_SEGMENT, maxDist - travelled);
+    const hit = visit(x, y, z, vx, vy, vz, length, travelled);
+    if (hit !== null) {
+      return {
+        t: travelled + hit,
+        x: x + vx * hit, y: y + vy * hit, z: z + vz * hit,
+        hit: true,
+      };
+    }
+    x += vx * length;
+    y += vy * length;
+    z += vz * length;
+    travelled += length;
+
+    // Gravity only engages past the flat zone, and is integrated per metre
+    // travelled rather than per second so the path does not depend on tick rate.
+    if (travelled > BULLET_DROP_START) {
+      const bend = BULLET_DROP_RATE * (travelled - BULLET_DROP_START) * length;
+      vy -= bend;
+      const norm = Math.hypot(vx, vy, vz);
+      if (norm > 1e-9) { vx /= norm; vy /= norm; vz /= norm; }
+    }
+  }
+  // A miss still has to report where the round ended up, or the tracer has
+  // nowhere to draw to.
+  return { t: travelled, x, y, z, hit: false };
+}

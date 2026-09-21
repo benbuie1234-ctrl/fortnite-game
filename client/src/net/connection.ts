@@ -1,20 +1,22 @@
 import {
-  TICK_DT, INTERP_DELAY_MS, INPUTS_PER_MESSAGE,
+  TICK_DT, INTERP_DELAY_MS, INPUTS_PER_MESSAGE, BLOOM_MAX, SPRINT_STAMINA_MAX,
 } from "@shared/constants";
 import {
   Writer, Reader, writeInputBatch, C_PING, C_CHAT,
   S_WELCOME, S_SNAPSHOT, S_PONG, S_FULL_WORLD, S_MATCH, S_CHAT, S_KICK,
   EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE,
-  PF_ALIVE,
+  PF_ALIVE, PF_SLIDING,
 } from "@shared/protocol";
 import { readSnapshot, type GameEvent, type OtherState } from "@shared/snapshot";
 import { World } from "@shared/world";
 import { buildArena } from "@shared/arena";
-import { stepPlayer, type InputCommand, type MovementState } from "@shared/sim";
+import { stepPlayer, newMovementState, type InputCommand, type MovementState } from "@shared/sim";
+import { stepBloom, bloomPerShot, weaponById } from "@shared/weapons";
 import { makePiece, type Slot, type Facing, unpackKey } from "@shared/build";
 
 export interface MatchPlayerInfo {
   id: number; name: string; kills: number; deaths: number;
+  wins?: number; ping?: number;
 }
 
 /** Locally predicted state for the player at this keyboard. */
@@ -28,6 +30,9 @@ export interface ClientSelf extends MovementState {
   material: number;
   reloadMs: number;
   alive: boolean;
+  /** Predicted weapon bloom, for the crosshair. The server owns the value the
+   *  shot cone is actually built from; this only has to look right. */
+  bloom: number;
 }
 
 interface RemoteSample {
@@ -103,10 +108,10 @@ export class Connection {
   readonly world = new World();
   readonly others = new Map<number, RemoteBuffer>();
   readonly self: ClientSelf = {
-    x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
-    yaw: 0, pitch: 0, grounded: false, lastLandingSpeed: 0,
+    ...newMovementState(),
     hp: 100, shield: 0, mats: 0, weapon: 0, ammo: 0,
     buildSlot: -1, material: 0, reloadMs: 0, alive: true,
+    bloom: 0,
   };
 
   selfId = -1;
@@ -203,6 +208,8 @@ export class Connection {
     if (!this.connected || this.pending.length >= 90) return;
     if (this.self.alive) {
       stepPlayer(this.self, cmd, this.world, TICK_DT);
+      const s = this.self;
+      s.bloom = stepBloom(s.bloom, Math.hypot(s.vx, s.vz), TICK_DT);
     }
     this.pending.push(cmd);
     this.unsent.push(cmd);
@@ -328,6 +335,9 @@ export class Connection {
     s.x = snap.self.x; s.y = snap.self.y; s.z = snap.self.z;
     s.vx = snap.self.vx; s.vy = snap.self.vy; s.vz = snap.self.vz;
     s.grounded = (snap.self.flags & 2) !== 0;
+    s.crouch = snap.self.stance / 255;
+    s.stamina = (snap.self.stamina / 255) * SPRINT_STAMINA_MAX;
+    s.sliding = (snap.self.flags & PF_SLIDING) !== 0;
 
     dropAcknowledged(this.pending, snap.ackSeq);
     if (s.alive) {
@@ -385,6 +395,14 @@ export class Connection {
       out.push({ id, ...p });
     }
     return out;
+  }
+
+  /** Charge the predicted crosshair for a shot the local player just fired.
+   *  The server does the same to the value it traces with. */
+  notePredictedShot(weaponId: number): void {
+    this.self.bloom = Math.min(
+      BLOOM_MAX, this.self.bloom + bloomPerShot(weaponById(weaponId)),
+    );
   }
 
   get pendingInputCount(): number { return this.pending.length; }

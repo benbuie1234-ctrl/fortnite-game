@@ -1,9 +1,11 @@
 import {
-  PLAYER_MAX_HP, PLAYER_MAX_SHIELD, START_MATS, MAX_MATS, PLAYER_HEIGHT, PLAYER_RADIUS,
+  PLAYER_MAX_HP, PLAYER_MAX_SHIELD, START_MATS, MAX_MATS, PLAYER_RADIUS,
+  SPRINT_STAMINA_MAX,
 } from "@shared/constants";
 import type { MovementState, InputCommand } from "@shared/sim";
 import { ARENA_LOADOUT, weaponById } from "@shared/weapons";
 import type { Box } from "@shared/build";
+import { playerHeight } from "@shared/sim";
 
 /** One position sample, kept so the server can rewind for lag compensation. */
 export interface HistorySample {
@@ -19,6 +21,25 @@ export class ServerPlayer implements MovementState {
   yaw = 0; pitch = 0;
   grounded = false;
   lastLandingSpeed = 0;
+  crouch = 0;
+  sliding = false;
+  slideLockout = 0;
+  crouchHeld = false;
+  sprinting = false;
+  stamina = SPRINT_STAMINA_MAX;
+  staminaIdle = 0;
+  fallPeakY = 0;
+  lastFallHeight = 0;
+
+  /** Current weapon bloom. Authoritative: the client predicts the same value
+   *  for its crosshair, but this is the one the shot cone is built from. */
+  bloom = 0;
+  /** Rounds fired but not yet charged to bloom, so a burst inside one tick
+   *  still costs what it should. */
+  pendingBloomShots = 0;
+
+  /** Wins across rounds, for the leaderboard. Survives endRound, unlike kills. */
+  wins = 0;
 
   hp = PLAYER_MAX_HP;
   shield = 0;
@@ -105,6 +126,17 @@ export class ServerPlayer implements MovementState {
     this.vx = 0; this.vy = 0; this.vz = 0;
     this.yaw = yaw; this.pitch = 0;
     this.grounded = true;
+    this.crouch = 0;
+    this.sliding = false;
+    this.slideLockout = 0;
+    this.crouchHeld = false;
+    this.sprinting = false;
+    this.stamina = SPRINT_STAMINA_MAX;
+    this.staminaIdle = 0;
+    this.fallPeakY = y;
+    this.lastFallHeight = 0;
+    this.bloom = 0;
+    this.pendingBloomShots = 0;
     this.hp = PLAYER_MAX_HP;
     this.shield = PLAYER_MAX_SHIELD * 0.5;
     this.mats = START_MATS;
@@ -125,12 +157,20 @@ export class ServerPlayer implements MovementState {
   }
 }
 
-/** Body and head boxes at an arbitrary position, for hit registration. */
-export function hitBoxes(x: number, y: number, z: number): { body: Box; head: Box } {
+/**
+ * Body and head boxes at an arbitrary position, for hit registration.
+ *
+ * Stance-aware: crouching has to actually shrink the target, or it is a
+ * disadvantage with no upside.
+ */
+export function hitBoxes(
+  x: number, y: number, z: number, crouch = 0,
+): { body: Box; head: Box } {
   const r = PLAYER_RADIUS;
-  const headBottom = y + PLAYER_HEIGHT - 0.28;
+  const height = playerHeight(crouch);
+  const headBottom = y + height - 0.28;
   return {
     body: [x - r, y, z - r, x + r, headBottom, z + r],
-    head: [x - 0.24, headBottom, z - 0.24, x + 0.24, y + PLAYER_HEIGHT, z + 0.24],
+    head: [x - 0.24, headBottom, z - 0.24, x + 0.24, y + height, z + 0.24],
   };
 }

@@ -36,7 +36,6 @@ export class Character {
   private kick = 0;
   private muzzle: THREE.Mesh;
   private lastName = "";
-  private lastHpPct = -1;
   private materials: THREE.MeshStandardMaterial[] = [];
 
   constructor(skinId: string, name: string) {
@@ -118,7 +117,7 @@ export class Character {
       this.legL, this.legR, this.torso, this.armL, this.armR,
       this.head, this.gun, this.nameplate,
     );
-    this.setNameplate(name, 255);
+    this.setNameplate(name);
   }
 
   setWeapon(id:number):void {
@@ -163,10 +162,18 @@ export class Character {
     this.nameplate.visible = false;
   }
 
-  setNameplate(name: string, hpPct: number): void {
-    if (name === this.lastName && hpPct === this.lastHpPct) return;
+  /**
+   * Draw the floating nameplate.
+   *
+   * Name only. There used to be a health bar under it, which handed every
+   * player a permanent readout of exactly how close each opponent was to
+   * dying, from any range, through the noise of a fight. Damage numbers tell
+   * you what YOUR shots did, which is the information you earned; how much a
+   * stranger has left is theirs.
+   */
+  setNameplate(name: string): void {
+    if (name === this.lastName) return;
     this.lastName = name;
-    this.lastHpPct = hpPct;
 
     const ctx = this.nameCanvas.getContext("2d");
     if (!ctx) return;
@@ -176,15 +183,9 @@ export class Character {
     ctx.textAlign = "center";
     ctx.lineWidth = 5;
     ctx.strokeStyle = "rgba(0,0,0,.85)";
-    ctx.strokeText(name, 128, 28);
+    ctx.strokeText(name, 128, 34);
     ctx.fillStyle = "#ffffff";
-    ctx.fillText(name, 128, 28);
-
-    const frac = Math.max(0, Math.min(1, hpPct / 255));
-    ctx.fillStyle = "rgba(0,0,0,.72)";
-    ctx.fillRect(40, 40, 176, 12);
-    ctx.fillStyle = frac > 0.5 ? "#4ade80" : frac > 0.22 ? "#ffc53d" : "#ff5a5a";
-    ctx.fillRect(42, 42, 172 * frac, 8);
+    ctx.fillText(name, 128, 34);
 
     this.nameTexture.needsUpdate = true;
   }

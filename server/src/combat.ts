@@ -3,17 +3,21 @@ import {
   MATERIALS, TILE,
 } from "@shared/constants";
 import { makePiece, inGridBounds, currentHp, packKey } from "@shared/build";
-import { World, rayVsBox } from "@shared/world";
-import { weaponById, damageAtRange, W_PICKAXE, W_SNIPER } from "@shared/weapons";
+import { World, rayVsBox, type RayHit } from "@shared/world";
+import {
+  weaponById, damageAtRange, W_PICKAXE, W_SNIPER,
+  spreadFor, pieceDamage, traceWithDrop,
+} from "@shared/weapons";
+import { eyeHeightFor } from "@shared/sim";
 import { forwardVector, applySpread } from "@shared/vec";
 import {
-  EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE, EV_SHOT, EV_HIT,
+  EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_FOLIAGE,
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
 import { ServerPlayer, hitBoxes } from "./player";
 import { resolvePlacement, placementIssue } from "@shared/placement";
 import { cameraPose } from "@shared/camera";
-import { ARENA_OWNER } from "@shared/arena";
+import { ARENA_OWNER, treeIndexFromKey } from "@shared/arena";
 
 /**
  * Resolve one trigger pull. Everything here is authoritative: the client never
@@ -47,7 +51,7 @@ export function resolveFire(
   const rewindTo = nowMs - rewindMs;
 
   const ox = shooter.x;
-  const oy = shooter.y + EYE_HEIGHT;
+  const oy = shooter.y + eyeHeightFor(shooter.crouch);
   const oz = shooter.z;
   let baseDir = forwardVector(shooter.yaw, shooter.pitch);
   if (weapon.id !== W_PICKAXE) {
@@ -58,7 +62,7 @@ export function resolveFire(
     for (const target of players) {
       if (target.id === shooter.id || !target.alive) continue;
       const pos = target.positionAt(rewindTo);
-      const boxes = hitBoxes(pos.x,pos.y,pos.z);
+      const boxes = hitBoxes(pos.x,pos.y,pos.z,target.crouch);
       for (const box of [boxes.head,boxes.body]) {
         const hit=rayVsBox(box,cx,cy,cz,fx,fy,fz);
         if(hit && hit.t<aimDistance) aimDistance=hit.t;
@@ -68,56 +72,82 @@ export function resolveFire(
     const length=Math.hypot(...delta);
     if(length>0.001) baseDir=delta.map(v=>v/length) as [number,number,number];
   }
-  const spread = shooter.aiming ? weapon.spreadAds : weapon.spreadHip;
+  // Spread is the weapon's floor plus however much bloom the shooter has
+  // accumulated from moving and firing, so standing still is rewarded.
+  const spread = spreadFor(weapon, shooter.aiming, shooter.bloom);
 
   for (let pellet = 0; pellet < weapon.pellets; pellet++) {
     const dir = applySpread(baseDir, spread, Math.random);
     const [dx, dy, dz] = dir;
 
-    const pieceHit = world.raycast(ox, oy, oz, dx, dy, dz, weapon.range, nowSec);
-    let bestT = pieceHit ? pieceHit.t : weapon.range;
-
+    let pieceHit: RayHit | null = null;
     let hitPlayer: ServerPlayer | null = null;
     let hitHead = false;
 
-    for (const target of players) {
-      if (target.id === shooter.id || !target.alive) continue;
-      const p = target.positionAt(rewindTo);
-      const { body, head } = hitBoxes(p.x, p.y, p.z);
+    // Segmented so the round can drop. Inside the flat zone this is identical
+    // to a straight raycast; past it the path bends and the hit tests follow.
+    const shot = traceWithDrop(
+      ox, oy, oz, dx, dy, dz, weapon.range,
+      (x, y, z, sx, sy, sz, segment) => {
+        let nearest = segment;
+        let found = false;
 
-      const headHit = rayVsBox(head, ox, oy, oz, dx, dy, dz);
-      if (headHit && headHit.t < bestT) {
-        bestT = headHit.t; hitPlayer = target; hitHead = true;
-      }
-      const bodyHit = rayVsBox(body, ox, oy, oz, dx, dy, dz);
-      if (bodyHit && bodyHit.t < bestT) {
-        bestT = bodyHit.t; hitPlayer = target; hitHead = false;
-      }
-    }
+        const piece = world.raycast(x, y, z, sx, sy, sz, segment, nowSec);
+        if (piece && piece.t <= nearest) {
+          nearest = piece.t; pieceHit = piece; hitPlayer = null; found = true;
+        }
 
-    if (hitPlayer) {
-      let dmg = damageAtRange(weapon, bestT);
+        for (const target of players) {
+          if (target.id === shooter.id || !target.alive) continue;
+          const p = target.positionAt(rewindTo);
+          const { body, head } = hitBoxes(p.x, p.y, p.z, target.crouch);
+
+          const headHit = rayVsBox(head, x, y, z, sx, sy, sz);
+          if (headHit && headHit.t <= nearest) {
+            nearest = headHit.t; hitPlayer = target; hitHead = true; pieceHit = null; found = true;
+          }
+          const bodyHit = rayVsBox(body, x, y, z, sx, sy, sz);
+          if (bodyHit && bodyHit.t <= nearest) {
+            nearest = bodyHit.t; hitPlayer = target; hitHead = false; pieceHit = null; found = true;
+          }
+        }
+        return found ? nearest : null;
+      },
+    );
+
+    const victim = hitPlayer as ServerPlayer | null;
+    const struck = pieceHit as RayHit | null;
+
+    if (victim) {
+      // Falloff is measured along the path travelled, not the straight-line
+      // distance, so a long arcing shot is priced at what it actually flew.
+      let dmg = damageAtRange(weapon, shot.t);
       if (hitHead) dmg *= weapon.headMult;
-      applyPlayerDamage(hitPlayer, dmg, shooter, nowSec);
+      applyPlayerDamage(victim, dmg, shooter, nowSec);
       events.push({
-        kind: EV_HIT, target: hitPlayer.id, shooter: shooter.id,
+        kind: EV_HIT, target: victim.id, shooter: shooter.id,
         damage: Math.round(dmg), headshot: hitHead ? 1 : 0,
       });
-    } else if (pieceHit && bestT === pieceHit.t) {
-      const materialScale = weapon.id === W_SNIPER
-        ? (pieceHit.piece.mat === 0 ? 2.0 : pieceHit.piece.mat === 1 ? 3.7 : 1.9)
-        : weapon.buildDamage;
-      const dmg = damageAtRange(weapon, bestT) * materialScale;
-      damagePiece(world, pieceHit.piece.key, dmg, nowSec, events, shooter);
+    } else if (struck) {
+      damagePiece(world, struck.piece.key, pieceDamage(weapon, struck.piece.mat), nowSec, events, shooter);
+      // Shooting a tree knocks its leaves off. The trunk is indestructible
+      // cover either way; what changes is that everyone can now see through
+      // the canopy, so hiding in one stops being free once you fire from it.
+      const tree = treeIndexFromKey(struck.piece.key);
+      if (tree >= 0) events.push({ kind: EV_FOLIAGE, index: tree });
     }
 
     events.push({
       kind: EV_SHOT, shooter: shooter.id, weapon: weapon.id,
       ox, oy, oz,
-      ex: ox + dx * bestT, ey: oy + dy * bestT, ez: oz + dz * bestT,
-      hit: hitPlayer ? 2 : (pieceHit && bestT === pieceHit.t ? 1 : 0),
+      ex: shot.x, ey: shot.y, ez: shot.z,
+      hit: victim ? 2 : (struck ? 1 : 0),
     });
   }
+
+  // Firing blooms the cone. Charged per trigger pull, not per pellet, so a
+  // shotgun is not punished nine times for one shot.
+  shooter.pendingBloomShots++;
 
   if (Number.isFinite(shooter.ammo[shooter.weaponIdx]) && shooter.ammo[shooter.weaponIdx] <= 0) {
     beginReload(shooter, nowSec);

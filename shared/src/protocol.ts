@@ -26,6 +26,9 @@ export const EV_HIT = 5;
 export const EV_DEATH = 6;
 export const EV_RESPAWN = 7;
 export const EV_SOUND = 8;
+/** A tree took a hit and lost its leaves. Carries the SCENERY index, so every
+ *  client can strip the same tree without the server sending geometry. */
+export const EV_FOLIAGE = 9;
 
 // ---------------------------------------------------------------------------
 // Quantisation
@@ -196,3 +199,4 @@ export const PF_AIMING = 1 << 2;
 export const PF_CROUCH = 1 << 3;
 export const PF_FIRING = 1 << 4;
 export const PF_MOVING = 1 << 5;
+export const PF_SLIDING = 1 << 6;

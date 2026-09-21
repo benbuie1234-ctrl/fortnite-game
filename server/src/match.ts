@@ -1,20 +1,19 @@
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS_PER_MATCH, RESPAWN_DELAY_S,
-  ROUND_WIN_SCORE, PLAYER_MAX_HP, FALL_DAMAGE_THRESHOLD, FALL_DAMAGE_PER_MPS,
-  MATERIALS,
+  ROUND_WIN_SCORE, PLAYER_MAX_HP, MATERIALS, BLOOM_MAX, SPRINT_STAMINA_MAX,
 } from "@shared/constants";
 import {
   C_HELLO, C_INPUT, C_PING, C_CHAT,
   S_WELCOME, S_PONG, S_FULL_WORLD, S_MATCH, S_CHAT, S_KICK,
   EV_DEATH, EV_RESPAWN, EV_PIECE_REMOVE,
   Reader, Writer, readInputBatch,
-  PF_ALIVE, PF_GROUNDED, PF_AIMING, PF_CROUCH, PF_FIRING, PF_MOVING,
+  PF_ALIVE, PF_GROUNDED, PF_AIMING, PF_CROUCH, PF_FIRING, PF_MOVING, PF_SLIDING,
 } from "@shared/protocol";
 import { writeSnapshot, type GameEvent, type OtherState } from "@shared/snapshot";
 import { World } from "@shared/world";
 import { buildArena, arenaSpawns, isOutOfBounds, ARENA_OWNER } from "@shared/arena";
-import { stepPlayer, BTN_FIRE, BTN_AIM, BTN_CROUCH, BTN_RELOAD, BTN_JUMP } from "@shared/sim";
-import { weaponById, ARENA_LOADOUT } from "@shared/weapons";
+import { stepPlayer, fallDamage, BTN_FIRE, BTN_AIM, BTN_RELOAD, BTN_JUMP } from "@shared/sim";
+import { weaponById, ARENA_LOADOUT, stepBloom, bloomPerShot } from "@shared/weapons";
 import { ServerPlayer } from "./player";
 import { resolveFire, tryPlace, beginReload, finishReloads } from "./combat";
 
@@ -202,6 +201,7 @@ export class MatchRoom implements DurableObject {
       target: ROUND_WIN_SCORE,
       players: [...this.players.values()].map((p) => ({
         id: p.id, name: p.name, kills: p.kills, deaths: p.deaths,
+        wins: p.wins, ping: Math.round(p.rttMs),
       })),
     });
   }
@@ -304,6 +304,17 @@ export class MatchRoom implements DurableObject {
     let processed = 0;
     while (player.inputQueue.length > 0 && processed < MAX_INPUTS_PER_TICK) {
       const cmd = player.inputQueue.shift()!;
+      // Each queued input is one simulation tick, so it gets its own instant on
+      // the clock the fire interval is measured against.
+      //
+      // Without this, every input in a burst shared the tick's timestamp, so
+      // the second and later ones were inside the previous shot's cooldown and
+      // their trigger pulls were silently dropped. Inputs arrive two at a time
+      // (SEND_HZ is half TICK_HZ), so that happened on every other tick: the
+      // gap between shots alternated between the weapon's real interval and a
+      // tick longer, which is exactly the "sometimes there's fire delay and
+      // sometimes there isn't" the cadence was suffering from.
+      const inputTime = nowSec + processed * TICK_DT;
       processed++;
       player.lastSeq = cmd.seq;
 
@@ -314,8 +325,9 @@ export class MatchRoom implements DurableObject {
 
       stepPlayer(player, cmd, this.world, TICK_DT);
 
-      if (player.lastLandingSpeed > FALL_DAMAGE_THRESHOLD) {
-        player.hp -= (player.lastLandingSpeed - FALL_DAMAGE_THRESHOLD) * FALL_DAMAGE_PER_MPS;
+      const fall = fallDamage(player.lastFallHeight, player.lastLandingSpeed);
+      if (fall > 0) {
+        player.hp -= fall;
         player.lastDamagedBy = -1;
       }
 
@@ -325,21 +337,31 @@ export class MatchRoom implements DurableObject {
         player.vx = 0; player.vy = 0; player.vz = 0;
       }
 
-      if ((cmd.buttons & BTN_RELOAD) !== 0) beginReload(player, nowSec);
+      if ((cmd.buttons & BTN_RELOAD) !== 0) beginReload(player, inputTime);
 
       const firing = (cmd.buttons & BTN_FIRE) !== 0;
       const weapon = weaponById(player.weaponId);
 
       if (player.inBuildMode) {
         // Turbo build: holding the button keeps placing at the build cooldown.
-        if (firing) tryPlace(this.world, player, nowSec, nowMs, this.events);
+        if (firing) tryPlace(this.world, player, inputTime, nowMs, this.events);
       } else {
         const triggered = weapon.auto ? firing : firing && !player.wasFiring;
         if (triggered) {
-          resolveFire(this.world, player, [...this.players.values()], nowSec, nowMs, this.events);
+          resolveFire(this.world, player, [...this.players.values()], inputTime, nowMs, this.events);
         }
       }
       player.wasFiring = firing;
+
+      // Bloom settles or grows once per simulated tick, then takes whatever the
+      // trigger just cost it.
+      player.bloom = stepBloom(player.bloom, Math.hypot(player.vx, player.vz), TICK_DT);
+      if (player.pendingBloomShots > 0) {
+        player.bloom = Math.min(
+          BLOOM_MAX, player.bloom + player.pendingBloomShots * bloomPerShot(weapon),
+        );
+        player.pendingBloomShots = 0;
+      }
     }
 
     // The queue should hover near empty. A persistent backlog means the client
@@ -395,6 +417,7 @@ export class MatchRoom implements DurableObject {
   }
 
   private endRound(winner: ServerPlayer, nowSec: number): void {
+    winner.wins++;
     this.broadcastJson({
       t: S_MATCH, roundOver: true, winnerId: winner.id, winnerName: winner.name,
     });
@@ -444,6 +467,8 @@ export class MatchRoom implements DurableObject {
           buildSlot: me.buildSlot < 0 ? 0 : me.buildSlot,
           material: me.material,
           reloadMs: Math.max(0, me.reloadEndAt * 1000 - nowMs),
+          stance: Math.round(me.crouch * 255),
+          stamina: Math.round((me.stamina / SPRINT_STAMINA_MAX) * 255),
         },
         others,
         events: this.events,
@@ -461,7 +486,9 @@ function flagsFor(p: ServerPlayer): number {
   if (p.aiming) f |= PF_AIMING;
   if (p.wasFiring) f |= PF_FIRING;
   if (Math.hypot(p.vx, p.vz) > 0.8) f |= PF_MOVING;
-  void BTN_CROUCH; void BTN_JUMP; void PF_CROUCH;
+  if (p.crouch > 0.5) f |= PF_CROUCH;
+  if (p.sliding) f |= PF_SLIDING;
+  void BTN_JUMP;
   return f;
 }
 

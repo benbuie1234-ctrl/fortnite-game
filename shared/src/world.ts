@@ -1,7 +1,7 @@
 import { terrainHeight } from "./map";
 import { TILE } from "./constants";
 import {
-  Piece, Box, Slot, SLOT_COUNT, SLOT_RAMP,
+  Piece, Box, Slot, SLOT_COUNT, SLOT_RAMP, SLOT_FLOOR,
   packKey, pieceBox, pieceBoxes, rampUnderBox, rampHeightAt, inGridBounds, currentHp,
 } from "./build";
 
@@ -56,6 +56,9 @@ export class World {
     minX: number, minY: number, minZ: number,
     maxX: number, maxY: number, maxZ: number,
     outBoxes: Box[], outRamps: Piece[],
+    /** The querying body's feet, if it is a player. Enables the one-way ramp
+     *  exit below; omit it and everything is solid from both sides. */
+    feetY?: number,
   ): void {
     outBoxes.length = 0;
     outRamps.length = 0;
@@ -85,11 +88,28 @@ export class World {
             // ramp could be walked through from the side and fallen through
             // from above.
             if (piece.slot === SLOT_RAMP) outRamps.push(piece);
+            if (this.isRampExit(piece, feetY)) continue;
             for (const box of pieceBoxes(piece)) outBoxes.push(box);
           }
         }
       }
     }
+  }
+
+  /**
+   * True when this floor is the roof over a ramp and the body is underneath it.
+   *
+   * A ramp rises to exactly the surface of the floor in the cell above it, so
+   * the last quarter-metre of the climb runs through that floor's slab and the
+   * ramp dead-ends into its own destination. Punching a hole would leave a gap
+   * anyone could fall through, so the floor is one-way instead: transparent to
+   * something climbing up through it, solid to anything standing on top.
+   */
+  private isRampExit(piece: Piece, feetY: number | undefined): boolean {
+    if (piece.slot !== SLOT_FLOOR || feetY === undefined) return false;
+    if (!this.pieces.has(packKey(piece.gx, piece.gy - 1, piece.gz, SLOT_RAMP))) return false;
+    // Solid once the feet reach the surface, so you land on it and stay there.
+    return feetY < piece.gy * TILE - 0.02;
   }
 
   /** Highest ramp surface under a point, or -Infinity. */

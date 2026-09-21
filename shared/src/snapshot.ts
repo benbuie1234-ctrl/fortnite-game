@@ -1,7 +1,7 @@
 import {
   Writer, Reader, S_SNAPSHOT,
   EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE,
-  EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_SOUND,
+  EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_SOUND, EV_FOLIAGE,
 } from "./protocol";
 
 /** Authoritative state for the player receiving this snapshot. Full precision:
@@ -14,6 +14,13 @@ export interface SelfState {
   hp: number; shield: number; mats: number;
   weapon: number; ammo: number;
   buildSlot: number; material: number; reloadMs: number;
+  /** Crouch fraction, 0-255. Part of the reconciled state: the capsule height
+   *  and the eye height both depend on it, so the client cannot simply keep
+   *  its own copy or replay would diverge from the server every snapshot. */
+  stance: number;
+  /** Sprint stamina, 0-255. Reconciled like the stance: the speed cap depends
+   *  on it, so the client cannot keep its own copy without drifting. */
+  stamina: number;
 }
 
 /** Everyone else, quantised. They are interpolated, so 3 cm is invisible. */
@@ -34,7 +41,8 @@ export type GameEvent =
   | { kind: typeof EV_HIT; target: number; shooter: number; damage: number; headshot: number }
   | { kind: typeof EV_DEATH; victim: number; killer: number; weapon: number }
   | { kind: typeof EV_RESPAWN; id: number; x: number; y: number; z: number }
-  | { kind: typeof EV_SOUND; sound: number; x: number; y: number; z: number };
+  | { kind: typeof EV_SOUND; sound: number; x: number; y: number; z: number }
+  | { kind: typeof EV_FOLIAGE; index: number };
 
 export interface Snapshot {
   serverTimeMs: number;
@@ -63,6 +71,8 @@ export function writeSnapshot(w: Writer, s: Snapshot): void {
   w.u8(self.buildSlot);
   w.u8(self.material);
   w.u16(Math.max(0, Math.min(65535, Math.round(self.reloadMs))));
+  w.u8(Math.max(0, Math.min(255, Math.round(self.stance))));
+  w.u8(Math.max(0, Math.min(255, Math.round(self.stamina))));
 
   w.u8(s.others.length);
   for (const o of s.others) {
@@ -108,6 +118,9 @@ export function writeSnapshot(w: Writer, s: Snapshot): void {
       case EV_SOUND:
         w.u8(e.sound); w.pos(e.x); w.pos(e.y); w.pos(e.z);
         break;
+      case EV_FOLIAGE:
+        w.u16(e.index);
+        break;
     }
   }
 }
@@ -124,6 +137,8 @@ export function readSnapshot(r: Reader): Snapshot {
     hp: r.u16(), shield: r.u16(), mats: r.u16(),
     weapon: r.u8(), ammo: r.u16(),
     buildSlot: r.u8(), material: r.u8(), reloadMs: r.u16(),
+    stance: r.u8(),
+    stamina: r.u8(),
   };
   if (self.ammo === 0xffff) self.ammo = Infinity;
 
@@ -173,6 +188,9 @@ export function readSnapshot(r: Reader): Snapshot {
         break;
       case EV_SOUND:
         events.push({ kind: EV_SOUND, sound: r.u8(), x: r.pos(), y: r.pos(), z: r.pos() });
+        break;
+      case EV_FOLIAGE:
+        events.push({ kind: EV_FOLIAGE, index: r.u16() });
         break;
       default:
         // Unknown event kind: the rest of the buffer is no longer parseable.

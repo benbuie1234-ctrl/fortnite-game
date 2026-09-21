@@ -1,14 +1,16 @@
 import { cameraPose, easeCameraDistance } from "@shared/camera";
 import * as THREE from "three";
 import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE } from "@shared/constants";
+import { eyeHeightFor } from "@shared/sim";
 import { resolvePlacement, placementIssue } from "@shared/placement";
 import { unpackKey } from "@shared/build";
 import { weaponById, ARENA_LOADOUT, W_SNIPER, W_PICKAXE } from "@shared/weapons";
-import { locationAt } from "@shared/map";
+import { locationAt, SCENERY } from "@shared/map";
+import { TREE_PERCH_RADIUS, PLAYER_HEIGHT } from "@shared/constants";
 import { SKINS } from "@shared/skins";
 import {
   EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
-  PF_ALIVE, PF_GROUNDED,
+  EV_FOLIAGE, PF_ALIVE, PF_GROUNDED,
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
 
@@ -16,7 +18,7 @@ import { createRenderer } from "./render/scene";
 import { PieceRenderer, BuildGhost } from "./render/pieces";
 import { Character } from "./render/character";
 import { Effects } from "./render/effects";
-import { Controls } from "./input/controls";
+import { Controls, ACTION_LABELS, keyLabel, type Action } from "./input/controls";
 import { Connection, type MatchPlayerInfo } from "./net/connection";
 import { Hud } from "./ui/hud";
 import { FrameLimiter, type FpsTarget } from "./render/framelimiter";
@@ -94,10 +96,18 @@ const controls = new Controls(view.renderer.domElement, {
     if (playing && !locked) hud.setCenterMessage("Paused", "Click to resume");
     else if (locked) hud.setCenterMessage("");
   },
+  onScoreboard(open) { hud.setScoreboardOpen(open); },
 });
 
 // Touch controls use the same input sampler as keyboard/mouse, so prediction
 // and the server see identical commands on phones and tablets.
+//
+// The markup these bind to did not exist until now, so this whole block was
+// attaching to nothing and every touch device was left with keyboard handlers
+// it had no way to drive.
+if (matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0) {
+  document.body.classList.add("touch");
+}
 const mobile = document.getElementById("mobileControls");
 const stick = document.getElementById("mobileStick");
 if (mobile && stick) {
@@ -123,11 +133,20 @@ if (mobile && stick) {
   }
   mobile.querySelectorAll<HTMLButtonElement>("[data-touch]").forEach(b => {
     const a = b.dataset.touch!;
-    b.addEventListener("pointerdown", e => { e.preventDefault(); controls.setTouchAction(a, true); });
-    b.addEventListener("pointerup", () => controls.setTouchAction(a, false));
-    b.addEventListener("pointercancel", () => controls.setTouchAction(a, false));
+    // Toggles report back whether they are now on, so a latched AIM or SPRINT
+    // button looks latched instead of leaving the player guessing.
+    const paint = (on: boolean) => b.classList.toggle("held", on);
+    b.addEventListener("pointerdown", e => { e.preventDefault(); paint(controls.setTouchAction(a, true)); });
+    b.addEventListener("pointerup", () => paint(controls.setTouchAction(a, false)));
+    b.addEventListener("pointercancel", () => paint(controls.setTouchAction(a, false)));
   });
 }
+
+// Tapping the on-screen weapon bar, build bar or material boxes selects them.
+// Without this the only way to change weapon on a phone was a key that phones
+// do not have.
+hud.onSlotTapped = (slot) => controls.selectSlot(slot);
+hud.onMaterialTapped = (material) => controls.selectMaterialPublic(material);
 
 // ---------------------------------------------------------------------------
 // Connecting
@@ -191,6 +210,58 @@ sensitivity.addEventListener("input", () => {
   controls.sensitivity = Number(sensitivity.value);
   localStorage.setItem("clutch.sensitivity", sensitivity.value);
 });
+// --- key bindings -----------------------------------------------------------
+//
+// Click a binding, press a key. Escape cancels rather than binding Escape,
+// which would take the pointer-lock release key away from the player.
+{
+  const container = document.getElementById("keybinds")!;
+  const buttons = new Map<Action, HTMLButtonElement>();
+  let listening: Action | null = null;
+
+  const refresh = (): void => {
+    for (const [action, button] of buttons) {
+      const code = controls.bindings[action];
+      button.textContent = listening === action
+        ? "Press a key…"
+        : code ? keyLabel(code) : "Unbound";
+      button.classList.toggle("listening", listening === action);
+    }
+  };
+
+  for (const [action, label] of ACTION_LABELS) {
+    const name = document.createElement("label");
+    name.textContent = label;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.addEventListener("click", () => {
+      listening = listening === action ? null : action;
+      refresh();
+    });
+    container.appendChild(name);
+    container.appendChild(button);
+    buttons.set(action, button);
+  }
+
+  // Capture phase: while a binding is being captured, no other keydown handler
+  // on the page (mute, the name field, the game itself) should see the key.
+  window.addEventListener("keydown", (e) => {
+    if (listening === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.code !== "Escape") controls.setBinding(listening, e.code);
+    listening = null;
+    refresh();
+  }, true);
+
+  document.getElementById("resetBinds")!.addEventListener("click", () => {
+    controls.resetBindings();
+    listening = null;
+    refresh();
+  });
+  refresh();
+}
+
 {
   const toggle = document.getElementById("statsToggle") as unknown as HTMLInputElement;
   const netstat = document.getElementById("netstat")!;
@@ -232,7 +303,7 @@ function enterGame(id: number, name: string): void {
   selfCharacter = new Character(SKINS[id % 2].id, name);
   selfCharacter.hideNameplate();
   view.scene.add(selfCharacter.root);
-  controls.requestLock();
+  if (!document.body.classList.contains("touch")) controls.requestLock();
 }
 
 function leaveGame(reason: string): void {
@@ -259,6 +330,7 @@ function leaveGame(reason: string): void {
 }
 
 app.addEventListener("click", () => {
+  if (document.body.classList.contains("touch")) return;
   if (playing && !controls.isLocked) controls.requestLock();
 });
 
@@ -266,6 +338,8 @@ app.addEventListener("click", () => {
 // and muting is exactly what you want to do when you have just tabbed away.
 window.addEventListener("keydown", (e) => {
   if (e.code !== "KeyM" || e.repeat) return;
+  // Cmd/Ctrl+M is the aim-assist chord below, not mute.
+  if (e.metaKey || e.ctrlKey) return;
   const target = e.target as HTMLElement | null;
   if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
   const muted = sound.toggleMute();
@@ -280,6 +354,27 @@ window.addEventListener("keydown", (e) => {
 function nameOf(id: number): string {
   if (id === conn.selfId) return "You";
   return matchPlayers.find((p) => p.id === id)?.name ?? "Player";
+}
+
+/**
+ * Point the red wedge at whoever just hit you.
+ *
+ * The shooter's position is not in the hit event, and does not need to be: we
+ * are already interpolating every remote player, so looking the shooter up
+ * costs nothing and avoids widening the snapshot for all four players to carry
+ * a field only the victim reads.
+ */
+function showDamageDirection(shooterId: number): void {
+  if (shooterId === conn.selfId || shooterId === 255) return;
+  const shooter = conn.remotePoses().find((p) => p.id === shooterId);
+  if (!shooter) return;
+  const dx = shooter.x - conn.self.x;
+  const dz = shooter.z - conn.self.z;
+  if (Math.hypot(dx, dz) < 0.01) return;
+  const yaw = controls.yaw;
+  const along = dx * -Math.sin(yaw) + dz * Math.cos(yaw);
+  const side = dx * -Math.cos(yaw) + dz * -Math.sin(yaw);
+  hud.addDamageDirection(Math.atan2(side, along));
 }
 
 function handleEvents(events: readonly GameEvent[]): void {
@@ -311,8 +406,15 @@ function handleEvents(events: readonly GameEvent[]): void {
           else characters.get(e.shooter)?.fire();
           sound.shot(e.weapon, e.ox, e.oy, e.oz);
           if (e.weapon !== W_PICKAXE) effects.spawnMuzzleFlash(e.ox, e.oy, e.oz);
-          // Only your own shots kick your own camera.
-          if (e.shooter === conn.selfId) viewfx.fire(e.weapon);
+          // Only your own shots kick your own camera, or bloom your own cone.
+          if (e.shooter === conn.selfId) {
+            viewfx.fire(e.weapon);
+            conn.notePredictedShot(e.weapon);
+          } else if (e.weapon !== W_PICKAXE) {
+            // Somebody else fired: put it on the compass. Sound alone tells you
+            // a fight started, not which way to turn.
+            hud.addGunshot(e.ox, e.oz);
+          }
         }
         break;
       }
@@ -347,6 +449,7 @@ function handleEvents(events: readonly GameEvent[]): void {
           hud.flashDamage();
           sound.damage();
           viewfx.damage(e.damage);
+          showDamageDirection(e.shooter);
         }
         break;
       case EV_DEATH: {
@@ -360,6 +463,10 @@ function handleEvents(events: readonly GameEvent[]): void {
         }
         break;
       }
+      case EV_FOLIAGE:
+        strippedTrees.set(e.index, performance.now() + FOLIAGE_REGROW_MS);
+        refreshTreeAlpha(e.index);
+        break;
       case EV_RESPAWN:
         if (e.id === conn.selfId) {
           respawnAtMs = 0;
@@ -374,18 +481,128 @@ function handleEvents(events: readonly GameEvent[]): void {
 }
 
 // ---------------------------------------------------------------------------
+// Tree cover
+//
+// Trees are climbable now, which makes the canopy real cover -- and real cover
+// you cannot see out of is just a blindfold. So the tree you are sitting in
+// fades for YOU while you aim, and a tree somebody has shot the leaves off
+// fades for EVERYONE. Both go through the same per-instance alpha, so a tree
+// that is both only fades once.
+// ---------------------------------------------------------------------------
+
+/** How long a tree stays stripped before the leaves read as whole again. */
+const FOLIAGE_REGROW_MS = 22_000;
+const strippedTrees = new Map<number, number>();
+let occupiedTree = -1;
+
+/** The tree whose canopy contains this point, or -1. */
+function treeAt(x: number, y: number, z: number): number {
+  const reach = TREE_PERCH_RADIUS + 0.7;
+  for (let i = 0; i < SCENERY.length; i++) {
+    const p = SCENERY[i];
+    if (p.kind !== "tree") continue;
+    if (Math.abs(p.x - x) > reach || Math.abs(p.z - z) > reach) continue;
+    // Only once you are actually up in it; standing at the base does not count.
+    if (y < p.y + 1.2 || y > p.y + p.size * 1.7) continue;
+    return i;
+  }
+  return -1;
+}
+
+function refreshTreeAlpha(index: number): void {
+  if (index < 0) return;
+  // Sitting in it is the stronger fade: you need to see out, and you are the
+  // only one paying for it.
+  const alpha = index === occupiedTree ? 0.28 : strippedTrees.has(index) ? 0.45 : 1;
+  view.landscape.setTreeAlpha(index, alpha);
+}
+
+function updateTreeCover(aiming: boolean, x: number, y: number, z: number): void {
+  const wanted = aiming ? treeAt(x, y, z) : -1;
+  if (wanted !== occupiedTree) {
+    const previous = occupiedTree;
+    occupiedTree = wanted;
+    refreshTreeAlpha(previous);
+    refreshTreeAlpha(wanted);
+  }
+  const now = performance.now();
+  for (const [index, until] of strippedTrees) {
+    if (now <= until) continue;
+    strippedTrees.delete(index);
+    refreshTreeAlpha(index);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Aim assist (development toggle)
+//
+// Cmd/Ctrl+M. Steers the local look angles onto the nearest living opponent's
+// head. It has to work this way round rather than server-side, because the
+// server traces every shot from the player's own yaw and pitch -- so the only
+// thing that can move a shot is the aim itself.
+//
+// It is deliberately loud: a badge sits on the HUD the entire time it is on.
+// This is a multiplayer game, so a silent version of this would be a cheat
+// rather than a tool.
+// ---------------------------------------------------------------------------
+
+let aimAssist = false;
+
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "KeyM" || e.repeat) return;
+  if (!e.metaKey && !e.ctrlKey) return;
+  e.preventDefault();
+  aimAssist = !aimAssist;
+  hud.setAimbot(aimAssist);
+  hud.setCenterMessage(aimAssist ? "AIM ASSIST ON" : "Aim assist off");
+  setTimeout(() => hud.setCenterMessage(""), 900);
+});
+
+function applyAimAssist(): void {
+  if (!aimAssist || !conn.self.alive) return;
+  const eyeY = conn.self.y + eyeHeightFor(conn.self.crouch);
+  let bestDistance = Infinity;
+  let bx = 0, by = 0, bz = 0;
+  for (const pose of conn.remotePoses()) {
+    if ((pose.state.flags & PF_ALIVE) === 0) continue;
+    const dx = pose.x - conn.self.x;
+    const dy = pose.y + PLAYER_HEIGHT - 0.14 - eyeY;
+    const dz = pose.z - conn.self.z;
+    const distance = Math.hypot(dx, dy, dz);
+    if (distance >= bestDistance) continue;
+    bestDistance = distance;
+    bx = dx; by = dy; bz = dz;
+  }
+  // No target: leave the player's own aim completely alone.
+  if (bestDistance === Infinity) return;
+  controls.yaw = Math.atan2(-bx, bz);
+  controls.pitch = Math.atan2(by, Math.hypot(bx, bz));
+}
+
+// ---------------------------------------------------------------------------
 // Camera
 // ---------------------------------------------------------------------------
 
 let cameraDistance=0;
 function updateCamera(aiming: boolean, dt: number): void {
   const weapon=weaponById(ARENA_LOADOUT[controls.slot]??0);
-  const position=aiming?conn.self:renderSelf;
-  const pose = cameraPose({...position, yaw:controls.yaw, pitch:controls.pitch},aiming,conn.world,Date.now()/1000,weapon.id===W_SNIPER);
-  const eye=new THREE.Vector3(position.x,position.y+EYE_HEIGHT,position.z);
+  // Always the smoothed position, never the raw authoritative one.
+  //
+  // Aiming used to switch the camera over to conn.self, which is snapped to
+  // the server every snapshot and then replayed: perfectly fine as simulation
+  // state, and visibly steppy as a camera anchor. So the moment you pressed
+  // aim the camera jumped from a smoothed anchor to a jittering one, and back
+  // again when you released -- that is the "ADS is glitchy with the character
+  // movement" bug. The boom easing below is now unconditional for the same
+  // reason: it used to be skipped while aiming, so every aim snapped.
+  const pose = cameraPose(
+    {...renderSelf, yaw:controls.yaw, pitch:controls.pitch, crouch:conn.self.crouch},
+    aiming, conn.world, Date.now()/1000, weapon.id===W_SNIPER,
+  );
+  const eye=new THREE.Vector3(renderSelf.x,renderSelf.y+eyeHeightFor(conn.self.crouch),renderSelf.z);
   const boom=new THREE.Vector3(...pose.origin).sub(eye);
   const safe=boom.length();
-  cameraDistance=aiming?safe:easeCameraDistance(cameraDistance,safe,dt);
+  cameraDistance=easeCameraDistance(cameraDistance,safe,dt);
   view.camera.position.copy(eye).addScaledVector(boom,safe>0?cameraDistance/safe:0);
   view.camera.rotation.order = "YXZ";
   // Recoil is added to the CAMERA only. The shot the server traces still uses
@@ -451,7 +668,11 @@ function frame(now: number): void {
 
   const nowSec = Date.now() / 1000;
   const self = conn.self;
-  const aiming = controls.isLocked && !controls.inBuildMode && controls.aiming;
+  // Touch play never takes the pointer lock, so gating aim on it would make
+  // aiming impossible on a phone.
+  const canAct = controls.isLocked || document.body.classList.contains("touch");
+  const aiming = canAct && !controls.inBuildMode && controls.aiming;
+  applyAimAssist();
 
   const distance=Math.hypot(self.x-renderSelf.x,self.y-renderSelf.y,self.z-renderSelf.z);
   const blend=1-Math.exp(-24*dt);
@@ -459,7 +680,7 @@ function frame(now: number): void {
   else { renderSelf.x+=(self.x-renderSelf.x)*blend;renderSelf.y+=(self.y-renderSelf.y)*blend;renderSelf.z+=(self.z-renderSelf.z)*blend; }
   updateCamera(aiming, dt);
   viewfx.update(dt);
-  sound.setListener(self.x, self.y + EYE_HEIGHT, self.z, controls.yaw);
+  sound.setListener(self.x, self.y + eyeHeightFor(self.crouch), self.z, controls.yaw);
   pieces.sync(conn.world, nowSec);
   pieces.updateVisibility(self.x, self.z);
   const direction=view.camera.getWorldDirection(new THREE.Vector3());
@@ -529,7 +750,7 @@ function frame(now: number): void {
     const alive = (pose.state.flags & PF_ALIVE) !== 0;
     ch.root.visible = alive;
     ch.setWeapon(pose.state.weapon);
-    ch.setNameplate(nameOf(pose.id), pose.state.hpPct);
+    ch.setNameplate(nameOf(pose.id));
     // Remote speed is not transmitted; derive it from the flag the server sets
     // so the walk cycle still plays.
     const moving = (pose.state.flags & 32) !== 0;
@@ -547,13 +768,19 @@ function frame(now: number): void {
   }
 
   // --- hud ---
+  const weapon = weaponById(ARENA_LOADOUT[controls.slot] ?? 0);
+  hud.setScope(aiming && weapon.id === W_SNIPER);
+  updateTreeCover(aiming, renderSelf.x, renderSelf.y, renderSelf.z);
   hud.setVitals(self.hp, self.shield);
+  hud.setStamina(self.stamina);
   hud.setMats(self.mats, self.material);
-  hud.setSlot(controls.slot, controls.inBuildMode);
-  hud.setReticle(aiming, controls.slot, controls.inBuildMode);
+  hud.setSlot(controls.slot, controls.inBuildMode, self.material);
+  hud.setReticle(aiming, controls.slot, controls.inBuildMode, self.bloom);
   const weaponIdx = controls.inBuildMode ? 0 : controls.slot;
-  hud.setAmmo(weaponIdx, self.ammo, self.reloadMs > 0);
+  hud.setAmmo(weaponIdx, self.ammo, self.reloadMs > 0, controls.inBuildMode, self.mats);
   hud.setScore(matchPlayers, conn.selfId, scoreTarget);
+  hud.updateCompass(self.x, self.z, controls.yaw);
+  hud.setScoreboard(matchPlayers, conn.selfId);
   hud.setNetStat(conn.rttMs, fps, conn.pendingInputCount, limiter.fpsTarget);
   if (!self.alive && respawnAtMs > 0) {
     const left = Math.max(0, (respawnAtMs - performance.now()) / 1000);

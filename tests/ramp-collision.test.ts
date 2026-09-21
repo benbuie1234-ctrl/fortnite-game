@@ -1,5 +1,5 @@
 import { World } from "../shared/src/world";
-import { stepPlayer, type InputCommand, type MovementState } from "../shared/src/sim";
+import { stepPlayer, type InputCommand, type MovementState, newMovementState } from "../shared/src/sim";
 import { makePiece, SLOT_RAMP, SLOT_CONE, pieceBoxes } from "../shared/src/build";
 import { TILE, TICK_DT, PLAYER_RADIUS } from "../shared/src/constants";
 
@@ -10,7 +10,7 @@ function check(name: string, cond: boolean, detail = ""): void {
 }
 
 function newPlayer(x: number, y: number, z: number): MovementState {
-  return { x, y, z, vx: 0, vy: 0, vz: 0, yaw: 0, pitch: 0, grounded: false, lastLandingSpeed: 0 };
+  return { ...newMovementState(), x, y, z };
 }
 function input(moveX: number, moveZ: number): InputCommand {
   return { seq: 0, moveX, moveZ, yaw: 0, pitch: 0, buttons: 0, slot: 2 };
