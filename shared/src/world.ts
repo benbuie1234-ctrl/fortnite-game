@@ -118,9 +118,9 @@ export class World {
     let tMaxZ = dz !== 0 ? (nextBoundary(gz, stepZ) - oz) * invDz : Infinity;
 
     let travelled = 0;
+    let best: RayHit | null = null;
     // Neighbour cells too: a wall on a cell face belongs to the +X/+Z cell.
     for (let guard = 0; guard < 512 && travelled <= maxDist; guard++) {
-      let best: RayHit | null = null;
 
       for (let ox2 = 0; ox2 <= 1; ox2++) {
         for (let oz2 = 0; oz2 <= 1; oz2++) {
@@ -139,7 +139,8 @@ export class World {
           }
         }
       }
-      if (best) return best;
+      const nearest = best as RayHit | null;
+      if (nearest && nearest.t <= Math.min(tMaxX, tMaxY, tMaxZ) + 1e-6) return nearest;
 
       if (tMaxX < tMaxY && tMaxX < tMaxZ) {
         gx += stepX; travelled = tMaxX; tMaxX += tDeltaX;
@@ -149,7 +150,7 @@ export class World {
         gz += stepZ; travelled = tMaxZ; tMaxZ += tDeltaZ;
       }
     }
-    return null;
+    return best;
   }
 }
 

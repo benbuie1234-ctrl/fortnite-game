@@ -79,8 +79,8 @@ export function stepPlayer(
   // --- desired horizontal direction, in world space ---
   const sin = Math.sin(s.yaw);
   const cos = Math.cos(s.yaw);
-  let wishX = input.moveX * cos - input.moveZ * sin;
-  let wishZ = input.moveX * sin + input.moveZ * cos;
+  let wishX = -input.moveX * cos - input.moveZ * sin;
+  let wishZ = -input.moveX * sin + input.moveZ * cos;
   const wishLen = Math.hypot(wishX, wishZ);
   if (wishLen > 1e-6) {
     wishX /= wishLen;
@@ -119,18 +119,18 @@ export function stepPlayer(
   s.vy += GRAVITY * dt;
   if (s.vy < MAX_FALL_SPEED) s.vy = MAX_FALL_SPEED;
 
-  moveAndCollide(s, world, dt);
+  moveAndCollide(s, world, dt, input);
 }
 
 function queryAround(s: MovementState, world: World, pad: number): void {
   world.collidersNear(
     s.x - PLAYER_RADIUS - pad, s.y - pad, s.z - PLAYER_RADIUS - pad,
-    s.x + PLAYER_RADIUS + pad, s.y + PLAYER_HEIGHT + pad, s.z + PLAYER_RADIUS + pad,
+    s.x + PLAYER_RADIUS + pad, s.y + PLAYER_HEIGHT + pad + 2, s.z + PLAYER_RADIUS + pad,
     scratchBoxes, scratchRamps,
   );
 }
 
-function moveAndCollide(s: MovementState, world: World, dt: number): void {
+function moveAndCollide(s: MovementState, world: World, dt: number, input:InputCommand): void {
   const wasGrounded = s.grounded;
   s.grounded = false;
 
@@ -181,6 +181,25 @@ function moveAndCollide(s: MovementState, world: World, dt: number): void {
     }
   }
 
+  // Hold jump and forward against a reachable ledge to pull up. Test the
+  // destination headroom so a ceiling or a second wall prevents climbing.
+  if ((blockedX || blockedZ) && input.moveZ>0 && (input.buttons&BTN_JUMP)!==0) {
+    const fx=-Math.sin(input.yaw),fz=Math.cos(input.yaw);
+    const tx=s.x+fx*.75,tz=s.z+fz*.75;
+    let top=Infinity;
+    for(const b of scratchBoxes) {
+      if(tx>b[0]-PLAYER_RADIUS && tx<b[3]+PLAYER_RADIUS && tz>b[2]-PLAYER_RADIUS && tz<b[5]+PLAYER_RADIUS && b[4]>s.y+.05 && b[4]-s.y<=1.9)top=Math.min(top,b[4]);
+    }
+    if(Number.isFinite(top)) {
+      const clear=!scratchBoxes.some(b=>overlaps(tx-PLAYER_RADIUS,top+.01,tz-PLAYER_RADIUS,tx+PLAYER_RADIUS,top+PLAYER_HEIGHT,tz+PLAYER_RADIUS,b));
+      if(clear) {
+        s.y=Math.min(top+.01,s.y+4.5*dt);s.vy=0;s.grounded=false;
+        if(s.y>=top){s.x=tx;s.z=tz;s.grounded=true;}
+        return;
+      }
+    }
+  }
+
   // --- vertical ---
   const hitVertical = sweepAxis(s, 1, dy);
   if (hitVertical && dy < 0) {
@@ -194,8 +213,8 @@ function moveAndCollide(s: MovementState, world: World, dt: number): void {
   // --- ramps: treat the slope as a floor we snap onto ---
   if (scratchRamps.length > 0) {
     const reach = wasGrounded ? STEP_HEIGHT : 0.05;
-    const surface = world.rampSurfaceAt(scratchRamps, s.x, s.z, s.y + reach + PLAYER_HEIGHT);
-    if (surface > -Infinity && s.y <= surface + reach && s.y >= surface - 4.0) {
+    const surface = world.rampSurfaceAt(scratchRamps, s.x, s.z, Math.max(startY, s.y) + reach);
+    if (surface > -Infinity && s.y <= surface + reach && Math.max(startY, s.y) >= surface - reach) {
       if (s.vy <= 0.001) {
         if (!s.grounded && s.vy < 0) s.lastLandingSpeed = Math.abs(s.vy);
         s.y = surface;

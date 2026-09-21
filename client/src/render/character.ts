@@ -1,3 +1,4 @@
+import { W_PICKAXE, W_SHOTGUN, W_SNIPER, W_SMG } from "@shared/weapons";
 import * as THREE from "three";
 import { PLAYER_HEIGHT } from "@shared/constants";
 import { skinById, type SkinDef } from "@shared/skins";
@@ -23,11 +24,15 @@ export class Character {
   private torso: THREE.Mesh;
   private head: THREE.Group;
   private gun: THREE.Mesh;
+  private pickaxe = new THREE.Group();
+  private weaponId = -1;
   private nameplate: THREE.Sprite;
   private nameCanvas: HTMLCanvasElement;
   private nameTexture: THREE.CanvasTexture;
 
   private phase = 0;
+  private kick = 0;
+  private muzzle: THREE.Mesh;
   private lastName = "";
   private lastHpPct = -1;
   private materials: THREE.MeshLambertMaterial[] = [];
@@ -49,7 +54,7 @@ export class Character {
     this.legR.position.set(0.13, LEG_H, 0);
 
     // --- torso ---
-    this.torso = new THREE.Mesh(new THREE.BoxGeometry(0.5, TORSO_H, 0.29), matPrimary);
+    this.torso = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.22, TORSO_H, 6), matPrimary);
     this.torso.position.set(0, LEG_H + TORSO_H / 2, 0);
 
     // --- arms: pivot at the shoulder ---
@@ -61,10 +66,10 @@ export class Character {
     // --- head, grouped so it can pitch with the view ---
     this.head = new THREE.Group();
     this.head.position.set(0, LEG_H + TORSO_H, 0);
-    const skull = new THREE.Mesh(new THREE.BoxGeometry(0.34, HEAD_H, 0.34), matSkin);
+    const skull = new THREE.Mesh(new THREE.IcosahedronGeometry(0.215, 1), matSkin);
     skull.position.y = HEAD_H / 2 + 0.02;
-    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.345, 0.1, 0.345), matVisor);
-    visor.position.set(0, HEAD_H / 2 + 0.06, 0.005);
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.09, 0.12), matVisor);
+    visor.position.set(0, HEAD_H / 2 + 0.06, 0.17);
     this.head.add(skull, visor);
 
     // --- held weapon, a simple silhouette in the right hand ---
@@ -72,7 +77,18 @@ export class Character {
       new THREE.BoxGeometry(0.1, 0.13, 0.62),
       new THREE.MeshLambertMaterial({ color: 0x2a2f38 }),
     );
-    this.gun.position.set(0.32, LEG_H + TORSO_H - 0.18, 0.3);
+    this.gun.position.set(-0.28, LEG_H + TORSO_H - 0.18, 0.3);
+
+    const handle=new THREE.Mesh(new THREE.CylinderGeometry(.025,.025,.75,6),matSecondary);
+    const blade=new THREE.Mesh(new THREE.BoxGeometry(.58,.09,.12),matAccent);
+    blade.position.y=.31;blade.rotation.z=-.15;
+    this.pickaxe.add(handle,blade);this.pickaxe.position.set(-.3,1.1,.4);
+    this.root.add(this.pickaxe);
+    this.muzzle = new THREE.Mesh(new THREE.ConeGeometry(.09,.22,5),new THREE.MeshBasicMaterial({color:0xffe89a}));
+    this.muzzle.rotation.x = Math.PI/2;
+    this.muzzle.position.z = .42;
+    this.muzzle.visible = false;
+    this.gun.add(this.muzzle);
 
     for (const m of [this.legL, this.legR, this.torso, this.armL, this.armR, this.gun]) {
       m.castShadow = true;
@@ -102,6 +118,19 @@ export class Character {
     this.setNameplate(name, 255);
   }
 
+  setWeapon(id:number):void {
+    this.weaponId=id;
+    this.pickaxe.visible=id===W_PICKAXE;
+    this.gun.visible=id!==255&&id!==W_PICKAXE;
+    this.gun.scale.set(id===W_PICKAXE?1.5:1,id===W_PICKAXE?.5:1,id===W_SNIPER?1.5:id===W_SMG?.65:id===W_SHOTGUN?1.15:1);
+  }
+  fire():void { this.kick=this.weaponId===W_PICKAXE?.35:.09; }
+  aimAt(worldPoint:THREE.Vector3):void {
+    if(!this.gun.visible)return;
+    this.root.updateMatrixWorld(true);
+    const local=this.root.worldToLocal(worldPoint.clone()).sub(this.gun.position).normalize();
+    this.gun.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),local);
+  }
   setSkin(skinId: string): void {
     const skin: SkinDef = skinById(skinId);
     this.materials[0].color.setHex(skin.colors.primary);
@@ -154,10 +183,14 @@ export class Character {
   ): void {
     this.root.position.set(x, y, z);
     // The model faces +Z at yaw 0, matching forwardVector in shared/vec.ts.
-    this.root.rotation.y = yaw;
+    this.root.rotation.y = -yaw;
 
     this.head.rotation.x = -pitch * 0.55;
-    this.gun.rotation.x = -pitch * 0.85;
+    this.kick = Math.max(0,this.kick-dt);
+    this.muzzle.visible = this.weaponId!==W_PICKAXE&&this.kick>.045;
+    this.pickaxe.rotation.x=-pitch+(this.kick>0?Math.sin((.35-this.kick)/.35*Math.PI)*1.6:0);
+    this.gun.rotation.x = -pitch - this.kick*1.2;
+    this.gun.position.z = .3-this.kick;
 
     const moving = speed > 0.6;
     if (moving && grounded) {
@@ -170,8 +203,8 @@ export class Character {
     const swing = moving && grounded ? Math.sin(this.phase) * Math.min(0.85, speed * 0.13) : 0;
     this.legL.rotation.x = swing;
     this.legR.rotation.x = -swing;
-    this.armL.rotation.x = -swing * 0.7;
-    this.armR.rotation.x = swing * 0.35;
+    this.armL.rotation.x = -1.05-pitch*.8-swing*.1;
+    this.armR.rotation.x = -.8-pitch*.8+swing*.1;
 
     if (!grounded) {
       // Tuck in the air so a jump is legible from across the map.
@@ -200,7 +233,7 @@ export class Character {
 function pivotBox(
   w: number, h: number, d: number, material: THREE.Material,
 ): THREE.Mesh {
-  const geo = new THREE.BoxGeometry(w, h, d);
+  const geo = new THREE.CylinderGeometry(w * 0.55, w * 0.45, h, 6);
   geo.translate(0, -h / 2, 0);
   return new THREE.Mesh(geo, material);
 }

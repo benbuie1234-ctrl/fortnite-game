@@ -26,6 +26,7 @@ export interface ClientSelf extends MovementState {
   ammo: number;
   buildSlot: number;
   material: number;
+  reloadMs: number;
   alive: boolean;
 }
 
@@ -105,7 +106,7 @@ export class Connection {
     x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
     yaw: 0, pitch: 0, grounded: false, lastLandingSpeed: 0,
     hp: 100, shield: 0, mats: 0, weapon: 0, ammo: 0,
-    buildSlot: -1, material: 0, alive: true,
+    buildSlot: -1, material: 0, reloadMs: 0, alive: true,
   };
 
   selfId = -1;
@@ -125,16 +126,23 @@ export class Connection {
   }
 
   connect(url: string): void {
+    this.disconnect();
+    this.pending.length=0; this.unsent.length=0; this.others.clear();
+    this.world.clear(); buildArena(this.world);
+    this.clockInitialised=false; this.snapshotCount=0;
+    this.self.vx=0;this.self.vy=0;this.self.vz=0;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
-    ws.addEventListener("message", (ev) => this.onMessage(ev.data));
+    ws.addEventListener("message", (ev) => { if(this.ws===ws) this.onMessage(ev.data); });
     ws.addEventListener("close", (ev) => {
+      if(this.ws!==ws)return;
       this.stopPing();
       this.handlers.onClose(ev.reason || "connection closed");
     });
     ws.addEventListener("error", () => {
+      if(this.ws!==ws)return;
       this.handlers.onClose("could not reach the server");
     });
     ws.addEventListener("open", () => this.startPing());
@@ -244,6 +252,8 @@ export class Connection {
     switch (msg.t) {
       case S_WELCOME:
         this.selfId = msg.id as number;
+        this.self.x = Number(msg.x); this.self.y = Number(msg.y); this.self.z = Number(msg.z);
+        this.self.yaw = Number(msg.yaw);
         this.handlers.onWelcome(msg.id as number, msg.name as string);
         break;
       case S_MATCH:
@@ -294,6 +304,8 @@ export class Connection {
 
     if (!this.clockInitialised) this.syncClock(snap.serverTimeMs + this.rttMs / 2);
 
+    this.applyWorldEvents(snap.events);
+
     // --- reconcile the local player -----------------------------------------
     const s = this.self;
     s.hp = snap.self.hp;
@@ -303,6 +315,7 @@ export class Connection {
     s.ammo = snap.self.ammo;
     s.buildSlot = snap.self.buildSlot;
     s.material = snap.self.material;
+    s.reloadMs = snap.self.reloadMs;
     s.alive = (snap.self.flags & PF_ALIVE) !== 0;
 
     // Snap to authority, then replay everything the server has not seen yet.
@@ -332,7 +345,6 @@ export class Connection {
     }
 
     // --- world events --------------------------------------------------------
-    this.applyWorldEvents(snap.events);
     this.handlers.onEvents(snap.events);
   }
 

@@ -107,7 +107,7 @@ export class Sound {
   /** Update where the player is hearing from. `yaw` matches the game's convention. */
   setListener(x: number, y: number, z: number, yaw: number): void {
     // rightVector(yaw) from shared/vec, inlined to avoid a per-frame import cost.
-    this.listener = { x, y, z, rx: Math.cos(yaw), rz: Math.sin(yaw) };
+    this.listener = { x, y, z, rx: -Math.cos(yaw), rz: -Math.sin(yaw) };
   }
 
   // -------------------------------------------------------------------------

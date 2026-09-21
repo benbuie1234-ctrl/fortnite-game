@@ -8,7 +8,7 @@ export function forwardVector(yaw: number, pitch: number): [number, number, numb
 }
 
 export function rightVector(yaw: number): [number, number, number] {
-  return [Math.cos(yaw), 0, Math.sin(yaw)];
+  return [-Math.cos(yaw), 0, -Math.sin(yaw)];
 }
 
 /** Which cardinal direction a yaw is facing: 0=+X, 1=+Z, 2=-X, 3=-Z. */

@@ -8,8 +8,8 @@ import { World } from "./world";
 export const ARENA_OWNER = 255;
 const ARENA_HP = Number.POSITIVE_INFINITY;
 
-export const ARENA_HALF_TILES = 7;   // 15x15 tiles of playable floor
-export const ARENA_WALL_HEIGHT = 5;  // tiles
+export const ARENA_HALF_TILES = 12;   // 15x15 tiles of playable floor
+export const ARENA_WALL_HEIGHT = 2;  // tiles
 
 export function isArenaPiece(p: Piece): boolean {
   return p.ownerId === ARENA_OWNER;
@@ -56,6 +56,18 @@ export function buildArena(world: World, _seed = 1): void {
   }
   place(world, -2, 0, 0, SLOT_RAMP, 0); // rises toward +X
   place(world, 2, 0, 0, SLOT_RAMP, 2);  // rises toward -X
+
+  // Four raised side platforms with accessible ramp approaches.
+  for (const [cx,cz] of [[-7,0],[7,0],[0,-7],[0,7]]) {
+    for(let dx=-1;dx<=1;dx++)for(let dz=-1;dz<=1;dz++)place(world,cx+dx,1,cz+dz,SLOT_FLOOR);
+    place(world,cx-2,0,cz,SLOT_RAMP,0);
+    place(world,cx+2,0,cz,SLOT_RAMP,2);
+  }
+  // Low cover along outer lanes leaves sightlines between landmarks.
+  for(const g of [-9,-5,5,9]) {
+    place(world,g,0,-9,SLOT_WALL_Z); place(world,g,0,9,SLOT_WALL_Z);
+    place(world,-9,0,g,SLOT_WALL_X); place(world,9,0,g,SLOT_WALL_X);
+  }
 
   // Four corner cover blocks: a wall pair each, so there is something to
   // fight around before anyone starts building.

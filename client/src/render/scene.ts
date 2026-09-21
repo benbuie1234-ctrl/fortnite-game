@@ -21,7 +21,7 @@ export function createRenderer(mount: HTMLElement): Renderer {
   });
   // Cap at 2: school laptops with high-DPI screens will otherwise render 4x
   // the pixels for no visible gain.
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -98,6 +98,35 @@ export function createRenderer(mount: HTMLElement): Renderer {
   skirt.rotation.x = -Math.PI / 2;
   skirt.position.y = -0.4;
   scene.add(skirt);
+
+  // Ground markings distinguish four routes without introducing collision obstacles.
+  const laneMaterial=new THREE.MeshLambertMaterial({color:0xc5b18a});
+  for(const angle of [0,Math.PI/2]) {
+    const lane=new THREE.Mesh(new THREE.PlaneGeometry(5,groundSize-5),laneMaterial);
+    lane.rotation.set(-Math.PI/2,0,angle);lane.position.y=.025;lane.receiveShadow=true;scene.add(lane);
+  }
+  for(const [x,z,color] of [[-21,0,0x38b8e5],[21,0,0xf2ad52],[0,-21,0x8f78d8],[0,21,0x65c890]]) {
+    const pad=new THREE.Mesh(new THREE.RingGeometry(5,6,32),new THREE.MeshBasicMaterial({color,side:THREE.DoubleSide}));
+    pad.rotation.x=-Math.PI/2;pad.position.set(x,.035,z);scene.add(pad);
+  }
+  // Stylized clouds stay above the arena and share geometry/material.
+  const cloudGeo=new THREE.IcosahedronGeometry(1,1);
+  const cloudMat=new THREE.MeshLambertMaterial({color:0xf3f8ff});
+  for(let i=0;i<10;i++) {
+    const cloud=new THREE.Mesh(cloudGeo,cloudMat);
+    cloud.position.set(Math.cos(i*2.4)*90,30+(i%3)*5,Math.sin(i*2.4)*90);
+    cloud.scale.set(10+i%4,2,5);scene.add(cloud);
+  }
+
+  // Low-poly landscape beyond the collision arena provides a readable skyline.
+  const hillMaterial = new THREE.MeshLambertMaterial({ color: 0x507c88, flatShading: true });
+  for (let i = 0; i < 18; i++) {
+    const angle = i * Math.PI * 2 / 18;
+    const hill = new THREE.Mesh(new THREE.ConeGeometry(17 + (i % 4) * 5, 18 + (i % 3) * 9, 5), hillMaterial);
+    hill.position.set(Math.cos(angle) * 108, 3, Math.sin(angle) * 108);
+    hill.rotation.y = angle;
+    scene.add(hill);
+  }
 
   function resize(): void {
     camera.aspect = window.innerWidth / window.innerHeight;

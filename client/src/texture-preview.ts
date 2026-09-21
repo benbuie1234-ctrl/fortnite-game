@@ -98,6 +98,9 @@ const centre = new THREE.Vector3(9, 1.5, 3);
 let angle = 0.6;
 function loop(): void {
   requestAnimationFrame(loop);
+  // This page used to spin and redraw forever, heating the machine even while
+  // nobody was looking at it. Skip the work whenever the tab is hidden.
+  if (document.hidden) return;
   angle += 0.0035;
   const r = 24;
   camera.position.set(

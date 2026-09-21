@@ -4,7 +4,7 @@ import {
 } from "@shared/sim";
 import { quantizeYaw, quantizePitch } from "@shared/protocol";
 
-const PITCH_LIMIT = Math.PI / 2 - 0.02;
+const PITCH_LIMIT = Math.PI * 0.44;
 
 /** Build slots, matching the server's `slot` field encoding. */
 const SLOT_WALL = 5;
@@ -73,7 +73,7 @@ export class Controls {
 
     document.addEventListener("mousemove", (e) => {
       if (!this.locked) return;
-      this.yaw -= e.movementX * this.sensitivity;
+      this.yaw += e.movementX * this.sensitivity;
       this.pitch -= e.movementY * this.sensitivity;
       this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch));
       // Keep yaw in range so quantisation stays lossless across long sessions.

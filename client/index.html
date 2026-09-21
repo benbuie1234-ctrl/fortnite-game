@@ -72,6 +72,14 @@
   }
   input[type=text]:focus { outline: none; border-color: var(--accent-2); }
 
+  select {
+    width: 100%; padding: 10px 12px; margin-bottom: 16px;
+    background: #0f131c; color: var(--text);
+    border: 1px solid var(--line); border-radius: 9px;
+    font-size: 14px; font-family: inherit;
+  }
+  select:focus { outline: none; border-color: var(--accent-2); }
+
   button {
     width: 100%; padding: 12px; border: 0; border-radius: 9px;
     font-size: 14px; font-weight: 650; font-family: inherit;
@@ -212,6 +220,38 @@
 
   #buildPreview { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%);
     font-size: 12px; color: var(--accent); font-weight: 600; }
+
+:root { --accent:#d9ff55; --accent-2:#6cceff; --muted:#b4c4d9; }
+#menu { background: radial-gradient(ellipse at 18% 25%,#246cad 0,transparent 55%),linear-gradient(130deg,#102547,#081529 75%); overflow:auto; padding:24px; }
+#menu::before { content:"BUILD / BATTLE / REPEAT"; position:absolute; top:6%; left:6%; font-size:12px; letter-spacing:5px; color:#93c9ed; }
+.card { width:min(460px,100%); background:#102441eb; border:1px solid #527aa855; border-radius:20px; padding:32px; box-shadow:0 30px 100px #0006; }
+.logo {font-size:64px;font-weight:950;font-style:italic;letter-spacing:-4px;line-height:1.1;}
+.tagline {letter-spacing:2px;font-size:11px;margin:12px 0 26px;color:#b8d9ef;}
+.primary {font-size:19px;font-weight:900;padding:16px; border-radius:6px;}
+.secondary {background:#234568;} #createBtn {margin-bottom:22px;}
+input[type=text] {background:#081a30;border-color:#3a597a;color:white;}
+summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#163653;color:white;padding:6px;margin-bottom:10px;border:1px solid #527aa8;} input[type=range] {width:100%;margin-bottom:10px;}
+.vitals {width:220px;left:24px;bottom:30px;filter:drop-shadow(0 2px 5px #0008);}
+.vital-label {display:flex;justify-content:space-between;font-size:10px;letter-spacing:1px;margin:6px 0 3px;font-weight:800;} .vital-label b {font-size:13px;}
+.bar {height:10px;border:0;border-radius:2px;}
+.slots {gap:5px;bottom:24px;} .slot {width:58px;height:65px;border-radius:5px;background:linear-gradient(#284c6ddd,#12283ee8);border:1px solid #93c8ed55;color:#e1edf7;position:relative;}
+.slot.active {background:linear-gradient(#658852,#314b36);border:2px solid var(--accent);box-shadow:0 0 14px #d9ff5522;transform:translateY(-4px);}
+.slot .ico {height:25px;} .ico svg {width:39px;height:27px;} .slot .k {position:absolute;top:3px;left:5px;font-size:9px;color:white;} .slot .ico {margin-top:8px;}
+#buildSlots {position:absolute;right:24px;bottom:99px;display:flex;gap:5px;} #buildSlots .slot {width:43px;height:47px;font-size:9px;} #buildSlots .ico {font-size:20px;height:20px;margin-top:3px;} #buildSlots .k {font-size:8px;}
+.mats {right:219px;bottom:99px;gap:4px;} .mat {min-width:35px;padding:5px;font-size:12px;border-radius:4px;} .mat small {font-size:8px;}
+#ammo {bottom:160px;font-size:32px;} #ammo small {color:#dfebf7;}
+#score {max-width:70%;flex-wrap:wrap;justify-content:center;border:0;border-radius:4px;font-size:11px;background:#10243de0;} #score .p b {font-size:18px;}
+#killfeed {top:82px;font-size:11px;max-width:45%;} #netstat {display:none;top:65px;} #roomBadge {position:absolute;top:24px;left:24px;font-size:11px;letter-spacing:1px;color:#def3ff;} #helpBadge {position:absolute;left:24px;bottom:155px;font-size:10px;color:#d4e5ef;text-shadow:0 1px 4px black;}
+#buildPreview {bottom:190px;background:#10243dbb;padding:5px 10px;border-radius:4px;} #centerMsg .sub {color:#eef5ff;}
+@media(max-width:700px) {.vitals {bottom:185px;width:170px;left:16px;} #helpBadge{display:none;} #score{top:52px;max-width:94%;width:max-content;} #roomBadge{left:16px;top:16px;} #killfeed{top:110px;} .slots,#buildSlots,.mats,#ammo{right:16px;} .mats{right:211px;} .card{padding:24px;} #menu::before{display:none;} }
+@media(max-height:650px) {#menu{align-items:flex-start;} .logo{font-size:44px;} .card{padding:20px;} .tagline{margin:6px 0 14px;} }
+
+
+.damage-number {position:absolute;left:52%;top:44%;font-size:30px;font-weight:900;text-shadow:0 2px 4px #10243d;animation:damage-rise .7s ease-out forwards;}
+@keyframes damage-rise {to {transform:translateY(-45px);opacity:0;}}
+#crosshair.shotgun {border:2px solid #fff9;border-radius:50%;} #crosshair.shotgun::before,#crosshair.shotgun::after {display:none;}
+#structureHealth {display:none;position:absolute;left:50%;top:57%;transform:translateX(-50%);width:190px;text-align:center;font-size:11px;font-weight:800;text-shadow:0 1px 3px black;}
+#structureHealth .bar {margin-top:6px;height:7px;} #structureFill {background:#ffd653;}
 </style>
 </head>
 <body>
@@ -221,7 +261,7 @@
     <div id="netstat"></div>
     <div id="score"></div>
     <div id="killfeed"></div>
-    <div id="crosshair"></div>
+    <div id="crosshair"></div><div id="structureHealth"><div id="structureLabel"></div><div class="bar"><i id="structureFill"></i></div></div>
     <div id="hitmarker">
       <svg viewBox="0 0 26 26" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round">
         <path d="M6 6 L10 10 M20 6 L16 10 M6 20 L10 16 M20 20 L16 16"/>
@@ -232,8 +272,8 @@
     <div id="buildPreview"></div>
 
     <div class="vitals">
-      <div class="bar"><i id="shieldFill" style="width:0%"></i></div>
-      <div class="bar"><i id="hpFill" style="width:100%"></i></div>
+      <div class="vital-label">SHIELD <b id="shieldValue">0</b></div><div class="bar"><i id="shieldFill" style="width:0%"></i></div>
+      <div class="vital-label">HEALTH <b id="hpValue">100</b></div><div class="bar"><i id="hpFill" style="width:100%"></i></div>
     </div>
 
     <div id="ammo"></div>
@@ -244,34 +284,42 @@
       <div class="mat" id="matMetalBox"><span id="matMetal">0</span><small>METAL</small></div>
     </div>
 
-    <div class="slots" id="slots"></div>
+    <div class="slots" id="slots"></div><div id="buildSlots"></div><div id="roomBadge"></div><div id="helpBadge">G Reload · M Sound · Esc Release mouse</div>
   </div>
 
   <div id="menu">
     <div class="card">
       <div class="logo">CL<span>U</span>TCH</div>
-      <div class="tagline">Build. Fight. Clutch up.</div>
+      <div class="tagline">YOUR FRIENDS. YOUR ARENA.</div>
 
       <label for="nameInput">Your name</label>
       <input id="nameInput" type="text" maxlength="16" placeholder="Player" autocomplete="off" />
 
-      <button class="primary" id="playBtn">Quick Play</button>
+      <button class="primary" id="playBtn">PLAY NOW →</button><button class="secondary" id="createBtn">Create a room for friends</button>
 
-      <label for="codeInput" style="margin-top:6px">Or join a private room</label>
+      <label for="codeInput" style="margin-top:6px">Have a code? Join your friends</label>
       <div class="row">
         <input id="codeInput" type="text" maxlength="12" placeholder="ROOM CODE" autocomplete="off" />
         <button class="secondary" id="joinBtn">Join</button>
       </div>
 
+      <label for="fpsSelect" style="margin-top:6px">Frame rate limit</label>
+      <select id="fpsSelect">
+        <option value="30">30 fps — save battery</option>
+        <option value="60">60 fps — recommended</option>
+        <option value="120">120 fps — high refresh displays</option>
+        <option value="0">Uncapped</option>
+      </select>
+
       <div class="status" id="status"></div>
 
-      <div class="hint">
-        <b>WASD</b> move &nbsp;·&nbsp; <b>Space</b> jump<br/>
+      <details class="hint"><summary>Controls & settings</summary><label for="sensitivity">Mouse sensitivity</label><input id="sensitivity" type="range" min="0.0005" max="0.005" step="0.0001" value="0.0022"><label for="volume">Sound volume</label><input id="volume" type="range" min="0" max="1" step="0.05" value="0.6"><label for="quality">Graphics</label><select id="quality"><option value="balanced">Balanced</option><option value="low">Low — faster</option><option value="high">High</option></select><label><input id="statsToggle" type="checkbox"> Show performance stats</label>
+        <b>WASD</b> move &nbsp;·&nbsp; <b>Space</b> jump / hold near a ledge to climb<br/>
         <b>Left click</b> shoot / place &nbsp;·&nbsp; <b>Right click</b> aim<br/>
         <b>1-5</b> weapons &nbsp;·&nbsp; <b>Q E R F</b> wall, floor, ramp, cone<br/>
         <b>Z X C</b> wood, brick, metal &nbsp;·&nbsp; <b>G</b> reload<br/>
         <b>M</b> mute &nbsp;·&nbsp; <b>Esc</b> release mouse
-      </div>
+      </details>
     </div>
   </div>
 

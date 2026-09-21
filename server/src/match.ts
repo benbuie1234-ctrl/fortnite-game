@@ -152,6 +152,7 @@ export class MatchRoom implements DurableObject {
       tickHz: TICK_HZ,
       serverTimeMs: Date.now(),
       loadout: ARENA_LOADOUT,
+      x: player.x, y: player.y, z: player.z, yaw: player.yaw,
     }));
   }
 
@@ -338,6 +339,7 @@ export class MatchRoom implements DurableObject {
 
   private applySlot(player: ServerPlayer, slot: number): void {
     if (slot >= 0 && slot <= 4) {
+      if (player.weaponIdx !== slot) player.reloadEndAt = 0;
       player.weaponIdx = slot;
       player.buildSlot = -1;
     } else if (slot >= 5 && slot <= 8) {
@@ -429,6 +431,7 @@ export class MatchRoom implements DurableObject {
           weapon: me.weaponId, ammo: me.ammo[me.weaponIdx],
           buildSlot: me.buildSlot < 0 ? 0 : me.buildSlot,
           material: me.material,
+          reloadMs: Math.max(0, me.reloadEndAt * 1000 - nowMs),
         },
         others,
         events: this.events,

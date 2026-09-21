@@ -12,6 +12,7 @@ import {
 import type { GameEvent } from "@shared/snapshot";
 import { ServerPlayer, hitBoxes } from "./player";
 import { resolvePlacement } from "@shared/placement";
+import { cameraPose } from "@shared/camera";
 import { ARENA_OWNER } from "@shared/arena";
 
 /**
@@ -48,7 +49,25 @@ export function resolveFire(
   const ox = shooter.x;
   const oy = shooter.y + EYE_HEIGHT;
   const oz = shooter.z;
-  const baseDir = forwardVector(shooter.yaw, shooter.pitch);
+  let baseDir = forwardVector(shooter.yaw, shooter.pitch);
+  if (weapon.id !== W_PICKAXE) {
+    const camera = cameraPose(shooter, shooter.aiming, world, nowSec);
+    const [cx,cy,cz] = camera.origin;
+    const [fx,fy,fz] = camera.forward;
+    let aimDistance = world.raycast(cx,cy,cz,fx,fy,fz,weapon.range,nowSec)?.t ?? weapon.range;
+    for (const target of players) {
+      if (target.id === shooter.id || !target.alive) continue;
+      const pos = target.positionAt(rewindTo);
+      const boxes = hitBoxes(pos.x,pos.y,pos.z);
+      for (const box of [boxes.head,boxes.body]) {
+        const hit=rayVsBox(box,cx,cy,cz,fx,fy,fz);
+        if(hit && hit.t<aimDistance) aimDistance=hit.t;
+      }
+    }
+    const delta:[number,number,number]=[cx+fx*aimDistance-ox,cy+fy*aimDistance-oy,cz+fz*aimDistance-oz];
+    const length=Math.hypot(...delta);
+    if(length>0.001) baseDir=delta.map(v=>v/length) as [number,number,number];
+  }
   const spread = shooter.aiming ? weapon.spreadAds : weapon.spreadHip;
 
   for (let pellet = 0; pellet < weapon.pellets; pellet++) {
@@ -175,7 +194,7 @@ export function tryPlace(
   const matDef = MATERIALS[p.material] ?? MATERIALS[0];
   if (p.mats < matDef.cost) return false;
 
-  const target = resolvePlacement(p);
+  const target = resolvePlacement(p, world);
   if (!target) return false;
   const { gx, gy, gz, slot, facing } = target;
 

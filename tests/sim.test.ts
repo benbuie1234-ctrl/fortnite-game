@@ -42,7 +42,7 @@ console.log("walls block movement");
   // Wall on the -X face of cell (1,0,0), i.e. the plane x = 3.
   world.set(makePiece(1, 0, 0, SLOT_WALL_X, 0, 0, 1, 0));
   const p = newPlayer(1.5, 0, 1.5);
-  run(p, world, input(1, 0), 120);
+  run(p, world, input(-1, 0), 120);
 
   const limit = TILE - PIECE_THICKNESS / 2 - PLAYER_RADIUS;
   check("stops before the wall", p.x <= limit + 1e-3, `x=${p.x} limit=${limit}`);
@@ -72,14 +72,14 @@ console.log("ramps are walkable");
   // Only 12 ticks: at 7 m/s the player crosses the whole 3 m ramp in well
   // under half a second, and running off the top is a different behaviour
   // than climbing it.
-  run(p, world, input(1, 0), 12);
+  run(p, world, input(-1, 0), 12);
   check("gains height climbing the ramp", p.y > startY + 1.0, `y=${p.y}`);
   check("still inside the ramp footprint", p.x <= TILE, `x=${p.x}`);
   check("tracks the slope surface", Math.abs(p.y - p.x) < 0.05, `x=${p.x} y=${p.y}`);
   check("grounded while climbing", p.grounded === true);
 
   // Running off the top should become a normal fall, not a teleport.
-  run(p, world, input(1, 0), 48);
+  run(p, world, input(-1, 0), 48);
   check("falls back to the floor past the ramp", Math.abs(p.y) < 1e-3, `y=${p.y}`);
 }
 
@@ -97,7 +97,7 @@ console.log("determinism (required for client prediction)");
   };
   const cmds: InputCommand[] = [
     input(1, 1, 1), input(0, 1), input(-1, 1), input(-1, 0),
-    input(0, -1), input(1, -1, 1), input(0, 0), input(1, 0),
+    input(0, -1), input(1, -1, 1), input(0, 0), input(-1, 0),
   ];
 
   const a = newPlayer(0.4, 2.5, 1.1);

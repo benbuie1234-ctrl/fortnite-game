@@ -1,12 +1,12 @@
+import { cameraPose } from "@shared/camera";
 import * as THREE from "three";
 import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE } from "@shared/constants";
-import { forwardVector, rightVector } from "@shared/vec";
 import { resolvePlacement } from "@shared/placement";
 import { packKey, unpackKey } from "@shared/build";
-import { weaponById, ARENA_LOADOUT, W_SNIPER } from "@shared/weapons";
+import { weaponById, ARENA_LOADOUT, W_SNIPER, W_PICKAXE } from "@shared/weapons";
 import { SKINS } from "@shared/skins";
 import {
-  EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
+  EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
   PF_ALIVE, PF_GROUNDED,
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
@@ -18,6 +18,7 @@ import { Effects } from "./render/effects";
 import { Controls } from "./input/controls";
 import { Connection, type MatchPlayerInfo } from "./net/connection";
 import { Hud } from "./ui/hud";
+import { FrameLimiter, type FpsTarget } from "./render/framelimiter";
 import { Sound } from "./audio/sound";
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,9 @@ const nameInput = document.getElementById("nameInput") as HTMLInputElement;
 const codeInput = document.getElementById("codeInput") as HTMLInputElement;
 const playBtn = document.getElementById("playBtn") as HTMLButtonElement;
 const joinBtn = document.getElementById("joinBtn") as HTMLButtonElement;
+// Cast through unknown: the Workers type definitions in this project shadow
+// part of the DOM lib, so the direct assertion is rejected.
+const fpsSelect = document.getElementById("fpsSelect") as unknown as HTMLSelectElement;
 
 const view = createRenderer(app);
 const hud = new Hud();
@@ -38,6 +42,7 @@ const pieces = new PieceRenderer(view.scene, view.maxAnisotropy);
 const ghost = new BuildGhost(view.scene);
 const effects = new Effects(view.scene);
 const sound = new Sound();
+const limiter = new FrameLimiter();
 
 const characters = new Map<number, Character>();
 let selfCharacter: Character | null = null;
@@ -45,8 +50,15 @@ let matchPlayers: MatchPlayerInfo[] = [];
 let scoreTarget = 5;
 let playing = false;
 let respawnAtMs = 0;
+const renderSelf={x:0,y:0,z:0};
+let renderReady=false;
 
 nameInput.value = localStorage.getItem("clutch.name") ?? "";
+
+fpsSelect.value = String(limiter.fpsTarget);
+fpsSelect.addEventListener("change", () => {
+  limiter.setTarget(Number(fpsSelect.value) as FpsTarget);
+});
 
 const conn = new Connection({
   onWelcome(id, name) {
@@ -95,6 +107,8 @@ let connectAttempt = 0;
 function startConnect(room: string): void {
   // Must happen inside the click handler: browsers refuse to start an
   // AudioContext outside a user gesture, and it would stay muted forever.
+  if (playBtn.disabled) return;
+  document.getElementById("roomBadge")!.textContent = room ? `PRIVATE ROOM · ${room}` : "CLUTCH · PUBLIC ARENA";
   sound.init();
   const name = (nameInput.value || "Player").slice(0, 16);
   statusEl.className = "status";
@@ -117,13 +131,47 @@ function startConnect(room: string): void {
 }
 
 playBtn.addEventListener("click", () => startConnect(""));
-joinBtn.addEventListener("click", () => startConnect(codeInput.value.trim().toUpperCase()));
+function joinRoom(): void {
+  const code = codeInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (!code) { statusEl.textContent = "Enter your friend’s room code first."; return; }
+  startConnect(code);
+}
+joinBtn.addEventListener("click", joinRoom);
+document.getElementById("createBtn")!.addEventListener("click", () => {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  const code = Array.from(bytes, b => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 32]).join("");
+  codeInput.value = code;
+  startConnect(code);
+});
+const sensitivity = document.getElementById("sensitivity") as HTMLInputElement;
+sensitivity.value = localStorage.getItem("clutch.sensitivity") ?? "0.0022";
+controls.sensitivity = Number(sensitivity.value);
+sensitivity.addEventListener("input", () => {
+  controls.sensitivity = Number(sensitivity.value);
+  localStorage.setItem("clutch.sensitivity", sensitivity.value);
+});
+document.getElementById("statsToggle")!.addEventListener("change", e => {
+  document.getElementById("netstat")!.style.display = (e.target as HTMLInputElement).checked ? "block" : "none";
+});
+document.getElementById("quality")!.addEventListener("change", e => {
+  const quality = (e.target as HTMLSelectElement).value;
+  view.renderer.setPixelRatio(Math.min(devicePixelRatio, quality === "low" ? 1 : quality === "high" ? 2 : 1.5));
+  view.renderer.shadowMap.enabled = quality !== "low";
+  view.scene.traverse(o => { if (o instanceof THREE.Mesh) {
+    const materials = Array.isArray(o.material) ? o.material : [o.material];
+    for (const m of materials) m.needsUpdate = true;
+  }});
+  view.resize();
+});
 nameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") startConnect(""); });
 codeInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") startConnect(codeInput.value.trim().toUpperCase());
+  if (e.key === "Enter") joinRoom();
 });
 
 function enterGame(id: number, name: string): void {
+  controls.yaw = conn.self.yaw;
+  controls.pitch = 0;
+  renderReady=false;
   playing = true;
   menu.classList.add("hidden");
   hud.show();
@@ -186,17 +234,21 @@ function handleEvents(events: readonly GameEvent[]): void {
   // A shotgun emits one EV_SHOT per pellet, so nine events describe a single
   // trigger pull. Tracers want all nine; the gunshot must fire exactly once.
   const voiced = new Set<number>();
+  let dealt = 0;
+  let headshot = false;
 
   for (const e of events) {
     switch (e.kind) {
       case EV_SHOT: {
         const sniper = e.weapon === W_SNIPER;
-        effects.spawnTracer(e.ox, e.oy, e.oz, e.ex, e.ey, e.ez, sniper ? 0xbfe6ff : 0xfff0b0);
+        if(e.weapon!==W_PICKAXE) effects.spawnTracer(e.ox, e.oy, e.oz, e.ex, e.ey, e.ez, sniper ? 0xbfe6ff : 0xfff0b0);
         effects.spawnImpact(e.ex, e.ey, e.ez);
 
         const voice = e.shooter * 256 + e.weapon;
         if (!voiced.has(voice)) {
           voiced.add(voice);
+          if(e.shooter===conn.selfId) selfCharacter?.fire();
+          else characters.get(e.shooter)?.fire();
           sound.shot(e.weapon, e.ox, e.oy, e.oz);
         }
         break;
@@ -206,13 +258,20 @@ function handleEvents(events: readonly GameEvent[]): void {
         sound.build((c.gx + 0.5) * TILE, (c.gy + 0.5) * TILE, (c.gz + 0.5) * TILE);
         break;
       }
+      case EV_PIECE_DAMAGE: {
+        pieces.flash(e.key);
+        break;
+      }
       case EV_PIECE_REMOVE: {
         const c = unpackKey(e.key);
+        effects.breakBurst((c.gx+.5)*TILE,(c.gy+.5)*TILE,(c.gz+.5)*TILE);
         sound.destroy((c.gx + 0.5) * TILE, (c.gy + 0.5) * TILE, (c.gz + 0.5) * TILE);
         break;
       }
       case EV_HIT:
         if (e.shooter === conn.selfId) {
+          dealt += e.damage;
+          headshot ||= e.headshot === 1;
           hud.showHitmarker(e.headshot === 1);
           sound.hitmarker(e.headshot === 1);
         }
@@ -242,56 +301,21 @@ function handleEvents(events: readonly GameEvent[]): void {
       default: break;
     }
   }
+  if (dealt) hud.showDamage(dealt, headshot);
 }
 
 // ---------------------------------------------------------------------------
 // Camera
 // ---------------------------------------------------------------------------
 
-const camTarget = new THREE.Vector3();
-let camDistance = 3.4;
-
-function updateCamera(aiming: boolean): void {
-  const s = conn.self;
-  const fwd = forwardVector(controls.yaw, controls.pitch);
-  const right = rightVector(controls.yaw);
-
-  camTarget.set(s.x, s.y + EYE_HEIGHT, s.z);
-
-  const wantDistance = aiming ? 1.9 : 3.4;
-  camDistance += (wantDistance - camDistance) * 0.22;
-  const shoulder = aiming ? 0.42 : 0.62;
-
-  let dx = -fwd[0] * camDistance + right[0] * shoulder;
-  let dy = -fwd[1] * camDistance + 0.18;
-  let dz = -fwd[2] * camDistance + right[2] * shoulder;
-
-  // Pull the camera in if the boom would clip through geometry, so building a
-  // box around yourself does not black out the screen.
-  const len = Math.hypot(dx, dy, dz);
-  if (len > 0.01) {
-    const hit = conn.world.raycast(
-      camTarget.x, camTarget.y, camTarget.z,
-      dx / len, dy / len, dz / len,
-      len + 0.3, Date.now() / 1000,
-    );
-    if (hit) {
-      const allowed = Math.max(0.35, hit.t - 0.25);
-      const scale = allowed / len;
-      dx *= scale; dy *= scale; dz *= scale;
-    }
-  }
-
-  view.camera.position.set(camTarget.x + dx, camTarget.y + dy, camTarget.z + dz);
-  // Orient directly from the input angles rather than lookAt, so the view
-  // matches the ray the server will actually trace.
+function updateCamera(aiming: boolean, dt: number): void {
+  const pose = cameraPose({...conn.self, ...renderSelf, yaw:controls.yaw, pitch:controls.pitch},aiming,conn.world,Date.now()/1000);
+  view.camera.position.set(...pose.origin);
   view.camera.rotation.order = "YXZ";
-  view.camera.rotation.y = controls.yaw + Math.PI;
-  view.camera.rotation.x = controls.pitch;
-  view.camera.rotation.z = 0;
-
-  const weapon = weaponById(ARENA_LOADOUT[controls.slot] ?? 0);
-  view.setFov(aiming && !controls.inBuildMode ? 78 / weapon.adsZoom : 78);
+  view.camera.rotation.set(controls.pitch,Math.PI-controls.yaw,0);
+  const weapon=weaponById(ARENA_LOADOUT[controls.slot]??0);
+  const fov=aiming&&!controls.inBuildMode?78/weapon.adsZoom:78;
+  view.setFov(view.camera.fov+(fov-view.camera.fov)*(1-Math.exp(-18*dt)));
 }
 
 // ---------------------------------------------------------------------------
@@ -329,6 +353,9 @@ function footsteps(id: number, x: number, y: number, z: number, active: boolean)
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
+  // Rendering is capped; the network tick runs on its own timer and is
+  // deliberately unaffected by this.
+  if (!limiter.shouldRender(now)) return;
 
   const dt = Math.min(0.1, (now - lastFrame) / 1000);
   lastFrame = now;
@@ -343,16 +370,24 @@ function frame(now: number): void {
   const self = conn.self;
   const aiming = controls.isLocked && !controls.inBuildMode && controls.aiming;
 
-  updateCamera(aiming);
+  const distance=Math.hypot(self.x-renderSelf.x,self.y-renderSelf.y,self.z-renderSelf.z);
+  const blend=1-Math.exp(-24*dt);
+  if(!renderReady || distance>3) { Object.assign(renderSelf,{x:self.x,y:self.y,z:self.z});renderReady=true; }
+  else { renderSelf.x+=(self.x-renderSelf.x)*blend;renderSelf.y+=(self.y-renderSelf.y)*blend;renderSelf.z+=(self.z-renderSelf.z)*blend; }
+  updateCamera(aiming, dt);
   sound.setListener(self.x, self.y + EYE_HEIGHT, self.z, controls.yaw);
   pieces.sync(conn.world, nowSec);
+  const direction=view.camera.getWorldDirection(new THREE.Vector3());
+  const targetPiece=conn.world.raycast(view.camera.position.x,view.camera.position.y,view.camera.position.z,direction.x,direction.y,direction.z,18,nowSec);
+  hud.setStructure(targetPiece?.piece??null,nowSec);
+  const aimPoint=view.camera.position.clone().addScaledVector(direction,targetPiece?.t??100);
   effects.update(dt);
 
   // --- build ghost ---
   if (controls.inBuildMode && self.alive) {
     const target = resolvePlacement({
-      x: self.x, y: self.y, z: self.z, yaw: controls.yaw, buildSlot: controls.slot,
-    });
+      x: self.x, y: self.y, z: self.z, yaw: controls.yaw, pitch: controls.pitch, buildSlot: controls.slot,
+    }, conn.world);
     if (target) {
       const occupied = conn.world.pieces.has(
         packKey(target.gx, target.gy, target.gz, target.slot),
@@ -380,11 +415,13 @@ function frame(now: number): void {
   // --- local body ---
   if (selfCharacter) {
     selfCharacter.root.visible = self.alive;
+    selfCharacter.setWeapon(controls.inBuildMode?255:ARENA_LOADOUT[controls.slot]);
     selfCharacter.update(
-      self.x, self.y, self.z,
+      renderSelf.x, renderSelf.y, renderSelf.z,
       controls.yaw, controls.pitch,
       Math.hypot(self.vx, self.vz), self.grounded, dt,
     );
+    selfCharacter.aimAt(aimPoint);
     // No nameplate on your own body.
   }
 
@@ -400,6 +437,7 @@ function frame(now: number): void {
     }
     const alive = (pose.state.flags & PF_ALIVE) !== 0;
     ch.root.visible = alive;
+    ch.setWeapon(pose.state.weapon);
     ch.setNameplate(nameOf(pose.id), pose.state.hpPct);
     // Remote speed is not transmitted; derive it from the flag the server sets
     // so the walk cycle still plays.
@@ -421,8 +459,9 @@ function frame(now: number): void {
   hud.setVitals(self.hp, self.shield);
   hud.setMats(self.mats, self.material);
   hud.setSlot(controls.slot, controls.inBuildMode);
+  hud.setReticle(aiming, controls.slot, controls.inBuildMode);
   const weaponIdx = controls.inBuildMode ? 0 : controls.slot;
-  hud.setAmmo(weaponIdx, self.ammo, false);
+  hud.setAmmo(weaponIdx, self.ammo, self.reloadMs > 0);
   hud.setScore(matchPlayers, conn.selfId, scoreTarget);
   hud.setNetStat(conn.rttMs, fps, conn.pendingInputCount);
   if (!self.alive && respawnAtMs > 0) {
@@ -465,3 +504,7 @@ setInterval(() => {
 }, 1000 / TICK_HZ);
 
 requestAnimationFrame(frame);
+
+const volume=document.getElementById("volume") as HTMLInputElement;
+volume.value=localStorage.getItem("clutch.volume")??"0.6";
+volume.addEventListener("input",()=>sound.setVolume(Number(volume.value)));

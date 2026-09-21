@@ -52,6 +52,10 @@ export class Effects {
     }
   }
 
+  breakBurst(x:number,y:number,z:number):void {
+    for(let i=0;i<12;i++) this.spawnImpact(x+(Math.random()-.5)*2,y+(Math.random()-.5)*2,z+(Math.random()-.5)*2);
+  }
+
   spawnTracer(
     ox: number, oy: number, oz: number,
     ex: number, ey: number, ez: number,

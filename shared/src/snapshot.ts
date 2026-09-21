@@ -13,7 +13,7 @@ export interface SelfState {
   flags: number;
   hp: number; shield: number; mats: number;
   weapon: number; ammo: number;
-  buildSlot: number; material: number;
+  buildSlot: number; material: number; reloadMs: number;
 }
 
 /** Everyone else, quantised. They are interpolated, so 3 cm is invisible. */
@@ -62,6 +62,7 @@ export function writeSnapshot(w: Writer, s: Snapshot): void {
   w.u16(Number.isFinite(self.ammo) ? Math.max(0, Math.round(self.ammo)) : 0xffff);
   w.u8(self.buildSlot);
   w.u8(self.material);
+  w.u16(Math.max(0, Math.min(65535, Math.round(self.reloadMs))));
 
   w.u8(s.others.length);
   for (const o of s.others) {
@@ -118,7 +119,7 @@ export function readSnapshot(r: Reader): Snapshot {
     flags: r.u8(),
     hp: r.u16(), shield: r.u16(), mats: r.u16(),
     weapon: r.u8(), ammo: r.u16(),
-    buildSlot: r.u8(), material: r.u8(),
+    buildSlot: r.u8(), material: r.u8(), reloadMs: r.u16(),
   };
   if (self.ammo === 0xffff) self.ammo = Infinity;
 

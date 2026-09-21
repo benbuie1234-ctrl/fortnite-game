@@ -91,7 +91,7 @@ export function makePiece(
   return {
     key: packKey(gx, gy, gz, slot),
     slot, gx, gy, gz, mat, facing,
-    hp: def.maxHp * BUILD_SPAWN_HP_FRACTION,
+    hp: def.maxHp,
     maxHp: def.maxHp,
     placedAt: now,
     ownerId,
@@ -101,7 +101,7 @@ export function makePiece(
 /** Pieces grow in after placement; a fresh wall is weak for a moment. */
 export function currentHp(piece: Piece, now: number): number {
   const def = MATERIALS[piece.mat] ?? MATERIALS[0];
-  const t = Math.min(1, (now - piece.placedAt) / def.buildTime);
+  const t = Math.max(0, Math.min(1, (now - piece.placedAt) / def.buildTime));
   const grown = def.maxHp * (BUILD_SPAWN_HP_FRACTION + (1 - BUILD_SPAWN_HP_FRACTION) * t);
   // hp tracks damage taken, so the effective value is whichever is lower.
   return Math.min(piece.hp, grown);

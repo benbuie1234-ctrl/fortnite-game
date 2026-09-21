@@ -172,6 +172,9 @@ function placeMesh(mesh: THREE.Object3D, piece: {
  */
 export class PieceRenderer {
   private meshes = new Map<number, THREE.Mesh>();
+  private flashes = new Map<number, number>();
+  private flashMaterial=new THREE.MeshLambertMaterial({color:0xffb266});
+  flash(key:number):void { this.flashes.set(key,performance.now()+140); }
   private buckets = new Map<number, number>();
   private group = new THREE.Group();
   private pool: MaterialPool;
@@ -202,19 +205,16 @@ export class PieceRenderer {
 
       if (isArena) continue;
 
-      // Grow-in: a freshly placed piece scales up over its build time, which
-      // is also the window where it is weakest.
-      const def = MATERIALS[piece.mat] ?? MATERIALS[0];
-      const age = nowSec - piece.placedAt;
-      const t = Math.min(1, Math.max(0, age / def.buildTime));
-      mesh.scale.setScalar(0.2 + 0.8 * easeOutCubic(t));
+      // Keep the visible shape aligned with its full-size collision from placement.
+      mesh.scale.setScalar(1);
 
       // Swap to a darker shared material only when the damage bucket changes.
       const hpFrac = Math.max(0, Math.min(1, currentHp(piece, nowSec) / piece.maxHp));
       const bucket = bucketFor(hpFrac);
-      if (this.buckets.get(key) !== bucket) {
+      {
         this.buckets.set(key, bucket);
-        mesh.material = (this.pool.build[piece.mat] ?? this.pool.build[0])[bucket];
+        mesh.material = (this.flashes.get(key)??0)>performance.now()?this.flashMaterial:(this.pool.build[piece.mat] ?? this.pool.build[0])[bucket];
+        if((this.flashes.get(key)??0)<=performance.now())this.flashes.delete(key);
       }
     }
 
@@ -223,14 +223,12 @@ export class PieceRenderer {
       if (world.pieces.has(key)) continue;
       this.group.remove(mesh);
       this.meshes.delete(key);
+      this.flashes.delete(key);
       this.buckets.delete(key);
     }
   }
 }
 
-function easeOutCubic(t: number): number {
-  return 1 - Math.pow(1 - t, 3);
-}
 
 /** Translucent preview of where the current build piece would land. */
 export class BuildGhost {
