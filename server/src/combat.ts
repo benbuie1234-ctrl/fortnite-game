@@ -20,6 +20,78 @@ import { cameraPose } from "@shared/camera";
 import { ARENA_OWNER, treeIndexFromKey } from "@shared/arena";
 
 /**
+ * Pick a target for the aim lock and return the exact launch direction that
+ * puts a round on its head.
+ *
+ * Three things have to be solved together or the shot still misses:
+ *
+ *  - The target has to be the one the SERVER will hit-test, so it is read at
+ *    the lag-compensated time rather than wherever it is right now.
+ *  - Bullet drop has to be cancelled. Past 45 m a round falls away from a
+ *    straight line -- about 1.5 m at 200 m -- so the launch angle is solved by
+ *    firing the real trajectory, measuring where it ends up, and lifting the
+ *    aim by the error. Three passes converge well inside a head.
+ *  - Line of sight has to be checked, because a perfect direction into a wall
+ *    is still a miss. Blocked targets are only chosen if nothing else is
+ *    available, so the lock tracks without ever shooting through cover.
+ */
+function lockOn(
+  world: World,
+  shooter: ServerPlayer,
+  players: readonly ServerPlayer[],
+  rewindTo: number,
+  nowSec: number,
+  weapon: { range: number },
+  ox: number, oy: number, oz: number,
+): [number, number, number] | null {
+  let bestDistance = Infinity;
+  let bestVisible = false;
+  let tx = 0, ty = 0, tz = 0;
+
+  for (const target of players) {
+    if (target.id === shooter.id || !target.alive) continue;
+    const p = target.positionAt(rewindTo);
+    const { head } = hitBoxes(p.x, p.y, p.z, target.crouch);
+    const cx = (head[0] + head[3]) / 2;
+    const cy = (head[1] + head[4]) / 2;
+    const cz = (head[2] + head[5]) / 2;
+
+    const distance = Math.hypot(cx - ox, cy - oy, cz - oz);
+    if (distance > weapon.range) continue;
+
+    const blocked = world.raycast(
+      ox, oy, oz,
+      (cx - ox) / distance, (cy - oy) / distance, (cz - oz) / distance,
+      distance - 0.05, nowSec,
+    );
+    const visible = blocked === null;
+    // A target you can actually shoot always beats a nearer one you cannot.
+    if (bestVisible && !visible) continue;
+    if (visible === bestVisible && distance >= bestDistance) continue;
+
+    bestDistance = distance;
+    bestVisible = visible;
+    tx = cx; ty = cy; tz = cz;
+  }
+  if (bestDistance === Infinity) return null;
+
+  let aimY = ty;
+  for (let pass = 0; pass < 3; pass++) {
+    const dx = tx - ox, dy = aimY - oy, dz = tz - oz;
+    const length = Math.hypot(dx, dy, dz) || 1;
+    // Fly the real trajectory out to the target's range and see where it lands.
+    const end = traceWithDrop(
+      ox, oy, oz, dx / length, dy / length, dz / length, bestDistance, () => null,
+    );
+    aimY += ty - end.y;
+  }
+
+  const dx = tx - ox, dy = aimY - oy, dz = tz - oz;
+  const length = Math.hypot(dx, dy, dz) || 1;
+  return [dx / length, dy / length, dz / length];
+}
+
+/**
  * Resolve one trigger pull. Everything here is authoritative: the client never
  * tells us that it hit something, only that it fired.
  */
@@ -54,7 +126,17 @@ export function resolveFire(
   const oy = shooter.y + eyeHeightFor(shooter.crouch);
   const oz = shooter.z;
   let baseDir = forwardVector(shooter.yaw, shooter.pitch);
-  if (weapon.id !== W_PICKAXE) {
+
+  // The aim lock replaces the whole aiming path, including the camera
+  // correction below: that correction exists to make the crosshair agree with
+  // an over-the-shoulder camera, and a locked shot is already pointed exactly
+  // where it needs to go.
+  const locked = shooter.aimbot && weapon.id !== W_PICKAXE
+    ? lockOn(world, shooter, players, rewindTo, nowSec, weapon, ox, oy, oz)
+    : null;
+
+  if (locked) baseDir = locked;
+  else if (weapon.id !== W_PICKAXE) {
     const camera = cameraPose(shooter, shooter.aiming, world, nowSec, weapon.id===W_SNIPER);
     const [cx,cy,cz] = camera.origin;
     const [fx,fy,fz] = camera.forward;
@@ -73,8 +155,10 @@ export function resolveFire(
     if(length>0.001) baseDir=delta.map(v=>v/length) as [number,number,number];
   }
   // Spread is the weapon's floor plus however much bloom the shooter has
-  // accumulated from moving and firing, so standing still is rewarded.
-  const spread = spreadFor(weapon, shooter.aiming, shooter.bloom);
+  // accumulated from moving and firing, so standing still is rewarded. A
+  // locked shot has none: any cone at all is a chance to miss, which is the
+  // one thing this toggle exists to remove.
+  const spread = locked ? 0 : spreadFor(weapon, shooter.aiming, shooter.bloom);
 
   for (let pellet = 0; pellet < weapon.pellets; pellet++) {
     const dir = applySpread(baseDir, spread, Math.random);

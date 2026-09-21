@@ -12,7 +12,7 @@ import {
 import { writeSnapshot, type GameEvent, type OtherState } from "@shared/snapshot";
 import { World } from "@shared/world";
 import { buildArena, arenaSpawns, isOutOfBounds, ARENA_OWNER } from "@shared/arena";
-import { stepPlayer, fallDamage, BTN_FIRE, BTN_AIM, BTN_RELOAD, BTN_JUMP } from "@shared/sim";
+import { stepPlayer, fallDamage, BTN_FIRE, BTN_AIM, BTN_RELOAD, BTN_JUMP, BTN_AIMBOT } from "@shared/sim";
 import { weaponById, ARENA_LOADOUT, stepBloom, bloomPerShot } from "@shared/weapons";
 import { ServerPlayer } from "./player";
 import { resolveFire, tryPlace, beginReload, finishReloads } from "./combat";
@@ -320,6 +320,7 @@ export class MatchRoom implements DurableObject {
 
       this.applySlot(player, cmd.slot);
       player.aiming = (cmd.buttons & BTN_AIM) !== 0;
+      player.aimbot = (cmd.buttons & BTN_AIMBOT) !== 0;
 
       if (!player.alive) continue;
 

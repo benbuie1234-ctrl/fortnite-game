@@ -6,11 +6,11 @@ import { resolvePlacement, placementIssue } from "@shared/placement";
 import { unpackKey } from "@shared/build";
 import { weaponById, ARENA_LOADOUT, W_SNIPER, W_PICKAXE } from "@shared/weapons";
 import { locationAt, SCENERY } from "@shared/map";
-import { TREE_PERCH_RADIUS, PLAYER_HEIGHT } from "@shared/constants";
+import { TREE_PERCH_RADIUS, PLAYER_HEIGHT, CROUCH_HEIGHT } from "@shared/constants";
 import { SKINS } from "@shared/skins";
 import {
   EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
-  EV_FOLIAGE, PF_ALIVE, PF_GROUNDED,
+  EV_FOLIAGE, PF_ALIVE, PF_GROUNDED, PF_CROUCH,
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
 
@@ -553,30 +553,57 @@ window.addEventListener("keydown", (e) => {
   if (!e.metaKey && !e.ctrlKey) return;
   e.preventDefault();
   aimAssist = !aimAssist;
+  controls.aimbot = aimAssist;
   hud.setAimbot(aimAssist);
   hud.setCenterMessage(aimAssist ? "AIM ASSIST ON" : "Aim assist off");
   setTimeout(() => hud.setCenterMessage(""), 900);
 });
 
+/**
+ * Point the view at whoever the server's lock is about to shoot.
+ *
+ * This no longer does the aiming -- the server does, from BTN_AIMBOT -- so its
+ * only job is to keep the crosshair on the same target the round is going to.
+ * It therefore has to pick the target the same way: the head, at the target's
+ * real stance, preferring one that is not behind cover. No drop compensation
+ * here on purpose; the camera should sit on the target while the round arcs to
+ * it, rather than tilting off into the sky at long range.
+ */
 function applyAimAssist(): void {
   if (!aimAssist || !conn.self.alive) return;
   const eyeY = conn.self.y + eyeHeightFor(conn.self.crouch);
+  const now = Date.now() / 1000;
   let bestDistance = Infinity;
+  let bestVisible = false;
   let bx = 0, by = 0, bz = 0;
+
   for (const pose of conn.remotePoses()) {
     if ((pose.state.flags & PF_ALIVE) === 0) continue;
+    const height = (pose.state.flags & PF_CROUCH) !== 0 ? CROUCH_HEIGHT : PLAYER_HEIGHT;
     const dx = pose.x - conn.self.x;
-    const dy = pose.y + PLAYER_HEIGHT - 0.14 - eyeY;
+    const dy = pose.y + height - 0.14 - eyeY;
     const dz = pose.z - conn.self.z;
     const distance = Math.hypot(dx, dy, dz);
-    if (distance >= bestDistance) continue;
+    if (distance < 1e-3) continue;
+
+    const blocked = conn.world.raycast(
+      conn.self.x, eyeY, conn.self.z,
+      dx / distance, dy / distance, dz / distance,
+      distance - 0.05, now,
+    );
+    const visible = blocked === null;
+    if (bestVisible && !visible) continue;
+    if (visible === bestVisible && distance >= bestDistance) continue;
+
     bestDistance = distance;
+    bestVisible = visible;
     bx = dx; by = dy; bz = dz;
   }
   // No target: leave the player's own aim completely alone.
   if (bestDistance === Infinity) return;
   controls.yaw = Math.atan2(-bx, bz);
   controls.pitch = Math.atan2(by, Math.hypot(bx, bz));
+  hud.setAimbotLocked(bestVisible);
 }
 
 // ---------------------------------------------------------------------------

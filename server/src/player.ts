@@ -58,6 +58,8 @@ export class ServerPlayer implements MovementState {
   lastBuildAt = 0;
   wasFiring = false;
   aiming = false;
+  /** Development aim lock, held in the input. See resolveFire. */
+  aimbot = false;
 
   kills = 0;
   deaths = 0;

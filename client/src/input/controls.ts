@@ -1,6 +1,6 @@
 import {
   BTN_JUMP, BTN_FIRE, BTN_AIM, BTN_CROUCH, BTN_SPRINT, BTN_RELOAD, BTN_EDIT, BTN_RESET,
-  type InputCommand,
+  BTN_AIMBOT, type InputCommand,
 } from "@shared/sim";
 import { quantizeYaw, quantizePitch } from "@shared/protocol";
 
@@ -100,6 +100,8 @@ export class Controls {
   /** 0-4 weapon, 5-8 build piece. */
   slot = 2;
   material = 0;
+  /** Development aim lock. Travels to the server, which owns the shot cone. */
+  aimbot = false;
 
   private binds: Record<Action, string> = { ...DEFAULT_BINDS };
   private keys = new Set<string>();
@@ -370,6 +372,7 @@ export class Controls {
     if (this.edgeReload) { buttons |= BTN_RELOAD; this.edgeReload = false; }
     if (this.down("edit")) buttons |= BTN_EDIT;
     if (this.edgeReset) { buttons |= BTN_RESET; this.edgeReset = false; }
+    if (this.aimbot) buttons |= BTN_AIMBOT;
 
     let moveX = 0;
     let moveZ = 0;

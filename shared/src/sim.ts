@@ -25,6 +25,10 @@ export const BTN_RELOAD = 1 << 4;
 export const BTN_EDIT   = 1 << 5;
 export const BTN_RESET  = 1 << 6;
 export const BTN_SPRINT = 1 << 7;
+/** Development aim lock. Travels in the button field because the shot cone is
+ *  built on the server, so steering the client's view alone cannot stop a
+ *  round scattering on bloom or dropping under the target. */
+export const BTN_AIMBOT = 1 << 8;
 
 export interface InputCommand {
   seq: number;

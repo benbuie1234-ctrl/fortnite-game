@@ -238,6 +238,12 @@ export class Hud {
 
   setAimbot(on: boolean): void {
     this.aimbotBadge.classList.toggle("on", on);
+    if (!on) this.aimbotBadge.textContent = "AIMBOT";
+  }
+
+  /** Whether the lock currently has a clear shot, so the badge says which. */
+  setAimbotLocked(locked: boolean): void {
+    this.aimbotBadge.textContent = locked ? "AIMBOT · LOCKED" : "AIMBOT · NO SHOT";
   }
 
   /** Sprint stamina. Turns warm once it is too low to start a sprint with, so
