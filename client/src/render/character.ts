@@ -1,7 +1,8 @@
-import { W_PICKAXE, W_SHOTGUN, W_SNIPER, W_SMG } from "@shared/weapons";
+import { W_PICKAXE } from "@shared/weapons";
 import * as THREE from "three";
 import { PLAYER_HEIGHT } from "@shared/constants";
 import { skinById, type SkinDef } from "@shared/skins";
+import { createWeaponModel, disposeWeaponModel } from "./weaponmodels";
 
 // Proportions, in metres, summing to PLAYER_HEIGHT. Deliberately blocky: it
 // reads clearly at distance, costs nothing to draw, and makes every skin a
@@ -23,7 +24,8 @@ export class Character {
   private armR: THREE.Mesh;
   private torso: THREE.Mesh;
   private head: THREE.Group;
-  private gun: THREE.Mesh;
+  private gun: THREE.Group;
+  private gunModel: THREE.Group | null = null;
   private pickaxe = new THREE.Group();
   private weaponId = -1;
   private nameplate: THREE.Sprite;
@@ -72,11 +74,12 @@ export class Character {
     visor.position.set(0, HEAD_H / 2 + 0.06, 0.17);
     this.head.add(skull, visor);
 
-    // --- held weapon, a simple silhouette in the right hand ---
-    this.gun = new THREE.Mesh(
-      new THREE.BoxGeometry(0.1, 0.13, 0.62),
-      physical(0x2a2f38, 0.42, 0.7),
-    );
+    // --- held weapon ---
+    // An empty holder; setWeapon fills it with a real model per weapon. This
+    // used to be one box scaled differently per gun, which meant every weapon
+    // had the same silhouette -- and the gun in your hands is on screen in
+    // every single frame.
+    this.gun = new THREE.Group();
     this.gun.position.set(-0.28, LEG_H + TORSO_H - 0.18, 0.3);
 
     const handle=new THREE.Mesh(new THREE.CylinderGeometry(.025,.025,.75,6),matSecondary);
@@ -90,7 +93,7 @@ export class Character {
     this.muzzle.visible = false;
     this.gun.add(this.muzzle);
 
-    for (const m of [this.legL, this.legR, this.torso, this.armL, this.armR, this.gun]) {
+    for (const m of [this.legL, this.legR, this.torso, this.armL, this.armR]) {
       m.castShadow = true;
       m.receiveShadow = true;
     }
@@ -119,10 +122,24 @@ export class Character {
   }
 
   setWeapon(id:number):void {
+    if (this.weaponId === id && this.gunModel) return; // already holding it
     this.weaponId=id;
-    this.pickaxe.visible=id===W_PICKAXE;
-    this.gun.visible=id!==255&&id!==W_PICKAXE;
-    this.gun.scale.set(id===W_PICKAXE?1.5:1,id===W_PICKAXE?.5:1,id===W_SNIPER?1.5:id===W_SMG?.65:id===W_SHOTGUN?1.15:1);
+
+    // The old box-with-a-scale is gone; every weapon now has its own geometry,
+    // so a shotgun reads as a shotgun from across the map.
+    this.pickaxe.visible = false;
+    if (this.gunModel) {
+      this.gun.remove(this.gunModel);
+      disposeWeaponModel(this.gunModel);
+      this.gunModel = null;
+    }
+
+    // 255 means "in build mode, holding nothing".
+    this.gun.visible = id !== 255;
+    if (!this.gun.visible) return;
+
+    this.gunModel = createWeaponModel(id);
+    this.gun.add(this.gunModel);
   }
   fire():void { this.kick=this.weaponId===W_PICKAXE?.35:.09; }
   aimAt(worldPoint:THREE.Vector3):void {

@@ -4,13 +4,22 @@ import { getTextures, planarUVs } from './textures';
 import { InstancedModel, type ModelLibrary } from './models';
 
 export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
- const trunkGeo=new THREE.BoxGeometry(.56,1,.56),rockGeo=new THREE.BoxGeometry(1,1,1),leafGeo=new THREE.ConeGeometry(1,1,7);
+ // Tapered trunk and irregular rock, rather than plain boxes. A cylinder that
+ // is wider at the base reads as a tree from any angle; a box only ever reads
+ // as a box.
+ const trunkGeo=new THREE.CylinderGeometry(.19,.32,1,6);
+ const rockGeo=new THREE.DodecahedronGeometry(.62,0);
+ // Props are crates and containers: they must stay boxes. Sharing one geometry
+ // with the rocks turned every container into a boulder.
+ const propGeo=new THREE.BoxGeometry(1,1,1);
+ const leafGeo=new THREE.ConeGeometry(1,1,7);
  const detail=getTextures(1).detail;
  const solidMaterial=new THREE.MeshStandardMaterial({color:0xffffff,map:detail,roughness:0.88,metalness:0,envMapIntensity:0.9});
  const treeList=SCENERY.filter(p=>p.kind==='tree'),rockList=SCENERY.filter(p=>p.kind==='rock');
  const trunks=new THREE.InstancedMesh(trunkGeo,solidMaterial,treeList.length);
- const leaves=new THREE.InstancedMesh(leafGeo,solidMaterial,treeList.length*2);
- const rocks=new THREE.InstancedMesh(rockGeo,solidMaterial,rockList.length+PROPS.length);
+ const leaves=new THREE.InstancedMesh(leafGeo,solidMaterial,treeList.length*3);
+ const rocks=new THREE.InstancedMesh(rockGeo,solidMaterial,rockList.length);
+ const props=new THREE.InstancedMesh(propGeo,solidMaterial,PROPS.length);
  const matrix=new THREE.Object3D();
 
  // A real tree model replaces the box-and-cones version. Same placement data
@@ -32,16 +41,26 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
  const useProceduralTrees=!treeInstances?.valid;
  if(useProceduralTrees) treeList.forEach((p,i)=>{
    matrix.position.set(p.x,p.y+p.size/2,p.z);matrix.scale.set(1,p.size,1);matrix.updateMatrix();trunks.setMatrixAt(i,matrix.matrix);trunks.setColorAt(i,new THREE.Color(0x806445));
-   for(let tier=0;tier<2;tier++){
-     matrix.position.set(p.x,p.y+p.size*.85+tier*p.size*.38,p.z);matrix.scale.set(p.size*(.6-tier*.17),p.size*.95,p.size*(.6-tier*.17));matrix.updateMatrix();
-     leaves.setMatrixAt(i*2+tier,matrix.matrix);leaves.setColorAt(i*2+tier,new THREE.Color(i%3===0?0x497c59:0x67964e));
+   for(let tier=0;tier<3;tier++){
+     const spread=p.size*(.66-tier*.17);
+     matrix.position.set(p.x,p.y+p.size*(.72+tier*.34),p.z);
+     matrix.scale.set(spread,p.size*.82,spread);
+     // Rotate each tier differently so the canopy is not three aligned cones.
+     matrix.rotation.set(0,(i*1.7+tier*0.9)%(Math.PI*2),0);
+     matrix.updateMatrix();
+     leaves.setMatrixAt(i*3+tier,matrix.matrix);
+     // Darker toward the base, lighter at the crown, as light falls through.
+     const base=i%3===0?0x3f6f4e:0x4f7f47;
+     const shade=new THREE.Color(base).multiplyScalar(0.82+tier*0.16);
+     leaves.setColorAt(i*3+tier,shade);
    }
+   matrix.rotation.set(0,0,0);
  });
- rockList.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.size*.25,p.z);matrix.scale.set(p.size*.6,p.size*.5,p.size*.6);matrix.updateMatrix();rocks.setMatrixAt(i,matrix.matrix);rocks.setColorAt(i,new THREE.Color(0x91a098));});
- PROPS.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.h/2,p.z);matrix.scale.set(p.w,p.h,p.d);matrix.updateMatrix();rocks.setMatrixAt(rockList.length+i,matrix.matrix);rocks.setColorAt(rockList.length+i,new THREE.Color(p.color));});
+ rockList.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.size*.2,p.z);matrix.scale.set(p.size*.62,p.size*.5,p.size*.62);matrix.rotation.set(i*.7%1.2,i*2.1%(Math.PI*2),i*.4%.9);matrix.updateMatrix();rocks.setMatrixAt(i,matrix.matrix);rocks.setColorAt(i,new THREE.Color(i%2?0x8d9aa0:0x9aa49c));});matrix.rotation.set(0,0,0);
+ PROPS.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.h/2,p.z);matrix.scale.set(p.w,p.h,p.d);matrix.updateMatrix();props.setMatrixAt(i,matrix.matrix);props.setColorAt(i,new THREE.Color(p.color));});
  // Rocks always use the procedural boxes; trunks and leaves only when no
  // tree model was supplied, or they would be drawn on top of the real trees.
- for(const batch of (useProceduralTrees?[trunks,leaves,rocks]:[rocks])){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
+ for(const batch of (useProceduralTrees?[trunks,leaves,rocks,props]:[rocks,props])){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
  const size=MAP_HALF*2;
  const ground=new THREE.PlaneGeometry(size,size,240,240);ground.rotateX(-Math.PI/2);
  const positions=ground.getAttribute('position');const colors=[];
