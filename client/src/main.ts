@@ -1,4 +1,4 @@
-import { cameraPose } from "@shared/camera";
+import { cameraPose, easeCameraDistance } from "@shared/camera";
 import * as THREE from "three";
 import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE } from "@shared/constants";
 import { resolvePlacement, placementIssue } from "@shared/placement";
@@ -310,12 +310,18 @@ function handleEvents(events: readonly GameEvent[]): void {
 // Camera
 // ---------------------------------------------------------------------------
 
+let cameraDistance=0;
 function updateCamera(aiming: boolean, dt: number): void {
-  const pose = cameraPose({...conn.self, ...renderSelf, yaw:controls.yaw, pitch:controls.pitch},aiming,conn.world,Date.now()/1000);
-  view.camera.position.set(...pose.origin);
+  const weapon=weaponById(ARENA_LOADOUT[controls.slot]??0);
+  const position=aiming?conn.self:renderSelf;
+  const pose = cameraPose({...position, yaw:controls.yaw, pitch:controls.pitch},aiming,conn.world,Date.now()/1000,weapon.id===W_SNIPER);
+  const eye=new THREE.Vector3(position.x,position.y+EYE_HEIGHT,position.z);
+  const boom=new THREE.Vector3(...pose.origin).sub(eye);
+  const safe=boom.length();
+  cameraDistance=aiming?safe:easeCameraDistance(cameraDistance,safe,dt);
+  view.camera.position.copy(eye).addScaledVector(boom,safe>0?cameraDistance/safe:0);
   view.camera.rotation.order = "YXZ";
   view.camera.rotation.set(controls.pitch,Math.PI-controls.yaw,0);
-  const weapon=weaponById(ARENA_LOADOUT[controls.slot]??0);
   const fov=aiming&&!controls.inBuildMode?78/weapon.adsZoom:78;
   view.setFov(view.camera.fov+(fov-view.camera.fov)*(1-Math.exp(-18*dt)));
 }
@@ -381,10 +387,11 @@ function frame(now: number): void {
   pieces.sync(conn.world, nowSec);
   pieces.updateVisibility(self.x, self.z);
   const direction=view.camera.getWorldDirection(new THREE.Vector3());
-  const targetPiece=conn.world.raycast(view.camera.position.x,view.camera.position.y,view.camera.position.z,direction.x,direction.y,direction.z,18,nowSec);
-  hud.setStructure(targetPiece?.piece??null,nowSec);
+  const aimRange=weaponById(ARENA_LOADOUT[controls.slot]??0).range;
+  const targetPiece=conn.world.raycast(view.camera.position.x,view.camera.position.y,view.camera.position.z,direction.x,direction.y,direction.z,aimRange,nowSec);
+  hud.setStructure(targetPiece&&targetPiece.t<=18?targetPiece.piece:null,nowSec);
   hud.setLocation(locationAt(self.x, self.z));
-  const aimPoint=view.camera.position.clone().addScaledVector(direction,targetPiece?.t??100);
+  const aimPoint=view.camera.position.clone().addScaledVector(direction,targetPiece?.t??aimRange);
   effects.update(dt);
 
   // --- build ghost ---
@@ -419,7 +426,9 @@ function frame(now: number): void {
 
   // --- local body ---
   if (selfCharacter) {
-    selfCharacter.root.visible = self.alive;
+    // Hide only our local model when the camera enters its silhouette. Other
+    // players still see the full character, including while we use the scope.
+    selfCharacter.root.visible = self.alive && view.camera.position.distanceTo(new THREE.Vector3(renderSelf.x,renderSelf.y+EYE_HEIGHT,renderSelf.z))>.85;
     selfCharacter.setWeapon(controls.inBuildMode?255:ARENA_LOADOUT[controls.slot]);
     selfCharacter.update(
       renderSelf.x, renderSelf.y, renderSelf.z,

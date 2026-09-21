@@ -23,10 +23,10 @@ for(let layer=0;layer<5;layer++) {
 function player(id:number) {return new ServerPlayer(id,'test',{} as WebSocket);}
 const builder=player(0);Object.assign(builder,p,{buildSlot:BUILD_CONE});
 const builds:GameEvent[]=[];assert.ok(tryPlace(new World(),builder,1,1000,builds),'ground cone accepted by server');
-// An aimed zero-spread sniper must hit the target centered on the shoulder camera ray.
+// An aimed zero-spread sniper must hit the target centered in its scope.
 for(const yaw of [0,.7,Math.PI/2,Math.PI]) {
  const w=new World();const shooter=player(0);Object.assign(shooter,{x:0,y:0,z:0,yaw,pitch:0,aiming:true,weaponIdx:4});
- const pose=cameraPose(shooter,true,w,10);const target=player(1);
+ const pose=cameraPose(shooter,true,w,10,true);const target=player(1);
  target.x=pose.origin[0]+pose.forward[0]*15;target.z=pose.origin[2]+pose.forward[2]*15;
  target.y=.18;const events:GameEvent[]=[];
  resolveFire(w,shooter,[shooter,target],10,10000,events);

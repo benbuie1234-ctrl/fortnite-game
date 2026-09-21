@@ -3,7 +3,7 @@ import { MAP_HALF,terrainHeight,BUILDINGS,LOCATIONS,SCENERY,PROPS } from '@share
 
 export function createLandscape(scene:THREE.Scene):void {
  const trunkGeo=new THREE.BoxGeometry(.56,1,.56),rockGeo=new THREE.BoxGeometry(1,1,1),leafGeo=new THREE.ConeGeometry(1,1,7);
- const solidMaterial=new THREE.MeshLambertMaterial({color:0xffffff});
+ const solidMaterial=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.88,metalness:0,envMapIntensity:0.9});
  const treeList=SCENERY.filter(p=>p.kind==='tree'),rockList=SCENERY.filter(p=>p.kind==='rock');
  const trunks=new THREE.InstancedMesh(trunkGeo,solidMaterial,treeList.length);
  const leaves=new THREE.InstancedMesh(leafGeo,solidMaterial,treeList.length*2);
@@ -28,8 +28,8 @@ export function createLandscape(scene:THREE.Scene):void {
   const color=new THREE.Color(h<-.1?0xbfae7b:h>10?0x638957:0x80aa63);color.multiplyScalar(.94+noise);colors.push(color.r,color.g,color.b);
  }
  ground.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));ground.computeVertexNormals();
- const terrain=new THREE.Mesh(ground,new THREE.MeshLambertMaterial({vertexColors:true}));terrain.receiveShadow=true;scene.add(terrain);
- const water=new THREE.Mesh(new THREE.CircleGeometry(1,64),new THREE.MeshLambertMaterial({color:0x53b6c8,transparent:true,opacity:.72}));
+ const terrain=new THREE.Mesh(ground,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,envMapIntensity:0.9}));terrain.receiveShadow=true;scene.add(terrain);
+ const water=new THREE.Mesh(new THREE.CircleGeometry(1,64),new THREE.MeshStandardMaterial({color:0x53b6c8,transparent:true,opacity:.78,roughness:0.08,metalness:0.25,envMapIntensity:1.4}));
  water.rotation.x=-Math.PI/2;water.scale.set(49,75,1);water.position.set(-251,.025,170);scene.add(water);
  // Roads are tessellated to follow the actual shared terrain, including the ridge ascent.
  function road(x1:number,z1:number,x2:number,z2:number,width:number,color:number):void {
@@ -37,7 +37,7 @@ export function createLandscape(scene:THREE.Scene):void {
   const verts=[],indices=[];const steps=Math.ceil(length/3);
   for(let i=0;i<=steps;i++){const t=i/steps,x=x1+(x2-x1)*t,z=z1+(z2-z1)*t;for(const sign of [-1,1])verts.push(x+nx*sign,terrainHeight(x+nx*sign,z+nz*sign)+.04,z+nz*sign);if(i<steps){const a=i*2;indices.push(a,a+2,a+1,a+1,a+2,a+3);}}
   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));g.setIndex(indices);g.computeVertexNormals();
-  const m=new THREE.Mesh(g,new THREE.MeshLambertMaterial({color,side:THREE.DoubleSide}));m.receiveShadow=true;scene.add(m);
+  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color,side:THREE.DoubleSide}));m.receiveShadow=true;scene.add(m);
  }
  // Main ring and central cross create several routes between every district.
  road(-240,-156,240,-156,9,0x667477);road(-240,156,240,156,9,0x667477);
@@ -49,7 +49,7 @@ export function createLandscape(scene:THREE.Scene):void {
  for(const z of [-210,-168,-126,-84])road(96,z,222,z,5,0xc5b491);
  for(const poi of LOCATIONS){road(poi.x,poi.z,poi.x,0,5,0xbba97e);road(poi.x,poi.z,0,poi.z,5,0xbba97e);}
  // Thin facade accents read as window frames; open cells remain open routes.
- const box=new THREE.BoxGeometry(1,1,1),mat=new THREE.MeshLambertMaterial({color:0xffffff});
+ const box=new THREE.BoxGeometry(1,1,1),mat=new THREE.MeshStandardMaterial({color:0xffffff});
  const details:{x:number;y:number;z:number;sx:number;sy:number;sz:number;color:number}[]=[];
  for(const b of BUILDINGS) {
   for(let level=0;level<b.floors;level++)for(let x=0;x<b.w;x++) {
@@ -81,7 +81,7 @@ export function createLandscape(scene:THREE.Scene):void {
  }
  // Mountain backdrop is beyond the playable boundary, never mistaken for traversable cover.
  for(let i=0;i<20;i++){
-  const a=i*Math.PI*2/20;const mountain=new THREE.Mesh(new THREE.ConeGeometry(55,60+i%4*18,5),new THREE.MeshLambertMaterial({color:i%2?0x688693:0x789b9f}));
+  const a=i*Math.PI*2/20;const mountain=new THREE.Mesh(new THREE.ConeGeometry(55,60+i%4*18,5),new THREE.MeshStandardMaterial({color:i%2?0x688693:0x789b9f}));
   mountain.position.set(Math.cos(a)*520,14,Math.sin(a)*520);scene.add(mountain);
  }
 }

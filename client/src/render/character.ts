@@ -35,16 +35,16 @@ export class Character {
   private muzzle: THREE.Mesh;
   private lastName = "";
   private lastHpPct = -1;
-  private materials: THREE.MeshLambertMaterial[] = [];
+  private materials: THREE.MeshStandardMaterial[] = [];
 
   constructor(skinId: string, name: string) {
     const skin = skinById(skinId);
 
-    const matPrimary = new THREE.MeshLambertMaterial({ color: skin.colors.primary });
-    const matSecondary = new THREE.MeshLambertMaterial({ color: skin.colors.secondary });
-    const matAccent = new THREE.MeshLambertMaterial({ color: skin.colors.accent });
-    const matSkin = new THREE.MeshLambertMaterial({ color: skin.colors.skin });
-    const matVisor = new THREE.MeshLambertMaterial({ color: skin.colors.visor });
+    const matPrimary = physical(skin.colors.primary);
+    const matSecondary = physical(skin.colors.secondary);
+    const matAccent = physical(skin.colors.accent);
+    const matSkin = physical(skin.colors.skin, 0.82);
+    const matVisor = physical(skin.colors.visor, 0.25, 0.6);
     this.materials = [matPrimary, matSecondary, matAccent, matSkin, matVisor];
 
     // --- legs: pivot at the hip so rotation swings the foot ---
@@ -75,7 +75,7 @@ export class Character {
     // --- held weapon, a simple silhouette in the right hand ---
     this.gun = new THREE.Mesh(
       new THREE.BoxGeometry(0.1, 0.13, 0.62),
-      new THREE.MeshLambertMaterial({ color: 0x2a2f38 }),
+      physical(0x2a2f38, 0.42, 0.7),
     );
     this.gun.position.set(-0.28, LEG_H + TORSO_H - 0.18, 0.3);
 
@@ -227,6 +227,17 @@ export class Character {
     for (const m of this.materials) m.dispose();
     this.nameTexture.dispose();
   }
+}
+
+/**
+ * Cloth and skin read as matte; the visor and the weapon catch a highlight.
+ * Under the sky environment map that difference is visible, which is most of
+ * what stops a character looking like flat painted cardboard.
+ */
+function physical(color: number, roughness = 0.72, metalness = 0): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color, roughness, metalness, envMapIntensity: 0.9,
+  });
 }
 
 /** A box whose origin sits at its top face, so rotation pivots at the joint. */

@@ -251,6 +251,7 @@ function moveAndCollide(s: MovementState, world: World, dt: number, input:InputC
 /** Move on one axis and push out of anything hit. Returns true if blocked. */
 function sweepAxis(s: MovementState, axis: 0 | 1 | 2, delta: number): boolean {
   if (delta === 0) return false;
+  const before = axis === 0 ? s.x : axis === 1 ? s.y : s.z;
   if (axis === 0) s.x += delta;
   else if (axis === 1) s.y += delta;
   else s.z += delta;
@@ -263,6 +264,13 @@ function sweepAxis(s: MovementState, axis: 0 | 1 | 2, delta: number): boolean {
     const minY = s.y,                 maxY = s.y + PLAYER_HEIGHT;
     const minZ = s.z - PLAYER_RADIUS, maxZ = s.z + PLAYER_RADIUS;
     if (!overlaps(minX, minY, minZ, maxX, maxY, maxZ, b)) continue;
+    // Floors and ramp landings can overlap the feet slightly (including
+    // snapshot float rounding). Never resolve that overlap sideways across
+    // an entire floor tile; only stop a horizontal move at a crossed face.
+    if (axis !== 1) {
+      const near = b[axis], far = b[axis + 3];
+      if (delta > 0 ? before + PLAYER_RADIUS > near + EPS : before - PLAYER_RADIUS < far - EPS) continue;
+    }
     blocked = true;
     if (axis === 0) {
       s.x = delta > 0 ? b[0] - PLAYER_RADIUS - EPS : b[3] + PLAYER_RADIUS + EPS;

@@ -180,9 +180,23 @@ function makeConeGeometry(): THREE.BufferGeometry {
 
 const DAMAGE_BUCKETS = [1.0, 0.82, 0.63, 0.45];
 
+/**
+ * Physical surface response per build material, indexed to MATERIALS.
+ *
+ * This is what a switch to MeshStandardMaterial actually buys: metal can be
+ * genuinely metallic and catch a highlight off the sky, while wood and brick
+ * stay matte. Under MeshLambertMaterial all three were the same flat surface
+ * wearing different colours.
+ */
+const SURFACE = [
+  { roughness: 0.82, metalness: 0.0 },  // wood
+  { roughness: 0.95, metalness: 0.0 },  // brick
+  { roughness: 0.38, metalness: 0.75 }, // metal
+];
+
 interface MaterialPool {
-  build: THREE.MeshLambertMaterial[][]; // [materialId][bucket]
-  arena: THREE.MeshLambertMaterial;
+  build: THREE.MeshStandardMaterial[][]; // [materialId][bucket]
+  arena: THREE.MeshStandardMaterial;
 }
 
 let pool: MaterialPool | null = null;
@@ -194,7 +208,7 @@ function materials(anisotropy: number): MaterialPool {
   pool = {
     build: MATERIALS.map((_def, i) =>
       DAMAGE_BUCKETS.map((mul) =>
-        new THREE.MeshLambertMaterial({
+        new THREE.MeshStandardMaterial({
           map: tex.build[i] ?? tex.build[0],
           // Multiplies the baked occlusion in bakeEdgeAO over the texture.
           vertexColors: true,
@@ -202,11 +216,15 @@ function materials(anisotropy: number): MaterialPool {
           // here must start at white and only darken for damage. Multiplying
           // by def.color would apply the colour twice.
           color: new THREE.Color(0xffffff).multiplyScalar(mul),
+          roughness: SURFACE[i]?.roughness ?? 0.9,
+          metalness: SURFACE[i]?.metalness ?? 0,
+          envMapIntensity: 0.85,
         }),
       ),
     ),
-    arena: new THREE.MeshLambertMaterial({
+    arena: new THREE.MeshStandardMaterial({
       map: tex.concrete, color: 0xffffff, vertexColors: true,
+      roughness: 0.92, metalness: 0, envMapIntensity: 0.8,
     }),
   };
   return pool;

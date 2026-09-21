@@ -4,7 +4,7 @@ import {
 } from "@shared/constants";
 import { makePiece, inGridBounds, currentHp, packKey } from "@shared/build";
 import { World, rayVsBox } from "@shared/world";
-import { weaponById, damageAtRange, W_PICKAXE } from "@shared/weapons";
+import { weaponById, damageAtRange, W_PICKAXE, W_SNIPER } from "@shared/weapons";
 import { forwardVector, applySpread } from "@shared/vec";
 import {
   EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE, EV_SHOT, EV_HIT,
@@ -51,7 +51,7 @@ export function resolveFire(
   const oz = shooter.z;
   let baseDir = forwardVector(shooter.yaw, shooter.pitch);
   if (weapon.id !== W_PICKAXE) {
-    const camera = cameraPose(shooter, shooter.aiming, world, nowSec);
+    const camera = cameraPose(shooter, shooter.aiming, world, nowSec, weapon.id===W_SNIPER);
     const [cx,cy,cz] = camera.origin;
     const [fx,fy,fz] = camera.forward;
     let aimDistance = world.raycast(cx,cy,cz,fx,fy,fz,weapon.range,nowSec)?.t ?? weapon.range;

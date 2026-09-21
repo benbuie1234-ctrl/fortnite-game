@@ -1,12 +1,14 @@
 import * as THREE from "three";
 import { createLandscape } from "./landscape";
+import { createSky } from "./sky";
+import { createGradePass } from "./grade";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
-/** Sky and fog share one colour so the horizon dissolves instead of banding. */
-const SKY_COLOR = 0x9fd0f5;
+/** How far the sun sits from the player; also sizes the shadow frustum. */
+const SUN_DISTANCE = 170;
 
 export interface Renderer {
   renderer: THREE.WebGLRenderer;
@@ -43,9 +45,18 @@ export function createRenderer(mount: HTMLElement): Renderer {
   mount.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(SKY_COLOR);
-  scene.fog = new THREE.Fog(SKY_COLOR, 120, 370);
 
+  // Sky, atmosphere and image-based lighting. Must exist before the fog, which
+  // samples the real horizon colour out of it.
+  const skySystem = createSky(renderer, scene);
+
+  // Exponential fog, tuned so distance actually reads. The old linear fog
+  // started at 120m and barely engaged, which is why far hills looked exactly
+  // as solid as near ones -- no aerial perspective, no depth. Colour comes
+  // from the sky itself, so the horizon line dissolves instead of banding.
+  scene.fog = new THREE.FogExp2(skySystem.horizonColor.getHex(), 0.0022);
+
+  const clock = new THREE.Clock();
   const camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.1, 850);
 
   // --- lighting -------------------------------------------------------------
@@ -55,32 +66,35 @@ export function createRenderer(mount: HTMLElement): Renderer {
   // separates a stylised game from a grey prototype: in Fortnite a shadow is
   // blue, not a darker version of the surface colour. Nothing is ever allowed
   // to fall to black.
-  const hemi = new THREE.HemisphereLight(0xa8d4ff, 0x7a8a5c, 0.9);
+  // Only a whisper of hemisphere now. scene.environment carries the real
+  // ambient, and it varies by direction -- blue from the sky above, warm
+  // bounce from the ground below -- which a constant term never could. Leaving
+  // the old values in would double-count and flatten it straight back out.
+  const hemi = new THREE.HemisphereLight(0xa8d4ff, 0x8a7a5c, 0.18);
   scene.add(hemi);
 
-  // Cool fill so faces turned away from the sun stay readable and tinted
-  // rather than going dead grey. This used to be white, which is what made
-  // the inside of a built box look muddy.
-  //
-  // Kept deliberately low. Fill light is what kills contrast, and without
-  // contrast there is no shadow for the warm/cool split to show up in -- the
-  // first pass at these numbers came out flat and milky.
-  scene.add(new THREE.AmbientLight(0x7d9ecb, 0.28));
 
-  const sun = new THREE.DirectionalLight(0xfff0cc, 3.0);
-  sun.position.set(38, 62, 26);
+  const sun = new THREE.DirectionalLight(0xffeec4, 2.6);
+  // Positioned along the sky's own sun direction, so the light and the sun you
+  // can see in the sky agree. A low raking angle throws long shadows and gives
+  // vertical surfaces form; the old near-overhead angle flattened everything.
+  const sunDir = skySystem.sunDirection;
+  sun.position.copy(sunDir).multiplyScalar(SUN_DISTANCE);
   sun.castShadow = true;
   // The arena is small and fixed, so the shadow frustum can wrap it tightly.
   // That keeps a 1024 map looking sharp instead of blocky.
-  const reach = 60;
+  // A tight frustum that follows the player. 90m across a 2048 map is ~4.4cm
+  // per texel, against ~12cm before -- the difference between a blob under
+  // your feet and an actual shadow.
+  const reach = 45;
   sun.shadow.camera.left = -reach;
   sun.shadow.camera.right = reach;
   sun.shadow.camera.top = reach;
   sun.shadow.camera.bottom = -reach;
   sun.shadow.camera.near = 1;
-  sun.shadow.camera.far = 180;
-  sun.shadow.mapSize.set(1024, 1024);
-  sun.shadow.bias = -0.0012;
+  sun.shadow.camera.far = SUN_DISTANCE * 2.4;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.02;
   scene.add(sun);
   scene.add(sun.target);
@@ -108,6 +122,8 @@ export function createRenderer(mount: HTMLElement): Renderer {
     0.85, // threshold
   ));
   composer.addPass(new OutputPass());
+  // Grading runs last, on display-referred colour after tone mapping.
+  composer.addPass(createGradePass());
 
   let bloomEnabled = true;
 
@@ -124,8 +140,15 @@ export function createRenderer(mount: HTMLElement): Renderer {
     renderer, scene, camera,
     maxAnisotropy: anisotropy,
     render: () => {
-      sun.position.set(camera.position.x+38,camera.position.y+62,camera.position.z+26);
-      sun.target.position.set(camera.position.x,camera.position.y,camera.position.z);
+      // Keep the shadow frustum centred on the player while holding the sun's
+      // true direction, so shadows stay crisp wherever you are on the map.
+      sun.position.set(
+        camera.position.x + sunDir.x * SUN_DISTANCE,
+        camera.position.y + sunDir.y * SUN_DISTANCE,
+        camera.position.z + sunDir.z * SUN_DISTANCE,
+      );
+      sun.target.position.copy(camera.position);
+      skySystem.update(clock.getDelta());
       if (bloomEnabled) composer.render();
       else renderer.render(scene, camera);
     },
