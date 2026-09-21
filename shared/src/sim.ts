@@ -16,6 +16,7 @@ export const BTN_CROUCH = 1 << 3;
 export const BTN_RELOAD = 1 << 4;
 export const BTN_EDIT   = 1 << 5;
 export const BTN_RESET  = 1 << 6;
+export const BTN_SPRINT = 1 << 7;
 
 export interface InputCommand {
   seq: number;
@@ -104,7 +105,8 @@ export function stepPlayer(
     // Quake-style: only accelerate up to the projection deficit, which keeps
     // diagonal movement from exceeding max speed.
     const current = s.vx * wishX + s.vz * wishZ;
-    const add = Math.min(MOVE_SPEED - current, accel * dt);
+    const speedLimit = (input.buttons & BTN_SPRINT) !== 0 && input.moveZ > 0 ? MOVE_SPEED * 1.28 : MOVE_SPEED;
+    const add = Math.min(speedLimit - current, accel * dt);
     if (add > 0) {
       s.vx += wishX * add;
       s.vz += wishZ * add;

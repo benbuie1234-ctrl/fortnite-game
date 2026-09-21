@@ -96,6 +96,39 @@ const controls = new Controls(view.renderer.domElement, {
   },
 });
 
+// Touch controls use the same input sampler as keyboard/mouse, so prediction
+// and the server see identical commands on phones and tablets.
+const mobile = document.getElementById("mobileControls");
+const stick = document.getElementById("mobileStick");
+if (mobile && stick) {
+  const knob = stick.querySelector("i") as HTMLElement | null;
+  let stickId = -1;
+  const moveStick = (e: PointerEvent) => {
+    const r = stick.getBoundingClientRect(), max = r.width * 0.34;
+    let x = e.clientX - (r.left + r.width / 2), y = e.clientY - (r.top + r.height / 2);
+    const d = Math.hypot(x, y);
+    if (d > max) { x *= max / d; y *= max / d; }
+    if (knob) knob.style.transform = `translate(${x}px,${y}px)`;
+    controls.setTouchMove(x / max, -y / max);
+  };
+  stick.addEventListener("pointerdown", e => { stickId = e.pointerId; stick.setPointerCapture(stickId); moveStick(e); });
+  stick.addEventListener("pointermove", e => { if (e.pointerId === stickId) moveStick(e); });
+  stick.addEventListener("pointerup", e => { if (e.pointerId === stickId) { stickId = -1; if (knob) knob.style.transform = ""; controls.setTouchMove(0, 0); } });
+  const look = document.getElementById("mobileLook");
+  let lookId = -1, lastX = 0, lastY = 0;
+  if (look) {
+    look.addEventListener("pointerdown", e => { lookId = e.pointerId; lastX = e.clientX; lastY = e.clientY; look.setPointerCapture(lookId); });
+    look.addEventListener("pointermove", e => { if (e.pointerId === lookId) { controls.touchLook(e.clientX - lastX, e.clientY - lastY); lastX = e.clientX; lastY = e.clientY; } });
+    look.addEventListener("pointerup", e => { if (e.pointerId === lookId) lookId = -1; });
+  }
+  mobile.querySelectorAll<HTMLButtonElement>("[data-touch]").forEach(b => {
+    const a = b.dataset.touch!;
+    b.addEventListener("pointerdown", e => { e.preventDefault(); controls.setTouchAction(a, true); });
+    b.addEventListener("pointerup", () => controls.setTouchAction(a, false));
+    b.addEventListener("pointercancel", () => controls.setTouchAction(a, false));
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Connecting
 // ---------------------------------------------------------------------------

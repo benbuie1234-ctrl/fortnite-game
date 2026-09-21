@@ -1,5 +1,5 @@
 import {
-  BTN_JUMP, BTN_FIRE, BTN_AIM, BTN_CROUCH, BTN_RELOAD, BTN_EDIT, BTN_RESET,
+  BTN_JUMP, BTN_FIRE, BTN_AIM, BTN_CROUCH, BTN_SPRINT, BTN_RELOAD, BTN_EDIT, BTN_RESET,
   type InputCommand,
 } from "@shared/sim";
 import { quantizeYaw, quantizePitch } from "@shared/protocol";
@@ -36,6 +36,11 @@ export class Controls {
   private seq = 0;
   private edgeReload = false;
   private edgeReset = false;
+  private touchMoveX = 0;
+  private touchMoveZ = 0;
+  private touchFire = false;
+  private touchAim = false;
+  private touchJump = false;
 
   constructor(
     private canvas: HTMLElement,
@@ -51,6 +56,21 @@ export class Controls {
    *  callers that only want to observe must not go through it. */
   get aiming(): boolean { return this.rightDown; }
   get firing(): boolean { return this.mouseDown; }
+
+  setTouchMove(x: number, z: number): void {
+    this.touchMoveX = Math.max(-1, Math.min(1, x));
+    this.touchMoveZ = Math.max(-1, Math.min(1, z));
+  }
+  touchLook(dx: number, dy: number): void {
+    this.yaw += dx * this.sensitivity * 1.7;
+    this.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, this.pitch - dy * this.sensitivity * 1.7));
+  }
+  setTouchAction(action: string, on: boolean): void {
+    if (action === "fire") this.touchFire = on;
+    else if (action === "aim") this.touchAim = on;
+    else if (action === "jump") this.touchJump = on;
+    if (action === "reload" && on) this.edgeReload = true;
+  }
 
   requestLock(): void {
     // Returns a promise in current browsers, and rejects when the document is
@@ -91,6 +111,12 @@ export class Controls {
       if (e.button === 0) this.mouseDown = false;
       if (e.button === 2) this.rightDown = false;
     });
+    document.addEventListener("wheel", (e) => {
+      if (!this.locked || this.inBuildMode) return;
+      e.preventDefault();
+      const dir = e.deltaY > 0 ? 1 : -1;
+      this.slot = (this.slot + dir + 5) % 5;
+    }, { passive: false });
     document.addEventListener("contextmenu", (e) => {
       if (this.locked) e.preventDefault();
     });
@@ -146,10 +172,11 @@ export class Controls {
    */
   sample(): InputCommand {
     let buttons = 0;
-    if (this.keys.has("Space")) buttons |= BTN_JUMP;
-    if (this.mouseDown) buttons |= BTN_FIRE;
-    if (this.rightDown) buttons |= BTN_AIM;
+    if (this.keys.has("Space") || this.touchJump) buttons |= BTN_JUMP;
+    if (this.mouseDown || this.touchFire) buttons |= BTN_FIRE;
+    if (this.rightDown || this.touchAim) buttons |= BTN_AIM;
     if (this.keys.has("ControlLeft") || this.keys.has("KeyV")) buttons |= BTN_CROUCH;
+    if (this.keys.has("ShiftLeft") || this.keys.has("ShiftRight")) buttons |= BTN_SPRINT;
     if (this.edgeReload) { buttons |= BTN_RELOAD; this.edgeReload = false; }
     if (this.keys.has("KeyT")) buttons |= BTN_EDIT;
     if (this.edgeReset) { buttons |= BTN_RESET; this.edgeReset = false; }
@@ -160,6 +187,8 @@ export class Controls {
     if (this.keys.has("KeyS")) moveZ -= 1;
     if (this.keys.has("KeyD")) moveX += 1;
     if (this.keys.has("KeyA")) moveX -= 1;
+    moveX += this.touchMoveX;
+    moveZ += this.touchMoveZ;
 
     const slot = this.slotOverrides.length > 0
       ? this.slotOverrides.shift()!
