@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { TILE } from '../shared/src/constants';
 import { World } from '../shared/src/world';
 import { resolvePlacement,BUILD_CONE,BUILD_FLOOR,BUILD_RAMP,BUILD_WALL } from '../shared/src/placement';
 import { makePiece,SLOT_RAMP,SLOT_WALL_Z,SLOT_FLOOR } from '../shared/src/build';
@@ -13,11 +14,11 @@ assert.equal(resolvePlacement({...p,pitch:-1,buildSlot:BUILD_FLOOR})!.gz,0,'look
 assert.ok(resolvePlacement({...p,pitch:1,buildSlot:BUILD_WALL})!.gy>0,'look up builds upper walls');
 const world=new World();world.set(makePiece(0,0,0,SLOT_RAMP,0,1,0,0));
 for(const buildSlot of [BUILD_FLOOR,BUILD_RAMP]) {
- const target=resolvePlacement({...p,y:2,z:2,buildSlot},world)!;
+ const target=resolvePlacement({...p,y:TILE*2/3,z:TILE*2/3,buildSlot},world)!;
  assert.equal(target.gy,1,'ramp exit continues at next level');assert.equal(target.gz,1,'next tile is beyond ramp');
 }
 for(let layer=0;layer<5;layer++) {
- const target=resolvePlacement({...p,y:layer*3+.25,buildSlot:BUILD_FLOOR},new World())!;
+ const target=resolvePlacement({...p,y:layer*TILE+.25,buildSlot:BUILD_FLOOR},new World())!;
  assert.equal(target.gy,layer,'upper floors retain their layer');
 }
 function player(id:number) {return new ServerPlayer(id,'test',{} as WebSocket);}

@@ -49,15 +49,15 @@ export function buildArena(world:World,_seed=1):void {
   }
  }
  // Docks run toward the shallow lake. Broad decking has matching collision.
- for(let x=-80;x<=-67;x++)for(let z=50;z<54;z++)place(world,x,0,z,SLOT_FLOOR);
+ for(let x=-40;x<=-34;x++)for(let z=25;z<27;z++)place(world,x,0,z,SLOT_FLOOR);
  // Cargo stacks form short-range cover between the warehouses and docks.
  for(let i=0;i<12;i++) {
-  const x=-70+(i%4)*8,z=72+Math.floor(i/4)*4;
-  for(let dx=0;dx<5;dx++) {
-   place(world,x+dx,0,z,SLOT_WALL_Z);place(world,x+dx,0,z+2,SLOT_WALL_Z);
-   for(let dz=0;dz<2;dz++)place(world,x+dx,1,z+dz,SLOT_FLOOR);
+  const x=-35+(i%4)*4,z=36+Math.floor(i/4)*2;
+  for(let dx=0;dx<3;dx++) {
+   place(world,x+dx,0,z,SLOT_WALL_Z);place(world,x+dx,0,z+1,SLOT_WALL_Z);
+   place(world,x+dx,1,z,SLOT_FLOOR);
   }
-  for(let dz=0;dz<2;dz++){place(world,x,0,z+dz,SLOT_WALL_X);place(world,x+5,0,z+dz,SLOT_WALL_X);}
+  place(world,x,0,z,SLOT_WALL_X);place(world,x+3,0,z,SLOT_WALL_X);
  }
  // Crossroads rest stop keeps the centre useful for small groups.
  for(const x of [-4,3])for(const z of [-4,3]) {

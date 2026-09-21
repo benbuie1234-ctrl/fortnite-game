@@ -15,13 +15,13 @@ const command={seq:1,moveX:0,moveZ:1,yaw:0,pitch:0,buttons:BTN_JUMP,slot:2};
  piece.hp=70;assert.equal(currentHp(piece,12),70,'damage persists');
 }
 {
- const w=new World();w.set(makePiece(0,0,1,SLOT_WALL_Z,0,0,0,0));
+ const w=new World();w.addObstacle([0,0,3,3,3,3.25],-50);
  const s:MovementState=fresh();let highest=0;
  for(let i=0;i<90;i++) {const before=s.y;stepPlayer(s,command,w);highest=Math.max(highest,s.y);assert.ok(s.y-before<.6,'climb has no vertical teleport');}
  assert.ok(highest>=3,'jump and forward mantles a reachable wall');
 }
 {
- const w=new World();w.set(makePiece(0,0,1,SLOT_WALL_Z,0,0,0,0));w.set(makePiece(0,1,1,SLOT_FLOOR,0,0,0,0));w.set(makePiece(0,1,0,SLOT_FLOOR,0,0,0,0));
+ const w=new World();w.addObstacle([0,0,3,3,3,3.25],-50);w.addObstacle([0,3,0,3,3.25,6],-51);
  const s=fresh();let highest=0;
  for(let i=0;i<60;i++){stepPlayer(s,command,w);highest=Math.max(highest,s.y);}
  assert.ok(highest<3,'ceiling blocks mantle');

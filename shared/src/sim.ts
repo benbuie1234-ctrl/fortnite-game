@@ -2,7 +2,8 @@ import {
   TICK_DT, PLAYER_HEIGHT, PLAYER_RADIUS, GRAVITY, JUMP_VELOCITY, MOVE_SPEED,
   GROUND_ACCEL, AIR_ACCEL, GROUND_FRICTION, MAX_FALL_SPEED, STEP_HEIGHT,
 } from "./constants";
-import type { Box, Piece } from "./build";
+import { rampHeightAt, type Box, type Piece } from "./build";
+import { rayVsRamp } from "./world";
 import type { World } from "./world";
 
 // ---------------------------------------------------------------------------
@@ -258,6 +259,18 @@ function sweepAxis(s: MovementState, axis: 0 | 1 | 2, delta: number): boolean {
   const high=[s.x+PLAYER_RADIUS,s.y+PLAYER_HEIGHT,s.z+PLAYER_RADIUS];
   let allowed=delta;
   let blocked = false;
+  for(const ramp of scratchRamps) {
+    const surface=rampHeightAt(ramp,s.x,s.z);
+    if(axis!==1&&surface!==null&&s.y>=surface-STEP_HEIGHT)continue;
+    for(const sx of [-PLAYER_RADIUS,0,PLAYER_RADIUS])for(const sz of [-PLAYER_RADIUS,0,PLAYER_RADIUS]) {
+      const direction=[0,0,0];direction[axis]=Math.sign(delta);
+      const y=axis===1?(delta>0?s.y+PLAYER_HEIGHT:s.y):s.y+STEP_HEIGHT;
+      const hit=rayVsRamp(ramp,s.x+sx,y,s.z+sz,direction[0],direction[1],direction[2]);
+      if(hit&&hit.t>=0&&hit.t<Math.abs(allowed)) {
+        allowed=Math.sign(delta)*Math.max(0,hit.t-EPS);blocked=true;
+      }
+    }
+  }
   for (const b of scratchBoxes) {
     // Sweep the entire travelled interval, not just the destination. Thin
     // floors must still catch a fast fall even when a tick crosses them fully.
