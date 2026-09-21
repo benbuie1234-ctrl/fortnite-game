@@ -25,9 +25,15 @@ against yourself.
 
 ## Controls
 
-**WASD** move · **Space** jump · **Left click** shoot or place · **Right click** aim
-**1-5** weapons · **Q E R F** wall, floor, ramp, cone · **Z X C** wood, brick, metal
-**G** reload · **M** mute · **Esc** release mouse
+**WASD** move · **Space** jump, or hold at a ledge to climb · **Left click** shoot or place · **Right click** aim
+**Shift** sprint · **Ctrl** crouch, or at speed to slide · **1-5** weapons
+**Q E R F** wall, floor, ramp, cone · **V** shield block · **Z X C** wood, brick, metal
+**G** reload · **Tab** scoreboard · **M** mute · **Esc** release mouse
+
+Every binding above is rebindable from the menu. On a phone or a tablet the
+whole game is played from the on-screen controls: a stick and the look surface,
+a thumb cluster for fire, aim, jump, crouch and build, and a tappable weapon,
+build and material bar down the right-hand side.
 
 ## How it is put together
 
@@ -101,8 +107,8 @@ detail is drawn with wraparound so nothing clips at the seam. All five cost
 about **1.7 kB of JavaScript** instead of several hundred kB of PNGs.
 
 Because the textures are shared between every piece, tiling density is baked
-into each geometry's UVs rather than set per-texture. Otherwise a 3 m wall and
-a 0.25 m floor slab would show wildly different brick sizes.
+into each geometry's UVs rather than set per-texture. Otherwise a full-height
+wall and a thin floor slab would show wildly different brick sizes.
 
 **Sound** (`client/src/audio/sound.ts`) is synthesised with the Web Audio API.
 Each gunshot layers a filtered noise "crack" over a low oscillator "body",
@@ -194,16 +200,17 @@ share a code land together.
 
 ## Status
 
-Working: movement, collision, building (wall/floor/ramp/cone × 3 materials with
-grow-in and destruction), 5 weapons with falloff and headshots, lag-compensated
-hit registration, respawns, scoring, rounds, kill feed, quickplay and room
-codes, procedural textures, and positional sound.
+Working: movement (sprint with stamina, crouch, slide, mantling), collision,
+building (wall/floor/ramp/cone × 3 materials with grow-in and destruction) plus
+a one-per-match shield block that reflects bullets, 5 weapons with movement
+bloom, bullet drop, falloff and headshots, lag-compensated hit registration,
+huntable wildlife, respawns, scoring, rounds, kill feed, quickplay and room
+codes, procedural textures, positional sound, and full touch play.
 
 Not built yet:
 
 - **Build editing** (the Fortnite `T` edit mechanic). The input bit is already
   on the wire; the server ignores it.
-- **Crouch** — also on the wire, not in the simulation.
 - **Skins are a catalogue, not a store.** `shared/src/skins.ts` defines six
   skins and the rendering path is a pure recolour, but there is deliberately no
   purchase flow yet. When one is built, unlocks must be granted server-side
@@ -215,10 +222,18 @@ Not built yet:
 
 ## Testing
 
-`npm test` runs three suites on plain node, no framework:
+`npm test` runs every suite in `tests/` on plain node, no framework. The ones
+worth knowing about:
 
 - `sim.test.ts` — gravity, walls, floors, ramps, jumping, and a **determinism
   check** that the same state plus the same inputs lands in exactly the same
   place. That last one is load-bearing: if it fails, client prediction breaks.
+- `navigation.test.ts` — drops a player on a grid across the whole map and
+  asserts the world caught every one of them, then walks up each district and
+  climbs every flight of stairs in every building style. This is the suite that
+  covers "falling through solid builds" and "I cannot get up there", neither of
+  which a screenshot will ever find.
 - `protocol.test.ts` — input batch round-trip including quantisation.
 - `arena.test.ts` — spawns face the middle of the map.
+- `world-stability.test.ts` — every building's base cell matches the ground
+  under it, and both doorways of every house stay walkable.

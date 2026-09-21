@@ -1,6 +1,6 @@
 import {
   TILE, PIECE_THICKNESS, GRID_MIN_XZ, GRID_MAX_XZ, GRID_MIN_Y, GRID_MAX_Y,
-  MATERIALS, BUILD_SPAWN_HP_FRACTION,
+  MATERIALS, BUILD_SPAWN_HP_FRACTION, STEP_HEIGHT, SHIELD_MAX_HP,
 } from "./constants";
 
 // ---------------------------------------------------------------------------
@@ -17,9 +17,13 @@ export const SLOT_RAMP = 1;
 export const SLOT_CONE = 2;
 export const SLOT_WALL_X = 3; // wall on the cell's -X face (the YZ plane)
 export const SLOT_WALL_Z = 4; // wall on the cell's -Z face (the XY plane)
-export const SLOT_COUNT = 5;
+/** The reflecting shield panel. Occupies a cell face like a wall, but in its
+ *  own slot so a shield and a wall can share a cell and neither replaces the
+ *  other. The packed key carries three bits of slot, so there is room. */
+export const SLOT_SHIELD = 5;
+export const SLOT_COUNT = 6;
 
-export type Slot = 0 | 1 | 2 | 3 | 4;
+export type Slot = 0 | 1 | 2 | 3 | 4 | 5;
 
 /** Ramp/cone facing. 0=+X, 1=+Z, 2=-X, 3=-Z */
 export type Facing = 0 | 1 | 2 | 3;
@@ -88,11 +92,14 @@ export function makePiece(
   mat: number, facing: Facing, ownerId: number, now: number,
 ): Piece {
   const def = MATERIALS[mat] ?? MATERIALS[0];
+  // A shield is not made of wood, brick or metal, so its health comes from its
+  // own constant rather than from whichever material happened to be selected.
+  const maxHp = slot === SLOT_SHIELD ? SHIELD_MAX_HP : def.maxHp;
   return {
     key: packKey(gx, gy, gz, slot),
     slot, gx, gy, gz, mat, facing,
-    hp: def.maxHp,
-    maxHp: def.maxHp,
+    hp: maxHp,
+    maxHp,
     placedAt: now,
     ownerId,
   };
@@ -102,7 +109,12 @@ export function makePiece(
 export function currentHp(piece: Piece, now: number): number {
   const def = MATERIALS[piece.mat] ?? MATERIALS[0];
   const t = Math.max(0, Math.min(1, (now - piece.placedAt) / def.buildTime));
-  const grown = def.maxHp * (BUILD_SPAWN_HP_FRACTION + (1 - BUILD_SPAWN_HP_FRACTION) * t);
+  // Against the PIECE's own maximum, not the material's. They are the same for
+  // everything built out of a material, and different for a shield, whose
+  // health has nothing to do with which material was selected when it went
+  // down -- reading the material's figure made a fresh shield grow in toward
+  // the wrong number and jump when it got there.
+  const grown = piece.maxHp * (BUILD_SPAWN_HP_FRACTION + (1 - BUILD_SPAWN_HP_FRACTION) * t);
   // hp tracks damage taken, so the effective value is whichever is lower.
   return Math.min(piece.hp, grown);
 }
@@ -138,6 +150,13 @@ export function pieceBox(piece: Piece): Box | null {
       return [x0 - T * 0.5, y0, z0, x0 + T * 0.5, y0 + TILE, z0 + TILE];
     case SLOT_WALL_Z:
       return [x0, y0, z0 - T * 0.5, x0 + TILE, y0 + TILE, z0 + T * 0.5];
+    case SLOT_SHIELD:
+      // Same footprint as a wall, on whichever axis the player was facing, so
+      // it plugs a doorway or a window exactly the way a wall would. A little
+      // thicker, because it is a slab of hard light rather than a plank.
+      return piece.facing === 0 || piece.facing === 2
+        ? [x0 - T, y0, z0, x0 + T, y0 + TILE, z0 + TILE]
+        : [x0, y0, z0 - T, x0 + TILE, y0 + TILE, z0 + T];
     case SLOT_CONE:
       // Approximated as a low box; the visual mesh is a pyramid. Close enough
       // for movement, and it keeps cones from being free cover.
@@ -202,9 +221,16 @@ export function pieceBoxes(piece: Piece): Box[] {
   return single ? [single] : [];
 }
 
-/** How finely a ramp and a cone are approximated. */
-const RAMP_STEPS = 8;
-const CONE_STEPS = 3;
+/**
+ * How finely a ramp and a cone are approximated.
+ *
+ * Derived from the tile rather than fixed, because the thing that matters is
+ * the height of one step, not how many there are: a step taller than
+ * STEP_HEIGHT is a step the player walks into instead of over, so a fixed
+ * count would make ramps unwalkable the moment the tile grew.
+ */
+const RAMP_STEPS = Math.max(8, Math.ceil(TILE / (STEP_HEIGHT * 0.72)));
+const CONE_STEPS = Math.max(3, Math.ceil(TILE / 1.5));
 
 function rampStepBoxes(piece: Piece): Box[] {
   const x0 = piece.gx * TILE;

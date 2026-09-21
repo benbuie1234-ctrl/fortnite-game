@@ -1,19 +1,23 @@
 import {
   BTN_JUMP, BTN_FIRE, BTN_AIM, BTN_CROUCH, BTN_SPRINT, BTN_RELOAD, BTN_EDIT, BTN_RESET,
-  BTN_AIMBOT, type InputCommand,
+  type InputCommand,
 } from "@shared/sim";
 import { quantizeYaw, quantizePitch } from "@shared/protocol";
+import { BUILD_SHIELD } from "@shared/placement";
 
 const PITCH_LIMIT = Math.PI * 0.44;
 
-/** Build slots, matching the server's `slot` field encoding. */
+/** Build slots, matching the server's `slot` field encoding. Imported for the
+ *  shield rather than re-declared, because 12 is a number you would not guess
+ *  and getting it wrong here selects a material instead of a piece. */
 const SLOT_WALL = 5;
 const SLOT_FLOOR = 6;
 const SLOT_RAMP = 7;
 const SLOT_CONE = 8;
+const SLOT_SHIELD = BUILD_SHIELD;
 
 /** The build pieces, in the order the scroll wheel cycles them. */
-export const BUILD_SLOTS = [SLOT_WALL, SLOT_FLOOR, SLOT_RAMP, SLOT_CONE];
+export const BUILD_SLOTS = [SLOT_WALL, SLOT_FLOOR, SLOT_RAMP, SLOT_CONE, SLOT_SHIELD];
 
 /**
  * Every rebindable action.
@@ -25,9 +29,8 @@ export type Action =
   | "forward" | "back" | "left" | "right"
   | "jump" | "crouch" | "sprint" | "reload" | "edit"
   | "weapon1" | "weapon2" | "weapon3" | "weapon4" | "weapon5"
-  | "wall" | "floor" | "ramp" | "cone"
-  | "matWood" | "matBrick" | "matMetal"
-  | "aimLock";
+  | "wall" | "floor" | "ramp" | "cone" | "shield"
+  | "matWood" | "matBrick" | "matMetal";
 
 export const ACTION_LABELS: ReadonlyArray<readonly [Action, string]> = [
   ["forward", "Move forward"],
@@ -48,10 +51,10 @@ export const ACTION_LABELS: ReadonlyArray<readonly [Action, string]> = [
   ["floor", "Build floor"],
   ["ramp", "Build ramp"],
   ["cone", "Build cone"],
+  ["shield", "Shield block"],
   ["matWood", "Wood"],
   ["matBrick", "Brick"],
   ["matMetal", "Metal"],
-  ["aimLock", "Aim lock (dev)"],
 ];
 
 export const DEFAULT_BINDS: Readonly<Record<Action, string>> = {
@@ -60,12 +63,8 @@ export const DEFAULT_BINDS: Readonly<Record<Action, string>> = {
   reload: "KeyG", edit: "KeyT",
   weapon1: "Digit1", weapon2: "Digit2", weapon3: "Digit3",
   weapon4: "Digit4", weapon5: "Digit5",
-  wall: "KeyQ", floor: "KeyE", ramp: "KeyR", cone: "KeyF",
+  wall: "KeyQ", floor: "KeyE", ramp: "KeyR", cone: "KeyF", shield: "KeyV",
   matWood: "KeyZ", matBrick: "KeyX", matMetal: "KeyC",
-  // A plain key, not a chord. Cmd+M is Minimise Window on macOS and Ctrl+M is
-  // taken in some browsers, so a modifier binding can be swallowed before the
-  // page ever sees it -- which looks exactly like the feature being broken.
-  aimLock: "KeyJ",
 };
 
 const BINDS_STORAGE_KEY = "clutch.binds";
@@ -106,10 +105,6 @@ export class Controls {
   /** 0-4 weapon, 5-8 build piece. */
   slot = 2;
   material = 0;
-  /** Development aim lock. Travels to the server, which owns the shot cone.
-   *  Owned here rather than in main so the key, the chord and the on-screen
-   *  button cannot disagree about whether it is on. */
-  aimbot = false;
 
   private binds: Record<Action, string> = { ...DEFAULT_BINDS };
   private keys = new Set<string>();
@@ -127,6 +122,17 @@ export class Controls {
   private touchFire = false;
   private touchAim = false;
   private touchJump = false;
+  /**
+   * A press that has not been sampled yet.
+   *
+   * Input is sampled on its own 30 Hz timer, not on the pointer event, so a
+   * quick tap that goes down and up inside one tick was simply never seen --
+   * on a phone that is a trigger pull or a jump that silently did nothing, and
+   * it happens constantly because tapping is how phones work. Latching the
+   * press until at least one sample has carried it makes every tap count.
+   */
+  private touchFireEdge = false;
+  private touchJumpEdge = false;
   private touchCrouch = false;
   private touchSprint = false;
   private scoreboard = false;
@@ -148,7 +154,7 @@ export class Controls {
   /** Read-only view for the camera. sample() advances the sequence number, so
    *  callers that only want to observe must not go through it. */
   get aiming(): boolean { return this.rightDown || this.touchAim; }
-  get firing(): boolean { return this.mouseDown || this.touchFire; }
+  get firing(): boolean { return this.mouseDown || this.touchFire || this.touchFireEdge; }
   get scoreboardOpen(): boolean { return this.scoreboard; }
 
   // -------------------------------------------------------------------------
@@ -222,10 +228,22 @@ export class Controls {
    */
   setTouchAction(action: string, on: boolean): boolean {
     switch (action) {
-      case "fire": this.touchFire = on; return on;
-      case "jump": this.touchJump = on; return on;
+      case "fire":
+        this.touchFire = on;
+        if (on) this.touchFireEdge = true;
+        return on;
+      case "jump":
+        this.touchJump = on;
+        if (on) this.touchJumpEdge = true;
+        return on;
       case "crouch": this.touchCrouch = on; return on;
-      case "scores": this.setScoreboard(on); return on;
+      // A toggle, not a hold. Holding a button to read the scoreboard costs
+      // the thumb that would otherwise be on the stick or the trigger, which
+      // on a phone means you cannot check the score without standing still and
+      // stopping shooting.
+      case "scores":
+        if (on) this.setScoreboard(!this.scoreboard);
+        return this.scoreboard;
       case "aim":
         if (on) this.touchAim = !this.touchAim;
         return this.touchAim;
@@ -238,9 +256,6 @@ export class Controls {
       case "build":
         if (on) this.selectSlot(this.inBuildMode ? this.lastWeaponSlot : this.lastBuildSlot);
         return this.inBuildMode;
-      case "aimlock":
-        if (on) this.toggleAimLock();
-        return this.aimbot;
       default: return on;
     }
   }
@@ -248,18 +263,16 @@ export class Controls {
   /** Select a weapon (0-4) or a build piece (5-8). Used by the on-screen slot
    *  bar as well as the keyboard. */
   selectSlot(slot: number): void {
-    if (slot < 0 || slot > 8) return;
+    if (slot < 0 || slot > SLOT_SHIELD) return;
+    // 9-11 are the material switches riding the same field; they are not
+    // something the slot bar can select.
+    if (slot > SLOT_CONE && slot !== SLOT_SHIELD) return;
     this.slot = slot;
     if (slot >= SLOT_WALL) this.lastBuildSlot = slot;
     else this.lastWeaponSlot = slot;
   }
 
   selectMaterialPublic(material: number): void { this.selectMaterial(material); }
-
-  toggleAimLock(): boolean {
-    this.aimbot = !this.aimbot;
-    return this.aimbot;
-  }
 
   requestLock(): void {
     // Returns a promise in current browsers, and rejects when the document is
@@ -360,11 +373,11 @@ export class Controls {
     else if (hit("floor")) this.selectSlot(SLOT_FLOOR);
     else if (hit("ramp")) this.selectSlot(SLOT_RAMP);
     else if (hit("cone")) this.selectSlot(SLOT_CONE);
+    else if (hit("shield")) this.selectSlot(SLOT_SHIELD);
     else if (hit("matWood")) this.selectMaterial(0);
     else if (hit("matBrick")) this.selectMaterial(1);
     else if (hit("matMetal")) this.selectMaterial(2);
     else if (hit("reload")) this.edgeReload = true;
-    else if (hit("aimLock")) this.toggleAimLock();
   }
 
   private selectMaterial(mat: number): void {
@@ -381,15 +394,16 @@ export class Controls {
    */
   sample(): InputCommand {
     let buttons = 0;
-    if (this.down("jump") || this.touchJump) buttons |= BTN_JUMP;
-    if (this.mouseDown || this.touchFire) buttons |= BTN_FIRE;
+    if (this.down("jump") || this.touchJump || this.touchJumpEdge) buttons |= BTN_JUMP;
+    if (this.mouseDown || this.touchFire || this.touchFireEdge) buttons |= BTN_FIRE;
+    this.touchJumpEdge = false;
+    this.touchFireEdge = false;
     if (this.rightDown || this.touchAim) buttons |= BTN_AIM;
     if (this.down("crouch") || this.touchCrouch) buttons |= BTN_CROUCH;
     if (this.down("sprint") || this.touchSprint) buttons |= BTN_SPRINT;
     if (this.edgeReload) { buttons |= BTN_RELOAD; this.edgeReload = false; }
     if (this.down("edit")) buttons |= BTN_EDIT;
     if (this.edgeReset) { buttons |= BTN_RESET; this.edgeReset = false; }
-    if (this.aimbot) buttons |= BTN_AIMBOT;
 
     let moveX = 0;
     let moveZ = 0;

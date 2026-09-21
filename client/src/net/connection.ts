@@ -5,7 +5,7 @@ import {
   Writer, Reader, writeInputBatch, C_PING, C_CHAT,
   S_WELCOME, S_SNAPSHOT, S_PONG, S_FULL_WORLD, S_MATCH, S_CHAT, S_KICK,
   EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE,
-  PF_ALIVE, PF_SLIDING,
+  PF_ALIVE, PF_SLIDING, PF_SHIELD_SPENT,
 } from "@shared/protocol";
 import { readSnapshot, type GameEvent, type OtherState } from "@shared/snapshot";
 import { World } from "@shared/world";
@@ -29,6 +29,8 @@ export interface ClientSelf extends MovementState {
   material: number;
   reloadMs: number;
   alive: boolean;
+  /** Whether this match's one shield block has already been placed. */
+  shieldUsed: boolean;
 }
 
 interface RemoteSample {
@@ -106,7 +108,7 @@ export class Connection {
   readonly self: ClientSelf = {
     ...newMovementState(),
     hp: 100, shield: 0, mats: 0, weapon: 0, ammo: 0,
-    buildSlot: -1, material: 0, reloadMs: 0, alive: true,
+    buildSlot: -1, material: 0, reloadMs: 0, alive: true, shieldUsed: false,
   };
 
   selfId = -1;
@@ -321,6 +323,7 @@ export class Connection {
     s.material = snap.self.material;
     s.reloadMs = snap.self.reloadMs;
     s.alive = (snap.self.flags & PF_ALIVE) !== 0;
+    s.shieldUsed = (snap.self.flags & PF_SHIELD_SPENT) !== 0;
 
     // Snap to authority, then replay everything the server has not seen yet.
     // Without the replay the player would visibly jump back by their ping
@@ -330,6 +333,7 @@ export class Connection {
     s.grounded = (snap.self.flags & 2) !== 0;
     s.crouch = snap.self.stance / 255;
     s.stamina = (snap.self.stamina / 255) * SPRINT_STAMINA_MAX;
+    s.bloom = snap.self.bloom / 255;
     s.sliding = (snap.self.flags & PF_SLIDING) !== 0;
 
     dropAcknowledged(this.pending, snap.ackSeq);

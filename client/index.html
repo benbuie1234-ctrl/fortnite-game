@@ -158,7 +158,8 @@
     font-size: 10px; color: var(--muted); gap: 2px;
   }
   .slot .k { font-size: 10px; font-weight: 700; color: #5d6577; }
-  .slot.active { border-color: var(--accent); background: rgba(255,197,61,.14); color: var(--text); }
+  .slot.spent {opacity:.4;filter:grayscale(1);}
+.slot.active { border-color: var(--accent); background: rgba(255,197,61,.14); color: var(--text); }
   .slot .ico { font-size: 17px; line-height: 1; }
 
   #ammo {
@@ -235,20 +236,22 @@ summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#1
 .vital-label {display:flex;justify-content:space-between;font-size:10px;letter-spacing:1px;margin:6px 0 3px;font-weight:800;} .vital-label b {font-size:13px;}
 .bar {height:10px;border:0;border-radius:2px;}
 .slots {gap:5px;bottom:24px;} .slot {width:58px;height:65px;border-radius:5px;background:linear-gradient(#284c6ddd,#12283ee8);border:1px solid #93c8ed55;color:#e1edf7;position:relative;}
+.slot.spent {opacity:.4;filter:grayscale(1);}
 .slot.active {background:linear-gradient(#658852,#314b36);border:2px solid var(--accent);box-shadow:0 0 14px #d9ff5522;transform:translateY(-4px);}
 .slot .ico {height:25px;} .ico svg {width:39px;height:27px;} .slot .k {position:absolute;top:3px;left:5px;font-size:9px;color:white;} .slot .ico {margin-top:8px;}
 #buildSlots {position:absolute;right:24px;bottom:99px;display:flex;gap:5px;} #buildSlots .slot {width:43px;height:47px;font-size:9px;} #buildSlots .ico {font-size:20px;height:20px;margin-top:3px;} #buildSlots .k {font-size:8px;}
-.mats {right:219px;bottom:99px;gap:4px;} .mat {min-width:35px;padding:5px;font-size:12px;border-radius:4px;} .mat small {font-size:8px;}
-#ammo {bottom:160px;font-size:32px;} #ammo small {color:#dfebf7;}
+.mats {right:24px;bottom:152px;gap:4px;} .mat {min-width:35px;padding:5px;font-size:12px;border-radius:4px;} .mat small {font-size:8px;}
+#ammo {bottom:206px;font-size:32px;} #ammo small {color:#dfebf7;}
 #score {max-width:70%;flex-wrap:wrap;justify-content:center;border:0;border-radius:4px;font-size:11px;background:#10243de0;} #score .p b {font-size:18px;}
-#killfeed {top:82px;font-size:11px;max-width:45%;} #netstat {top:65px;} #roomBadge {position:absolute;top:24px;left:24px;font-size:11px;letter-spacing:1px;color:#def3ff;} #helpBadge {position:absolute;left:24px;bottom:155px;font-size:10px;color:#d4e5ef;text-shadow:0 1px 4px black;}
-#buildPreview {bottom:190px;background:#10243dbb;padding:5px 10px;border-radius:4px;} #centerMsg .sub {color:#eef5ff;}
-@media(max-width:700px) {.vitals {bottom:185px;width:170px;left:16px;} #helpBadge{display:none;} #score{top:52px;max-width:94%;width:max-content;} #roomBadge{left:16px;top:16px;} #killfeed{top:110px;} .slots,#buildSlots,.mats,#ammo{right:16px;} .mats{right:211px;} .card{padding:24px;} #menu::before{display:none;} }
+#killfeed {top:82px;font-size:11px;max-width:45%;} #netstat {top:65px;} #roomBadge {position:absolute;top:24px;left:24px;font-size:11px;letter-spacing:1px;color:#def3ff;} #helpBadge {position:absolute;left:24px;bottom:132px;font-size:10px;color:#d4e5ef;text-shadow:0 1px 4px black;}
+#buildPreview {bottom:244px;background:#10243dbb;padding:5px 10px;border-radius:4px;} #centerMsg .sub {color:#eef5ff;}
+@media(max-width:700px) {.vitals {bottom:185px;width:170px;left:16px;} #helpBadge{display:none;} #score{top:52px;max-width:94%;width:max-content;} #roomBadge{left:16px;top:16px;} #killfeed{top:110px;} .slots,#buildSlots,.mats,#ammo{right:16px;} .card{padding:24px;} #menu::before{display:none;} }
 @media(max-height:650px) {#menu{align-items:flex-start;} .logo{font-size:44px;} .card{padding:20px;} .tagline{margin:6px 0 14px;} }
 
 
 .damage-number {position:absolute;left:52%;top:44%;font-size:30px;font-weight:900;text-shadow:0 2px 4px #10243d;animation:damage-rise .7s ease-out forwards;}
 @keyframes damage-rise {to {transform:translateY(-45px);opacity:0;}}
+.damage-number.heal {left:46%;top:40%;color:#8ef07a;}
 #crosshair.shotgun {border:2px solid #fff9;border-radius:50%;} #crosshair.shotgun::before,#crosshair.shotgun::after {display:none;}
 #structureHealth {display:none;position:absolute;left:50%;top:57%;transform:translateX(-50%);width:190px;text-align:center;font-size:11px;font-weight:800;text-shadow:0 1px 3px black;}
 #structureHealth .bar {margin-top:6px;height:7px;} #structureFill {background:#ffd653;}
@@ -350,25 +353,72 @@ body.touch #mobileControls { display:block; }
 /* One thumb row along the bottom edge, and the rest of the HUD lifted clear
    of it. Dropping the buttons on top of the weapon bar would have made both
    unusable: a tap meant for a slot would fire instead. */
-#mobileControls [data-touch="fire"] { right:16px; bottom:16px; width:92px; height:92px; background:rgba(150,32,32,.55); }
-#mobileControls [data-touch="aim"] { right:116px; bottom:16px; }
-#mobileControls [data-touch="jump"] { right:196px; bottom:16px; }
-#mobileControls [data-touch="crouch"] { right:276px; bottom:16px; }
-#mobileControls [data-touch="reload"] { left:168px; bottom:86px; width:56px; height:56px; font-size:10px; }
-#mobileControls [data-touch="sprint"] { left:232px; bottom:86px; width:56px; height:56px; font-size:10px; }
-#mobileControls [data-touch="build"] { left:296px; bottom:86px; width:56px; height:56px; font-size:10px; background:rgba(120,140,40,.55); }
-#mobileControls [data-touch="scores"] { left:20px; top:20px; bottom:auto; width:56px; height:56px; font-size:9px; }
-#mobileControls [data-touch="aimlock"] { left:84px; top:20px; bottom:auto; width:56px; height:56px; font-size:10px; }
+/* One thumb cluster at each bottom corner, and the whole HUD moved out from
+   between them. The previous layout stacked the weapon bar, the build bar and
+   the material boxes directly above the action buttons, so on a phone the
+   readouts and the controls were competing for the same two hundred pixels and
+   a tap meant for a slot fired the gun instead. The readouts now live along the
+   top-right, where nothing is ever pressed. */
+#mobileControls [data-touch="fire"]   { right:14px;  bottom:14px;  width:96px; height:96px; background:rgba(150,32,32,.55); }
+#mobileControls [data-touch="aim"]    { right:120px; bottom:22px;  width:72px; height:72px; }
+#mobileControls [data-touch="jump"]   { right:120px; bottom:104px; width:72px; height:72px; }
+#mobileControls [data-touch="crouch"] { right:200px; bottom:22px;  width:64px; height:64px; font-size:10px; }
+#mobileControls [data-touch="build"]  { right:200px; bottom:96px;  width:64px; height:64px; font-size:10px; background:rgba(120,140,40,.55); }
+#mobileControls [data-touch="sprint"] { left:160px;  bottom:120px; width:62px; height:62px; font-size:10px; }
+#mobileControls [data-touch="reload"] { left:160px;  bottom:44px;  width:62px; height:62px; font-size:10px; }
+#mobileControls [data-touch="scores"] { left:16px;   top:16px; bottom:auto; width:54px; height:54px; font-size:9px; }
 #mobileControls [data-touch].held { background:rgba(217,255,85,.42); color:#16210a; }
+#mobileControls [data-touch]:active { filter:brightness(1.5); }
 
-body.touch .slots { bottom:110px; right:16px; gap:4px; }
-body.touch .slot { width:46px; height:52px; }
+/* --- the readouts, pushed clear of both thumbs --- */
+/* Everything the player READS goes down the right-hand side from the top, in
+   one column, in the order it is needed: what you are building with, what you
+   are holding, how much of it is left. Nothing is ever tapped in the top
+   corners, so nothing here can be hit by accident. */
+body.touch .mats        { top:12px;  bottom:auto; right:14px; gap:4px; }
+body.touch .slots       { top:54px;  bottom:auto; right:14px; gap:4px; }
+body.touch #buildSlots  { top:112px; bottom:auto; right:14px; gap:4px; }
+body.touch #ammo        { top:162px; bottom:auto; right:14px; font-size:22px; text-align:right; }
+body.touch .slot        { width:46px; height:52px; }
 body.touch .slot .ico svg { width:30px; height:22px; }
-body.touch #buildSlots { bottom:172px; right:16px; }
-body.touch .mats { bottom:172px; right:206px; }
-body.touch #ammo { bottom:222px; right:16px; font-size:24px; }
-body.touch .vitals { left:168px; bottom:24px; width:170px; }
+body.touch #buildSlots .slot { width:40px; height:44px; }
+/* Above the stick, not beside it: beside it is where the left thumb lives. */
+body.touch .vitals      { left:16px; bottom:164px; width:180px; }
+/* Diagnostics and the feed go down the LEFT, clear of the readout column. */
+body.touch #netstat     { top:14px; left:82px; right:auto; }
+body.touch #killfeed    { top:76px; right:auto; left:16px; align-items:flex-start; max-width:42%; }
+body.touch #roomBadge   { display:none; }
 body.touch #helpBadge { display:none; }
+/* The build readout stays. It is the only thing that says WHY a placement was
+   refused, and a phone has no other channel for that -- hiding it left touch
+   players tapping a button that silently did nothing. */
+body.touch #buildPreview { left:16px; bottom:120px; transform:none; font-size:11px; }
+body.touch #scoreboard  { min-width:0; width:min(92vw,460px); }
+
+/* Landscape phones are short, so every row has to tighten. This is the
+   orientation people actually hold a shooter in, so it gets the careful pass:
+   the readout column is compressed rather than rearranged, because moving
+   things between orientations is how you end up not knowing where anything is. */
+@media (orientation:landscape) and (max-height:540px) {
+  body.touch .mats       { top:8px; }
+  body.touch .slots      { top:46px; }
+  body.touch #buildSlots { top:102px; }
+  body.touch #ammo       { top:150px; font-size:19px; }
+  body.touch .mat        { min-width:32px; padding:4px; font-size:11px; }
+  body.touch .vitals     { left:16px; bottom:146px; width:152px; }
+  body.touch #killfeed   { top:62px; max-width:34%; }
+  body.touch #compass    { top:88px; }
+  body.touch #score      { top:8px; font-size:10px; max-width:34%; }
+  body.touch #locationBadge { top:48px; }
+  #mobileStick           { width:112px; height:112px; left:16px; bottom:16px; }
+  #mobileControls [data-touch="fire"]   { width:84px; height:84px; }
+  #mobileControls [data-touch="aim"]    { right:108px; bottom:18px; width:64px; height:64px; }
+  #mobileControls [data-touch="jump"]   { right:108px; bottom:90px; width:64px; height:64px; }
+  #mobileControls [data-touch="crouch"] { right:178px; bottom:18px; width:58px; height:58px; }
+  #mobileControls [data-touch="build"]  { right:178px; bottom:84px; width:58px; height:58px; }
+  #mobileControls [data-touch="sprint"] { left:138px; bottom:100px; width:56px; height:56px; }
+  #mobileControls [data-touch="reload"] { left:138px; bottom:36px;  width:56px; height:56px; }
+}
 
 /* ------------------------------------------------------- keybinds */
 #keybinds { display:grid; grid-template-columns:1fr auto; gap:5px 8px; margin:8px 0 12px; }
@@ -422,16 +472,11 @@ body.touch #helpBadge { display:none; }
 #staminaFill { background:linear-gradient(90deg,#d9ff55,#a8dd3a); }
 .bar.stamina.spent #staminaFill { background:linear-gradient(90deg,#ff8a4a,#ff5a5a); }
 
-/* --------------------------------------------------------- aimbot badge */
-#aimbotBadge {
-  position:absolute; left:50%; top:148px; transform:translateX(-50%);
-  padding:4px 12px; border-radius:4px; background:#c0322acc; color:#fff;
-  font-size:11px; font-weight:800; letter-spacing:2px; display:none;
-}
-#aimbotBadge.on { display:block; }
-
 /* Tappable HUD. Only on touch: with the pointer locked on desktop the DOM
    never sees a click anyway, and opting in would risk stealing the lock. */
+.touchonly { display:none; }
+body.touch .deskonly { display:none; }
+body.touch .touchonly { display:inline; }
 body.touch .slot, body.touch .mat { pointer-events:auto; cursor:pointer; }
 body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
 </style>
@@ -469,10 +514,9 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
     </div>
 
     <div id="scope"><div class="vig"></div><div class="ring"></div><i class="h"></i><i class="v"></i><div class="hub"></div><div class="mil"><b></b><b></b><b></b></div></div>
-    <div id="aimbotBadge">AIMBOT</div>
     <div id="hitDirs"></div>
     <div id="compass"><div id="compassLine"></div></div>
-    <div id="scoreboard"><div class="wrap"><h4>SCOREBOARD</h4><table id="scoreTable"></table><div class="hint2">Hold Tab</div></div></div>
+    <div id="scoreboard"><div class="wrap"><h4>SCOREBOARD</h4><table id="scoreTable"></table><div class="hint2"><span class="deskonly">Hold Tab</span><span class="touchonly">Tap SCORES again to close</span></div></div></div>
     <div id="mobileControls">
       <div id="mobileLook"></div>
       <div id="mobileStick"><i></i></div>
@@ -483,10 +527,9 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
       <button data-touch="sprint">SPRINT</button>
       <button data-touch="build">BUILD</button>
       <button data-touch="scores">SCORES</button>
-      <button data-touch="aimlock">LOCK</button>
       <button data-touch="reload">RELOAD</button>
     </div>
-    <div class="slots" id="slots"></div><div id="buildSlots"></div><div id="roomBadge"></div><div id="helpBadge">G Reload · Ctrl Crouch · J Aim lock · Tab Scores · M Sound · Esc Release mouse</div>
+    <div class="slots" id="slots"></div><div id="buildSlots"></div><div id="roomBadge"></div><div id="helpBadge">G Reload · Ctrl Crouch · Tab Scores · M Sound · Esc Release mouse</div>
   </div>
 
   <div id="menu">
@@ -522,9 +565,9 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
         <b>WASD</b> move &nbsp;·&nbsp; <b>Space</b> jump / hold near a ledge to climb<br/>
         <b>Left click</b> shoot / place &nbsp;·&nbsp; <b>Right click</b> aim<br/>
         <b>1-5</b> weapons &nbsp;·&nbsp; <b>Q E R F</b> wall, floor, ramp, cone<br/>
-        <b>Z X C</b> wood, brick, metal &nbsp;·&nbsp; <b>G</b> reload<br/>
+        <b>V</b> shield block (one per match, reflects bullets) &nbsp;·&nbsp; <b>Z X C</b> wood, brick, metal &nbsp;·&nbsp; <b>G</b> reload<br/>
         <b>Ctrl</b> crouch &nbsp;·&nbsp; <b>Shift + Ctrl</b> at speed to slide<br/>
-        <b>J</b> aim lock (dev, rebindable; Cmd/Ctrl+M also works) &nbsp;·&nbsp; <b>Tab</b> scoreboard &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; <b>Esc</b> release mouse
+        <b>Tab</b> scoreboard &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; <b>Esc</b> release mouse
       </details>
     </div>
   </div>

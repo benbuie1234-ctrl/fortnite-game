@@ -1,6 +1,6 @@
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS_PER_MATCH, RESPAWN_DELAY_S,
-  ROUND_WIN_SCORE, PLAYER_MAX_HP, MATERIALS, SPRINT_STAMINA_MAX,
+  ROUND_WIN_SCORE, PLAYER_MAX_HP, MATERIALS, SPRINT_STAMINA_MAX, SHIELD_LIFETIME_S,
 } from "@shared/constants";
 import {
   C_HELLO, C_INPUT, C_PING, C_CHAT,
@@ -8,14 +8,18 @@ import {
   EV_DEATH, EV_RESPAWN, EV_PIECE_REMOVE,
   Reader, Writer, readInputBatch,
   PF_ALIVE, PF_GROUNDED, PF_AIMING, PF_CROUCH, PF_FIRING, PF_MOVING, PF_SLIDING,
+  PF_SHIELD_SPENT,
 } from "@shared/protocol";
 import { writeSnapshot, type GameEvent, type OtherState } from "@shared/snapshot";
 import { World } from "@shared/world";
 import { buildArena, arenaSpawns, isOutOfBounds, ARENA_OWNER } from "@shared/arena";
-import { stepPlayer, fallDamage, BTN_FIRE, BTN_AIM, BTN_RELOAD, BTN_JUMP, BTN_AIMBOT } from "@shared/sim";
+import { stepPlayer, fallDamage, BTN_FIRE, BTN_AIM, BTN_RELOAD, BTN_JUMP } from "@shared/sim";
 import { weaponById, ARENA_LOADOUT } from "@shared/weapons";
+import { CritterState } from "@shared/critters";
 import { ServerPlayer } from "./player";
 import { resolveFire, tryPlace, beginReload, finishReloads } from "./combat";
+import { BUILD_SHIELD } from "@shared/placement";
+import { SLOT_SHIELD } from "@shared/build";
 
 export interface Env {
   MATCH: DurableObjectNamespace;
@@ -37,6 +41,9 @@ export class MatchRoom implements DurableObject {
   private timer: ReturnType<typeof setInterval> | null = null;
   private tickCount = 0;
   private spawns = arenaSpawns();
+  /** Which birds and fish are currently down. Authoritative; clients mirror it
+   *  from EV_CRITTER rather than being told the whole set. */
+  private critters = new CritterState();
 
   // The room is entirely in-memory and ephemeral: a match that ends leaves
   // nothing to persist, so neither the state store nor the env is retained.
@@ -253,6 +260,7 @@ export class MatchRoom implements DurableObject {
     this.timer = null;
     // Nobody left: drop player-built pieces so the next match starts clean.
     this.resetBuilds();
+    this.critters.reset();
     this.events.length = 0;
     this.tickCount = 0;
   }
@@ -291,6 +299,8 @@ export class MatchRoom implements DurableObject {
       player.recordHistory(nowMs);
     }
 
+    this.expireShields(nowSec);
+
     if (this.tickCount % Math.max(1, Math.round(TICK_HZ / SNAPSHOT_HZ)) === 0) {
       this.broadcastSnapshots(nowMs);
       this.events.length = 0;
@@ -320,7 +330,6 @@ export class MatchRoom implements DurableObject {
 
       this.applySlot(player, cmd.slot);
       player.aiming = (cmd.buttons & BTN_AIM) !== 0;
-      player.aimbot = (cmd.buttons & BTN_AIMBOT) !== 0;
 
       if (!player.alive) continue;
 
@@ -349,7 +358,7 @@ export class MatchRoom implements DurableObject {
       } else {
         const triggered = weapon.auto ? firing : firing && !player.wasFiring;
         if (triggered) {
-          resolveFire(this.world, player, [...this.players.values()], inputTime, nowMs, this.events);
+          resolveFire(this.world, player, [...this.players.values()], inputTime, nowMs, this.events, this.critters);
         }
       }
       player.wasFiring = firing;
@@ -362,12 +371,29 @@ export class MatchRoom implements DurableObject {
     // the next acknowledgement erase movement already predicted by clients.
   }
 
+  /**
+   * Take down shields that have outlived their welcome.
+   *
+   * Swept rather than scheduled: there are at most one per player, so walking
+   * the piece map twice a second costs nothing, and a timer per piece would be
+   * one more thing to clean up when a round ends or a player leaves.
+   */
+  private expireShields(nowSec: number): void {
+    if (this.tickCount % Math.max(1, Math.round(TICK_HZ / 2)) !== 0) return;
+    for (const [key, piece] of this.world.pieces) {
+      if (piece.slot !== SLOT_SHIELD) continue;
+      if (nowSec - piece.placedAt < SHIELD_LIFETIME_S) continue;
+      this.world.remove(key);
+      this.events.push({ kind: EV_PIECE_REMOVE, key });
+    }
+  }
+
   private applySlot(player: ServerPlayer, slot: number): void {
     if (slot >= 0 && slot <= 4) {
       if (player.weaponIdx !== slot) player.reloadEndAt = 0;
       player.weaponIdx = slot;
       player.buildSlot = -1;
-    } else if (slot >= 5 && slot <= 8) {
+    } else if ((slot >= 5 && slot <= 8) || slot === BUILD_SHIELD) {
       player.buildSlot = slot;
     } else if (slot >= 9 && slot <= 11) {
       const mat = slot - 9;
@@ -416,6 +442,7 @@ export class MatchRoom implements DurableObject {
     for (const p of this.players.values()) {
       p.kills = 0;
       p.deaths = 0;
+      p.shieldUsed = false;
       const spawn = this.pickSpawn();
       p.resetForSpawn(spawn.x, spawn.y, spawn.z, spawn.yaw);
       p.respawnAt = nowSec;
@@ -460,6 +487,7 @@ export class MatchRoom implements DurableObject {
           reloadMs: Math.max(0, me.reloadEndAt * 1000 - nowMs),
           stance: Math.round(me.crouch * 255),
           stamina: Math.round((me.stamina / SPRINT_STAMINA_MAX) * 255),
+          bloom: Math.round(me.bloom * 255),
         },
         others,
         events: this.events,
@@ -479,6 +507,7 @@ function flagsFor(p: ServerPlayer): number {
   if (Math.hypot(p.vx, p.vz) > 0.8) f |= PF_MOVING;
   if (p.crouch > 0.5) f |= PF_CROUCH;
   if (p.sliding) f |= PF_SLIDING;
+  if (p.shieldUsed) f |= PF_SHIELD_SPENT;
   void BTN_JUMP;
   return f;
 }

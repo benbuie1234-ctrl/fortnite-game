@@ -1,5 +1,6 @@
 import {
   MATERIALS, BULLET_DROP_START, BULLET_DROP_RATE, BULLET_SEGMENT,
+  BLOOM_SPREAD_HIP, BLOOM_SPREAD_ADS,
 } from "./constants";
 
 export interface WeaponDef {
@@ -149,13 +150,24 @@ export function pieceDamage(w: WeaponDef, mat: number): number {
 /**
  * Cone half-angle for a shot, in radians.
  *
- * Just the weapon's own figure. A movement-driven bloom term used to be added
- * on top; it tripled the effective cone at its ceiling and took the crosshair
- * with it, which made every gun feel wildly inaccurate. Spread is back to the
- * per-weapon values, which are the ones the weapons were tuned around.
+ * The weapon's own figure, opened up by however much bloom the shooter has
+ * built up moving around. `bloom` runs 0..1 and comes out of the movement
+ * solver, so both sides derive the same cone from the same reconciled number.
+ *
+ * The growth is a fraction of the weapon's spread rather than a fixed angle,
+ * which keeps the relative accuracy of the guns intact: a sniper that is
+ * pin-sharp aimed stays pin-sharp, and a shotgun that is already a wall of
+ * pellets does not turn into a fog. The first version of this added a flat
+ * term and tripled the cone at its ceiling, which is why it had to come out.
  */
-export function spreadFor(w: WeaponDef, aiming: boolean): number {
-  return aiming ? w.spreadAds : w.spreadHip;
+export function spreadFor(w: WeaponDef, aiming: boolean, bloom = 0): number {
+  const base = aiming ? w.spreadAds : w.spreadHip;
+  const growth = aiming ? BLOOM_SPREAD_ADS : BLOOM_SPREAD_HIP;
+  return base * (1 + growth * clampBloom(bloom));
+}
+
+function clampBloom(v: number): number {
+  return v > 0 ? (v < 1 ? v : 1) : 0;
 }
 
 /**

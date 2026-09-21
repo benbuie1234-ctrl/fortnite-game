@@ -46,5 +46,20 @@ for (let i = 0; i < commands.length; i++) {
   check(`cmd${i} pitch`, Math.abs(a.pitch - b.pitch) < 1e-4, `sent ${a.pitch} got ${b.pitch}`);
 }
 
+// The button field is a u16 on the wire but every flag defined so far fits in
+// the low byte, so a narrowing to u8 anywhere along the path would go unnoticed
+// until the ninth flag was added and silently never arrived.
+{
+  const w2 = new Writer(64);
+  writeInputBatch(w2, [{
+    seq: 9, moveX: 0, moveZ: 1,
+    yaw: quantizeYaw(0.1), pitch: quantizePitch(0),
+    buttons: 0xa5a5, slot: 3,
+  }], 99);
+  const only = readInputBatch(new Reader(w2.finish().slice(1))).commands[0];
+  check("the full 16-bit button field survives", only.buttons === 0xa5a5,
+    `got ${only.buttons}`);
+}
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -1,63 +1,370 @@
 /** Shared layout used by collision, scenery, navigation and spawn selection. */
-export const MAP_HALF = 360;
+import { TILE } from './constants';
+
+/**
+ * Half-width of the playable area, in metres.
+ *
+ * Pulled in from 360. Matches were slow because the four districts sat 312 m
+ * apart across an empty middle, so most of a round was spent walking. The
+ * districts are closer together and the space between them now has terrain in
+ * it rather than distance.
+ */
+export const MAP_HALF = 240;
+
+/** Cell index a metre coordinate falls in. Map data is authored in cells so it
+ *  survives a change to TILE; everything else here is metres. */
+export const cell = (metres: number): number => Math.round(metres / TILE);
+
+/**
+ * The districts, and the height each one's plateau sits at.
+ *
+ * Heights are exact multiples of TILE so a building's base cell lands exactly
+ * on its own ground. A plateau at 25 m with a 24 m base would leave every
+ * structure in the district either floating or sunk by a metre.
+ */
 export const LOCATIONS = [
-  {name:'SKYLINE CITY',x:-156,z:-156,color:0x62b7db,description:'High-rise blocks · rooftop fights'},
-  {name:'SUNNY MEADOWS',x:156,z:-156,color:0xeac06a,description:'Houses · gardens · neighborhood lanes'},
-  {name:'TIDAL WORKS',x:-156,z:156,color:0x68b9b1,description:'Warehouses · docks · lakefront'},
-  {name:'PINEWATCH RIDGE',x:156,z:156,color:0x89b96b,description:'Forest · hilltop cabins · lookout'},
+  {name:'SKYLINE CITY',x:-108,z:-108,height:TILE*4,color:0x62b7db,description:'High-rise blocks · rooftop fights'},
+  {name:'SUNNY MEADOWS',x:108,z:-108,height:TILE*1,color:0xeac06a,description:'Houses · gardens · neighborhood lanes'},
+  {name:'TIDAL WORKS',x:-108,z:108,height:0,color:0x68b9b1,description:'Warehouses · docks · lakefront'},
+  {name:'PINEWATCH RIDGE',x:108,z:108,height:TILE*5,color:0x89b96b,description:'Forest · hilltop cabins · lookout'},
+  {name:'THE CITADEL',x:0,z:0,height:TILE*2,color:0xd7a2e0,description:'Central mesa · the fight everyone walks into'},
 ] as const;
-export interface Building {x:number;z:number;w:number;d:number;floors:number;base:number;style:'city'|'house'|'warehouse'|'cabin';color:number;}
-export const BUILDINGS:Building[]=[];
-// 4 x 4 city blocks, each separated by a generous street or alley.
-for(let row=0;row<4;row++)for(let col=0;col<4;col++) {
-  BUILDINGS.push({x:-70+col*11,z:-70+row*11,w:6,d:6,floors:2+(row*3+col)%4,base:0,style:'city',color:[0xc6d4d9,0xe4c6a8,0xa9bccc,0xc3bbcf][(row+col)%4]});
-}
-for(let row=0;row<3;row++)for(let col=0;col<4;col++)BUILDINGS.push({x:35+col*10,z:[-68,-48,-34][row],w:4,d:5,floors:1+(col+row)%2,base:0,style:'house',color:[0xe6c08f,0xb8d2be,0xe5aea0,0xabc8d9][col]});
-for(let i=0;i<5;i++)BUILDINGS.push({x:-68+(i%3)*13,z:37+Math.floor(i/3)*18,w:9,d:10,floors:1,base:0,style:'warehouse',color:[0x739aa0,0xbb9b79,0x8895ae][i%3]});
-for(const [x,z] of [[43,43],[57,43],[43,57],[57,57]])BUILDINGS.push({x,z,w:4,d:4,floors:1,base:6,style:'cabin',color:0xb89970});
-BUILDINGS.push({x:51,z:51,w:3,d:3,floors:4,base:6,style:'city',color:0xd4c4a1});
-// Roadside stops break the long runs into smaller, readable encounters.
-for(const [x,z] of [[-27,-8],[22,-8],[-8,-28],[-8,23],[-29,-48],[22,-48],[-48,22],[23,4]]) {
-  BUILDINGS.push({x,z,w:4,d:4,floors:1,base:0,style:'cabin',color:0xb7bd9b});
-}
+
+// ---------------------------------------------------------------------------
+// Terrain
+//
+// Plateaus are combined with max(), never added. Summing them meant two
+// overlapping rises stacked into a spike nothing was authored against; taking
+// the higher of the two keeps every plateau exactly the height it claims to
+// be, which is what lets buildings be placed on a fixed base cell.
+//
+// Rolling ground fills the space BETWEEN the plateaus and is faded out by the
+// plateau coverage, so the flat tops stay flat.
+// ---------------------------------------------------------------------------
+
+interface Plateau { x:number; z:number; r:number; f:number; h:number; }
+
+/**
+ * Falloffs are roughly twice the height on purpose: that is a ~26 degree
+ * slope, which reads as a hillside you walk up rather than a cliff you
+ * scramble. Anything steeper and the approaches to the high districts stop
+ * being routes and become walls.
+ */
+const PLATEAUS: readonly Plateau[] = [
+  {x:-108,z:-108,r:46,f:54,h:TILE*4},  // Skyline, high and flat
+  {x:108, z:-108,r:48,f:34,h:TILE*1},  // Meadows, a gentle shelf
+  {x:-108,z:108, r:46,f:30,h:0},       // Tidal, at the waterline
+  {x:108, z:108, r:44,f:64,h:TILE*5},  // Pinewatch, the summit
+  {x:0,   z:0,   r:30,f:30,h:TILE*2},  // the central mesa
+];
+
+/** Low hills between the districts, so the middle of the map has shape. */
+const HILLS: readonly Plateau[] = [
+  {x:-10, z:-120,r:14,f:30,h:9},
+  {x:120, z:6,   r:16,f:32,h:11},
+  {x:-6,  z:124, r:15,f:28,h:8},
+  {x:-126,z:2,   r:14,f:30,h:10},
+  {x:56,  z:-58, r:11,f:24,h:7},
+  {x:-58, z:-52, r:10,f:22,h:6},
+  {x:62,  z:58,  r:12,f:26,h:9},
+  {x:-64, z:60,  r:11,f:24,h:7},
+];
+
+/** Centre and extent of the lake, in metres. */
+const LAKE = {x:-168,z:150,rx:46,rz:60};
+
 const smooth=(t:number)=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
-export function terrainHeight(x:number,z:number):number {
-  // Broad walkable ascent, flat hilltop keeps all cabin foundations exact.
-  const ridge=18*(1-smooth((Math.hypot(x-156,z-156)-62)/65));
-  const lake=Math.hypot((x+251)/50,(z-170)/76);
-  const basin=-1.2*(1-smooth((lake-.72)/.28));
-  return ridge+basin;
+/** 1 at the centre of a rise, 0 outside its falloff. */
+const reach=(p:Plateau,x:number,z:number)=>1-smooth((Math.hypot(x-p.x,z-p.z)-p.r)/p.f);
+
+/**
+ * The landscape before any building pad is cut into it.
+ *
+ * Split out from terrainHeight because the pads are DERIVED from the buildings
+ * and some buildings derive their base cell from the ground -- so the raw
+ * surface has to be answerable before the pads exist.
+ */
+export function rawTerrain(x:number,z:number):number {
+  let height=0,cover=0;
+  for(const p of PLATEAUS) {
+    const t=reach(p,x,z);
+    height=Math.max(height,p.h*t);
+    cover=Math.max(cover,t);
+  }
+  // Hills only raise the ground where no district plateau owns it, so a
+  // district's flat top is never tilted by one.
+  for(const p of HILLS) height=Math.max(height,p.h*reach(p,x,z)*(1-cover));
+  const lake=Math.hypot((x-LAKE.x)/LAKE.rx,(z-LAKE.z)/LAKE.rz);
+  return height-3.2*(1-smooth((lake-.7)/.3));
 }
+
+export function terrainHeight(x:number,z:number):number {
+  const base=rawTerrain(x,z);
+  const pad=padAt(x,z);
+  return pad===null?base:base+(pad.h-base)*pad.w;
+}
+
+/** Water surface height, for the renderer. Sits just above the basin floor. */
+export const LAKE_SURFACE = -1.4;
+export const LAKE_SHAPE = LAKE;
+
 export function locationAt(x:number,z:number):string {
   const nearest=LOCATIONS.reduce((a,b)=>Math.hypot(x-a.x,z-a.z)<Math.hypot(x-b.x,z-b.z)?a:b);
-  return Math.hypot(x-nearest.x,z-nearest.z)<100?nearest.name:'THE CROSSROADS';
+  return Math.hypot(x-nearest.x,z-nearest.z)<72?nearest.name:'THE CROSSROADS';
 }
+
+// ---------------------------------------------------------------------------
+// Buildings
+//
+// Authored in grid cells. `base` is the cell the ground floor sits on, so it
+// has to match the plateau underneath: height / TILE, exactly.
+// ---------------------------------------------------------------------------
+
+export interface Building {x:number;z:number;w:number;d:number;floors:number;base:number;style:'city'|'house'|'warehouse'|'cabin';color:number;}
+export const BUILDINGS:Building[]=[];
+
+// The four districts sit at the corners of a square, so their cell
+// coordinates are just two values in each axis. Naming them per AXIS rather
+// than per district matters: a single `MEADOW` constant used for both x and z
+// quietly puts the Meadows in the Pinewatch quadrant, buried 24 m inside that
+// plateau, and everything still compiles.
+const NEAR = cell(-108), FAR = cell(108);
+
+// Skyline: towers on a raised plateau, two cells apart so the streets between
+// them are one tile wide -- close enough to build across, which is the point.
+const CITY_BASE = cell(TILE * 4);
+for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+  BUILDINGS.push({
+    x: NEAR - 5 + col * 5, z: NEAR - 4 + row * 4, w: 3, d: 2,
+    floors: 2 + (row * 2 + col) % 3, base: CITY_BASE, style: 'city',
+    color: [0xc6d4d9, 0xe4c6a8, 0xa9bccc, 0xc3bbcf][(row + col) % 4],
+  });
+}
+
+// Meadows: single-storey houses with pitched roofs, on a low shelf.
+const MEADOW_BASE = cell(TILE * 1);
+for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+  if (row === 1 && col === 1) continue; // a green in the middle of the neighbourhood
+  BUILDINGS.push({
+    x: FAR - 4 + col * 4, z: NEAR - 4 + row * 4, w: 2, d: 2, floors: 1,
+    base: MEADOW_BASE, style: 'house', color: [0xe6c08f, 0xb8d2be, 0xe5aea0, 0xabc8d9][(row + col) % 4],
+  });
+}
+
+// Tidal: wide warehouses at the waterline.
+for (let i = 0; i < 4; i++) {
+  BUILDINGS.push({
+    x: NEAR - 5 + (i % 2) * 6, z: FAR - 4 + Math.floor(i / 2) * 6, w: 3, d: 3, floors: 1,
+    base: 0, style: 'warehouse', color: [0x739aa0, 0xbb9b79, 0x8895ae][i % 3],
+  });
+}
+
+// Pinewatch: cabins around a lookout tower, on the summit.
+const RIDGE_BASE = cell(TILE * 5);
+for (const [dx, dz] of [[-4, -4], [3, -4], [-4, 3], [3, 3]]) {
+  BUILDINGS.push({ x: FAR + dx, z: FAR + dz, w: 2, d: 2, floors: 1, base: RIDGE_BASE, style: 'cabin', color: 0xb89970 });
+}
+BUILDINGS.push({ x: FAR - 1, z: FAR, w: 3, d: 2, floors: 4, base: RIDGE_BASE, style: 'city', color: 0xd4c4a1 });
+
+// The Citadel: a two-storey blockhouse on the central mesa. Everybody can see
+// it from everywhere, which is what makes the middle of the map worth a fight.
+BUILDINGS.push({ x: -2, z: -2, w: 4, d: 4, floors: 2, base: cell(TILE * 2), style: 'city', color: 0xb7a8c8 });
+
+/**
+ * Cover between the districts.
+ *
+ * The base cell is derived from the terrain under each one rather than fixed,
+ * because these sit on the rolling ground between plateaus and a hard-coded
+ * base would bury half of them. They are also placed by their CENTRE, so the
+ * sample the base is taken from is the middle of the footprint.
+ */
+for (const [mx, mz] of [
+  [-58, -16], [54, -18], [-16, -56], [-18, 52], [-62, -62], [58, -60], [-60, 58], [60, 62],
+  [0, -92], [0, 92], [-92, 0], [92, 0],
+]) {
+  BUILDINGS.push({
+    x: cell(mx) - 1, z: cell(mz) - 1, w: 2, d: 2, floors: 1,
+    base: Math.round(rawTerrain(mx, mz) / TILE), style: 'cabin', color: 0xb7bd9b,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Building pads
+//
+// A building is a rigid stack of grid cells anchored to one base cell, so it
+// can only stand on ground that is level under its whole footprint. Rolling
+// terrain is the entire point of the map, so the terrain gives way instead:
+// each building flattens the ground beneath it and blends back out to the
+// landscape over a short skirt.
+//
+// Pads are spatially indexed because terrainHeight is on the hot path -- it is
+// called ~1500 times per bullet by the terrain raycast, so testing all forty
+// of them per sample would be felt. A sample only ever tests the handful of
+// pads in its own coarse cell.
+// ---------------------------------------------------------------------------
+
+interface Pad { x0:number; z0:number; x1:number; z1:number; h:number; }
+/** Metres of skirt from the pad edge back down to the landscape. Wide enough
+ *  that the slope it creates is always walkable. */
+const PAD_BLEND=11;
+const PAD_CELL=64;
+const PAD_INDEX=new Map<string,Pad[]>();
+
+function indexPad(pad:Pad):void {
+  for(let cx=Math.floor((pad.x0-PAD_BLEND)/PAD_CELL);cx<=Math.floor((pad.x1+PAD_BLEND)/PAD_CELL);cx++)
+  for(let cz=Math.floor((pad.z0-PAD_BLEND)/PAD_CELL);cz<=Math.floor((pad.z1+PAD_BLEND)/PAD_CELL);cz++) {
+    const key=`${cx},${cz}`;
+    const list=PAD_INDEX.get(key)??[];
+    list.push(pad);
+    PAD_INDEX.set(key,list);
+  }
+}
+
+/** The pad with the strongest claim on this point, or null. */
+function padAt(x:number,z:number):{h:number;w:number}|null {
+  const list=PAD_INDEX.get(`${Math.floor(x/PAD_CELL)},${Math.floor(z/PAD_CELL)}`);
+  if(list===undefined)return null;
+  let weight=0,height=0;
+  for(const pad of list) {
+    // Distance outside the rectangle; zero anywhere inside it.
+    const dx=Math.max(pad.x0-x,0,x-pad.x1);
+    const dz=Math.max(pad.z0-z,0,z-pad.z1);
+    const w=1-smooth(Math.hypot(dx,dz)/PAD_BLEND);
+    if(w>weight){weight=w;height=pad.h;}
+  }
+  return weight>0?{h:height,w:weight}:null;
+}
+
+for(const b of BUILDINGS) {
+  // A margin of a third of a tile, so the doorway threshold is level rather
+  // than sitting on the first centimetre of the skirt.
+  const m=TILE/3;
+  indexPad({x0:b.x*TILE-m,z0:b.z*TILE-m,x1:(b.x+b.w)*TILE+m,z1:(b.z+b.d)*TILE+m,h:b.base*TILE});
+}
+
 export function buildingAt(gx:number,gz:number):Building|undefined {
   return BUILDINGS.find(b=>gx>=b.x&&gx<=b.x+b.w&&gz>=b.z&&gz<=b.z+b.d);
 }
+
+/** Metre-space footprint of a building, padded. Used to keep scenery and props
+ *  out of doorways; written once so map data and the renderer cannot disagree
+ *  about where a building actually is. */
+export function buildingFootprint(b:Building,pad=0):{x0:number;z0:number;x1:number;z1:number} {
+  return {x0:b.x*TILE-pad, z0:b.z*TILE-pad, x1:(b.x+b.w)*TILE+pad, z1:(b.z+b.d)*TILE+pad};
+}
+
+// ---------------------------------------------------------------------------
+// Roads
+//
+// Shared so the renderer draws exactly the corridors the scenery generator
+// keeps clear. They used to be two separate hard-coded lists that drifted.
+// ---------------------------------------------------------------------------
+
+export interface Road {x1:number;z1:number;x2:number;z2:number;width:number;color:number;}
+export const ROADS:Road[]=[
+  // The central cross, and a ring joining the four districts.
+  {x1:0,z1:-MAP_HALF,x2:0,z2:MAP_HALF,width:12,color:0xbba97e},
+  {x1:-MAP_HALF,z1:0,x2:MAP_HALF,z2:0,width:12,color:0xbba97e},
+  {x1:-108,z1:-170,x2:-108,z2:170,width:9,color:0x667477},
+  {x1:108,z1:-170,x2:108,z2:170,width:9,color:0x667477},
+  {x1:-170,z1:-108,x2:170,z2:-108,width:9,color:0x667477},
+  {x1:-170,z1:108,x2:170,z2:108,width:9,color:0x667477},
+];
+// A spur from each district to the centre, so every plateau has a walkable
+// approach rather than only its own slope.
+for(const poi of LOCATIONS) {
+  if(poi.x===0&&poi.z===0)continue;
+  ROADS.push({x1:poi.x,z1:poi.z,x2:poi.x*0.18,z2:poi.z*0.18,width:7,color:0xbba97e});
+}
+
+const onRoad=(x:number,z:number,pad:number)=>ROADS.some(r=>{
+  const dx=r.x2-r.x1, dz=r.z2-r.z1, len2=dx*dx+dz*dz || 1;
+  const t=Math.max(0,Math.min(1,((x-r.x1)*dx+(z-r.z1)*dz)/len2));
+  return Math.hypot(x-(r.x1+dx*t),z-(r.z1+dz*t))<r.width/2+pad;
+});
+
+// ---------------------------------------------------------------------------
+// Scenery and props
+// ---------------------------------------------------------------------------
 
 export interface Scenery {x:number;z:number;y:number;size:number;kind:'tree'|'rock';}
 export const SCENERY:Scenery[]=[];
 let seed=918273;
 function random():number { seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296; }
-for(let i=0;i<800;i++) {
-  const x=(random()-.5)*590,z=(random()-.5)*590;
-  // Keep road corridors, lake, and every building/door approach clear.
-  if(Math.abs(x)<12||Math.abs(z)<12||Math.abs(Math.abs(x)-156)<10||Math.abs(Math.abs(z)-156)<10)continue;
-  if(x< -80&&x> -224&&z< -80&&z> -224)continue;
-  if(x>96&&x<225&&z< -80&&z> -214)continue;
-  if(BUILDINGS.some(b=>x>b.x*3-7&&x<(b.x+b.w)*3+7&&z>b.z*3-7&&z<(b.z+b.d)*3+7))continue;
-  const y=terrainHeight(x,z);if(y<-.05)continue;
-  SCENERY.push({x,z,y,size:3+random()*3,kind:i%5===0?'rock':'tree'});
+
+for(let i=0;i<900;i++) {
+  const x=(random()-.5)*(MAP_HALF*1.92), z=(random()-.5)*(MAP_HALF*1.92);
+  if(onRoad(x,z,4))continue;
+  if(BUILDINGS.some(b=>{const f=buildingFootprint(b,7);return x>f.x0&&x<f.x1&&z>f.z0&&z<f.z1;}))continue;
+  const y=terrainHeight(x,z);
+  if(y<-.05)continue; // nothing grows in the lake
+  // Trees cluster on the forested ridge and thin out over the city plateau.
+  const wooded=Math.hypot(x-108,z-108)<90;
+  if(!wooded&&random()<.45)continue;
+  SCENERY.push({x,z,y,size:4+random()*4,kind:i%5===0?'rock':'tree'});
+}
+
+// ---------------------------------------------------------------------------
+// Cars
+//
+// Solid cover you can also climb onto, parked along the roads and in the
+// districts. Sized a little over life size -- a real 4.5 m car reads as a toy
+// beside a 6 m wall, and the walls are the thing the eye calibrates against.
+// ---------------------------------------------------------------------------
+
+export interface Car {x:number;z:number;yaw:number;color:number;}
+/** Body dimensions, in metres. Length runs along the car's own forward axis. */
+export const CAR_LENGTH = 5.6;
+export const CAR_WIDTH = 2.4;
+export const CAR_HEIGHT = 1.55;
+
+export const CARS:Car[]=[];
+{
+  const palette=[0xd8323c,0xf0c020,0x2a6fd0,0x1d1f24,0xe8eaee,0x2fb56b,0xff7a1a];
+  // Parked along the approach roads and on the streets BETWEEN the district
+  // blocks, angled so they read as parked rather than dropped on the map.
+  const spots:Array<[number,number,number]>=[
+    [-86,-14,0.1],[-70,-14,-0.1],[86,-16,3.2],[70,-16,3.0],
+    [-16,-86,1.6],[-16,-70,1.5],[16,88,-1.6],[16,72,-1.5],
+    [-114,-114,0.7],[-84,-90,2.2],[102,-114,-0.6],[102,-90,2.5],
+    [-111,111,0.4],[108,132,1.1],[34,24,0.8],[-32,-26,2.4],
+  ];
+  // A car whose box lands inside a building is not cover, it is a bug you can
+  // see through a wall. The footprints move whenever the districts are
+  // re-authored, so this is checked here rather than trusted to the numbers
+  // above staying correct.
+  const clearance=Math.hypot(CAR_LENGTH,CAR_WIDTH)/2;
+  for(const [x,z,yaw] of spots) {
+    if(BUILDINGS.some(b=>{
+      const f=buildingFootprint(b,clearance);
+      return x>f.x0&&x<f.x1&&z>f.z0&&z<f.z1;
+    }))continue;
+    CARS.push({x,z,yaw,color:palette[CARS.length%palette.length]});
+  }
 }
 
 export interface Prop {x:number;y:number;z:number;w:number;h:number;d:number;color:number;}
 export const PROPS:Prop[]=[];
 for(const b of BUILDINGS.filter(b=>b.style==='house')) {
-  const x=b.x*3,z=b.z*3;
-  // Low garden borders, a bench and a table; front doors remain clear.
-  PROPS.push({x:x-2,y:0,z:z+7,w:.3,h:.65,d:12,color:0xf0e6cc});
-  PROPS.push({x:x+2,y:.25,z:z+10,w:2.2,h:.5,d:.6,color:0x927550});
-  PROPS.push({x:x+8,y:.25,z:z+10,w:1.5,h:.8,d:1.5,color:0xb29369});
-  SCENERY.push({x:x-3,z:z-5,y:0,size:4.4,kind:'tree'});
+  const f=buildingFootprint(b);
+  const y=b.base*TILE;
+  // A low garden border down one side, with the bench and planter beside it.
+  //
+  // Everything sits on the -X flank on purpose. buildArena leaves a doorway in
+  // the middle of BOTH the -Z and +Z walls, so anything parked off either of
+  // those faces is standing in a doorway -- which is exactly where the planter
+  // used to be, sealing the back door of every house in the district.
+  PROPS.push({x:f.x0-2.0,y,z:(f.z0+f.z1)/2,w:.5,h:1.0,d:f.z1-f.z0,color:0xf0e6cc});
+  PROPS.push({x:f.x0-4.2,y:y+.4,z:(f.z0+f.z1)/2-2.5,w:1.0,h:.8,d:3.2,color:0x927550});
+  PROPS.push({x:f.x0-4.2,y:y+.6,z:(f.z0+f.z1)/2+2.5,w:2.0,h:1.2,d:2.0,color:0xb29369});
+  SCENERY.push({x:f.x0-7,z:f.z0-3,y,size:6,kind:'tree'});
+}
+// Cargo stacks out on the decking, as short-range cover. Placed on the deck
+// surface (y=0), not on the terrain: the ground under the jetty is the lake
+// bed, so a crate sitting on it would be underwater.
+for(let i=0;i<10;i++) {
+  PROPS.push({
+    x:-190+(i%5)*10, y:0, z:104+Math.floor(i/5)*12,
+    w:7,h:5,d:7,color:[0x9a5b4a,0x4a6f9a,0x6f8f5a][i%3],
+  });
 }

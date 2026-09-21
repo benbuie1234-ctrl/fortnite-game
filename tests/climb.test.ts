@@ -41,7 +41,7 @@ console.log("mantling");
   // below means anything.
   const w = new World();
   w.set(makePiece(0, 0, 1, SLOT_WALL_Z, 0, 0, 1, 0));
-  const p = { ...newMovementState(), x: 1.5, y: 0, z: 1.5, grounded: true };
+  const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
   check("a one-tile wall can be climbed",
     climb(p, w, input(0, 1, BTN_JUMP), 90) >= TILE - 0.05, `${p.y.toFixed(2)}`);
 }
@@ -52,9 +52,9 @@ console.log("mantling");
   // was abandoned entirely.
   const w = new World();
   w.set(makePiece(0, 0, 1, SLOT_RAMP, 0, 3, 1, 0)); // rises toward -Z: tall face at +Z
-  const p = { ...newMovementState(), x: 1.5, y: 0, z: 5.6, grounded: true };
-  const highest = climb(p, w, input(0, -1, BTN_JUMP), 90);
-  check("the back of a ramp can be climbed", highest > 2.2, `reached ${highest.toFixed(2)}`);
+  const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE * 1.87, grounded: true };
+  const highest = climb(p, w, input(0, -1, BTN_JUMP), 120);
+  check("the back of a ramp can be climbed", highest > TILE * 0.73, `reached ${highest.toFixed(2)}`);
 }
 {
   // Two walls stacked. The lower top is occupied by the upper wall, so there
@@ -62,7 +62,7 @@ console.log("mantling");
   const w = new World();
   w.set(makePiece(0, 0, 1, SLOT_WALL_Z, 0, 0, 1, 0));
   w.set(makePiece(0, 1, 1, SLOT_WALL_Z, 0, 0, 1, 0));
-  const p = { ...newMovementState(), x: 1.5, y: 0, z: 1.5, grounded: true };
+  const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
   check("but not one with no room to stand on top",
     climb(p, w, input(0, 1, BTN_JUMP), 90) < TILE - 0.1, `${p.y.toFixed(2)}`);
 }
@@ -71,10 +71,10 @@ console.log("mantling");
   // pull the player straight up through the slab.
   const w = new World();
   w.set(makePiece(0, 0, 1, SLOT_WALL_Z, 0, 0, 1, 0));
-  w.set(makePiece(0, 2, 0, SLOT_FLOOR, 0, 0, 1, 0)); // surface at y=6, slab 5.75-6
-  const p = { ...newMovementState(), x: 1.5, y: 0, z: 1.5, grounded: true };
+  w.set(makePiece(0, 2, 0, SLOT_FLOOR, 0, 0, 1, 0)); // surface two tiles up
+  const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
   const highest = climb(p, w, input(0, 1, BTN_JUMP), 90);
-  check("a ceiling is never mistaken for a ledge", highest < 6, `${highest.toFixed(2)}`);
+  check("a ceiling is never mistaken for a ledge", highest < TILE * 2, `${highest.toFixed(2)}`);
 }
 {
   check("reach covers a full tile", MANTLE_REACH >= TILE);
@@ -88,14 +88,14 @@ console.log("ramp exits through the floor above");
   const w = new World();
   w.set(makePiece(0, 0, 0, SLOT_RAMP, 0, 1, 1, 0));   // rises toward +Z
   w.set(makePiece(0, 1, 0, SLOT_FLOOR, 0, 0, 1, 0));  // directly above it
-  const p = { ...newMovementState(), x: 1.5, y: 0, z: 0.3, grounded: true };
-  const highest = climb(p, w, input(0, 1), 40);
+  const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE * 0.05, grounded: true };
+  const highest = climb(p, w, input(0, 1), 90);
   check("a ramp can be walked all the way to the top",
     highest >= TILE - 0.1, `reached ${highest.toFixed(2)} of ${TILE}`);
 
   // ...and the same floor is still solid from above, or it would just be a
   // hole everyone falls through.
-  const stander = { ...newMovementState(), x: 1.5, y: TILE + 1.5, z: 1.5 };
+  const stander = { ...newMovementState(), x: TILE / 2, y: TILE + 1.5, z: TILE / 2 };
   for (let i = 0; i < 60; i++) stepPlayer(stander, input(0, 0), w, TICK_DT);
   check("and is still solid to stand on from above",
     Math.abs(stander.y - TILE) < 0.05, `y=${stander.y.toFixed(2)}`);
@@ -105,7 +105,7 @@ console.log("ramp exits through the floor above");
 console.log("sprint stamina");
 {
   const w = new World();
-  const p = { ...newMovementState(), x: 1.5, y: 0, z: 1.5, grounded: true };
+  const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
   check("starts full", p.stamina === SPRINT_STAMINA_MAX);
 
   // The first continuous burst, which is the number the player experiences.
@@ -146,7 +146,7 @@ console.log("slide tiers");
   const w = new World();
 
   function slideDistance(sprintFirst: boolean): number {
-    const p = { ...newMovementState(), x: 1.5, y: 0, z: 1.5, grounded: true };
+    const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
     const run = input(0, 1, sprintFirst ? BTN_SPRINT : 0);
     for (let i = 0; i < 40; i++) stepPlayer(p, run, w, TICK_DT);
     const startZ = p.z;
@@ -164,7 +164,7 @@ console.log("slide tiers");
     sprintSlide > walkSlide + 1, `walk ${walkSlide.toFixed(2)} sprint ${sprintSlide.toFixed(2)}`);
 
   // Holding crouch must not chain slides forever.
-  const p = { ...newMovementState(), x: 1.5, y: 0, z: 1.5, grounded: true };
+  const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
   for (let i = 0; i < 40; i++) stepPlayer(p, input(0, 1, BTN_SPRINT), w, TICK_DT);
   let slidingTicks = 0;
   for (let i = 0; i < 300; i++) {

@@ -2,7 +2,7 @@ import { buildingAt } from "@shared/map";
 import * as THREE from "three";
 import { TILE, PIECE_THICKNESS, MATERIALS } from "@shared/constants";
 import {
-  SLOT_FLOOR, SLOT_RAMP, SLOT_WALL_X, SLOT_WALL_Z,
+  SLOT_FLOOR, SLOT_RAMP, SLOT_WALL_X, SLOT_WALL_Z, SLOT_SHIELD,
   Slot, Facing, currentHp, type Piece,
 } from "@shared/build";
 import type { World } from "@shared/world";
@@ -23,6 +23,10 @@ const METERS_PER_TILE = 1.0;
 const geoFloor = buildPieceBox(TILE, T, TILE);
 const geoWallX = buildPieceBox(T, TILE, TILE);
 const geoWallZ = buildPieceBox(TILE, TILE, T);
+// The shield is the same panel on either axis, twice a wall's thickness, and
+// matches pieceBox(SLOT_SHIELD) exactly.
+const geoShieldX = new THREE.BoxGeometry(T * 2, TILE, TILE);
+const geoShieldZ = new THREE.BoxGeometry(TILE, TILE, T * 2);
 
 /**
  * A box for one build piece: subdivided, UV-mapped in world space, and with
@@ -266,15 +270,24 @@ const FACING_ANGLE: Record<Facing, number> = {
   3: Math.PI / 2,   // -Z
 };
 
-function geometryFor(slot: Slot): THREE.BufferGeometry {
+function geometryFor(slot: Slot, facing: Facing = 0): THREE.BufferGeometry {
   switch (slot) {
     case SLOT_FLOOR: return geoFloor;
     case SLOT_WALL_X: return geoWallX;
     case SLOT_WALL_Z: return geoWallZ;
     case SLOT_RAMP: return geoRamp;
+    // A shield has no slot of its own per axis, so the facing picks the plane
+    // -- exactly as pieceBox does, or the mesh and the collider disagree.
+    case SLOT_SHIELD: return facing === 0 || facing === 2 ? geoShieldX : geoShieldZ;
     default: return geoCone;
   }
 }
+
+/** Hard light: bright, see-through, and obviously not a building material. */
+const shieldMaterial = new THREE.MeshStandardMaterial({
+  color: 0x5fe0ff, emissive: 0x1d6c88, roughness: 0.15, metalness: 0.1,
+  transparent: true, opacity: 0.42, side: THREE.DoubleSide, depthWrite: false,
+});
 
 /** Mesh centre for a piece, matching the collision boxes in build.ts. */
 function placeMesh(mesh: THREE.Object3D, piece: {
@@ -295,6 +308,11 @@ function placeMesh(mesh: THREE.Object3D, piece: {
       break;
     case SLOT_WALL_Z:
       mesh.position.set(x0 + TILE / 2, y0 + TILE / 2, z0);
+      break;
+    case SLOT_SHIELD:
+      // Sits on the same cell face a wall would, on whichever axis it faces.
+      if (piece.facing === 0 || piece.facing === 2) mesh.position.set(x0, y0 + TILE / 2, z0 + TILE / 2);
+      else mesh.position.set(x0 + TILE / 2, y0 + TILE / 2, z0);
       break;
     case SLOT_RAMP:
       mesh.position.set(x0 + TILE / 2, y0, z0 + TILE / 2);
@@ -380,8 +398,9 @@ export class PieceRenderer {
 
       if (!mesh) {
         mesh = new THREE.Mesh(
-          geometryFor(piece.slot),
-          isArena ? this.pool.arena : (this.pool.build[piece.mat] ?? this.pool.build[0])[0],
+          geometryFor(piece.slot, piece.facing),
+          piece.slot === SLOT_SHIELD ? shieldMaterial
+            : isArena ? this.pool.arena : (this.pool.build[piece.mat] ?? this.pool.build[0])[0],
         );
         mesh.castShadow = true;
         mesh.receiveShadow = true;
@@ -392,6 +411,9 @@ export class PieceRenderer {
       }
 
       if (isArena) continue;
+      // A shield does not darken or crack: bullets do not touch it, and the
+      // damage buckets below would make it look like a wall that is losing.
+      if (piece.slot === SLOT_SHIELD) { mesh.scale.setScalar(1); continue; }
 
       // Keep the visible shape aligned with its full-size collision from
       // placement -- a piece must never look smaller than the box you can be
@@ -431,6 +453,7 @@ export class PieceRenderer {
 export class BuildGhost {
   private mesh: THREE.Mesh;
   private currentSlot: Slot | null = null;
+  private currentFacing: Facing | null = null;
 
   constructor(scene: THREE.Scene) {
     this.mesh = new THREE.Mesh(
@@ -451,9 +474,12 @@ export class BuildGhost {
     target: { gx: number; gy: number; gz: number; slot: Slot; facing: Facing },
     blocked: boolean,
   ): void {
-    if (this.currentSlot !== target.slot) {
-      this.mesh.geometry = geometryFor(target.slot);
+    // Facing matters for the shield's shape, so the ghost is rebuilt when
+    // either changes rather than only on a slot change.
+    if (this.currentSlot !== target.slot || this.currentFacing !== target.facing) {
+      this.mesh.geometry = geometryFor(target.slot, target.facing);
       this.currentSlot = target.slot;
+      this.currentFacing = target.facing;
     }
     this.mesh.rotation.set(0, 0, 0);
     placeMesh(this.mesh, target);

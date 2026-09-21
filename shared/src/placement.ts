@@ -1,8 +1,12 @@
-import { SLOT_FLOOR, SLOT_RAMP, SLOT_CONE, SLOT_WALL_X, SLOT_WALL_Z, Slot, Facing, worldToCell, packKey, makePiece, pieceBox, rampHeightAt, inGridBounds } from './build';
+import { SLOT_FLOOR, SLOT_RAMP, SLOT_CONE, SLOT_WALL_X, SLOT_WALL_Z, SLOT_SHIELD, Slot, Facing, worldToCell, packKey, makePiece, pieceBox, rampHeightAt, inGridBounds } from './build';
 import { TILE, EYE_HEIGHT, BUILD_RANGE, PLAYER_RADIUS, PLAYER_HEIGHT, STEP_HEIGHT, BUILD_MIN_LAYER } from './constants';
 import { quadrantFromYaw, forwardVector } from './vec';
 import type { World } from './world';
 export const BUILD_WALL=5, BUILD_FLOOR=6, BUILD_RAMP=7, BUILD_CONE=8;
+/** The shield panel. 9-11 are already taken by the material switches, which
+ *  ride the same field, so this continues above them rather than beside the
+ *  other pieces. The wire carries four bits of slot, so there is room. */
+export const BUILD_SHIELD=12;
 export interface PlacementTarget { gx:number;gy:number;gz:number;slot:Slot;facing:Facing; }
 
 /** Same rejection reasons drive the ghost and server placement. */
@@ -61,10 +65,14 @@ export function resolvePlacement(p:{x:number;y:number;z:number;yaw:number;pitch?
   if(world?.get(feet.gx,feet.gy,feet.gz,SLOT_RAMP) && p.y-feet.gy*TILE>TILE*.4 && pitch>-.35) gy=feet.gy+1;
   const cell=worldToCell(x,gy*TILE,z);
   let target:PlacementTarget;
-  if(p.buildSlot===BUILD_WALL) {
+  if(p.buildSlot===BUILD_WALL||p.buildSlot===BUILD_SHIELD) {
     // Place the forward face of the selected tile; close walls stay in reach.
+    // A shield is positioned exactly like a wall -- it is the same panel in a
+    // different slot -- so the two share this branch rather than drifting.
     const base=worldToCell(p.x,p.y,p.z);
-    target={gx:base.gx,gy,gz:base.gz,slot:q===0||q===2?SLOT_WALL_X:SLOT_WALL_Z,facing:q};
+    const wall=p.buildSlot===BUILD_WALL;
+    const slot:Slot=wall?(q===0||q===2?SLOT_WALL_X:SLOT_WALL_Z):SLOT_SHIELD;
+    target={gx:base.gx,gy,gz:base.gz,slot,facing:q};
     if(q===0)target.gx++; if(q===1)target.gz++;
   } else {
     const slot=p.buildSlot===BUILD_FLOOR?SLOT_FLOOR:p.buildSlot===BUILD_RAMP?SLOT_RAMP:p.buildSlot===BUILD_CONE?SLOT_CONE:null;

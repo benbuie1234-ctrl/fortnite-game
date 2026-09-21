@@ -30,6 +30,7 @@ export class ServerPlayer implements MovementState {
   staminaIdle = 0;
   fallPeakY = 0;
   lastFallHeight = 0;
+  bloom = 0;
 
 
   /** Wins across rounds, for the leaderboard. Survives endRound, unlike kills. */
@@ -52,8 +53,12 @@ export class ServerPlayer implements MovementState {
   lastBuildAt = 0;
   wasFiring = false;
   aiming = false;
-  /** Development aim lock, held in the input. See resolveFire. */
-  aimbot = false;
+
+  /** One shield per match. Deliberately NOT reset in resetForSpawn: a
+   *  per-life shield would be a shield in every fight, which is a different
+   *  and much stronger item than the one that was asked for. Cleared when a
+   *  round ends. */
+  shieldUsed = false;
 
   kills = 0;
   deaths = 0;
@@ -131,6 +136,7 @@ export class ServerPlayer implements MovementState {
     this.staminaIdle = 0;
     this.fallPeakY = y;
     this.lastFallHeight = 0;
+    this.bloom = 0;
     this.hp = PLAYER_MAX_HP;
     this.shield = PLAYER_MAX_SHIELD * 0.5;
     this.mats = START_MATS;

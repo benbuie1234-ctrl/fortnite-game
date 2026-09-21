@@ -1,7 +1,7 @@
 import {
   TICK_DT, PLAYER_HEIGHT, PLAYER_RADIUS, GRAVITY, JUMP_VELOCITY, MOVE_SPEED,
   GROUND_ACCEL, AIR_ACCEL, GROUND_FRICTION, MAX_FALL_SPEED, STEP_HEIGHT,
-  EYE_HEIGHT, PLAYER_MAX_HP,
+  EYE_HEIGHT, PLAYER_MAX_HP, TILE,
   BACKPEDAL_SPEED_MULT, BACKPEDAL_AIR_SPEED_MULT, STRAFE_SPEED_MULT, SPRINT_SPEED_MULT,
   CROUCH_HEIGHT, CROUCH_EYE_HEIGHT, CROUCH_SPEED_MULT, CROUCH_TRANSITION_SPEED,
   SLIDE_MIN_SPEED, SLIDE_BOOST_SPEED, SLIDE_SPRINT_BOOST_SPEED, SLIDE_FRICTION,
@@ -9,6 +9,8 @@ import {
   SPRINT_STAMINA_MAX, SPRINT_REGEN_DELAY, SPRINT_REGEN_RATE, SPRINT_MIN_TO_START,
   MANTLE_REACH, MANTLE_FORWARD, MANTLE_SPEED,
   FALL_SAFE_HEIGHT, FALL_LETHAL_HEIGHT, FALL_MIN_IMPACT_SPEED,
+  BLOOM_RISE_RATE, BLOOM_FALL_RATE, BLOOM_AIR_FLOOR, BLOOM_CROUCH_MULT,
+  BLOOM_STILL_SPEED,
 } from "./constants";
 import type { Box, Piece } from "./build";
 import type { World } from "./world";
@@ -25,10 +27,6 @@ export const BTN_RELOAD = 1 << 4;
 export const BTN_EDIT   = 1 << 5;
 export const BTN_RESET  = 1 << 6;
 export const BTN_SPRINT = 1 << 7;
-/** Development aim lock. Travels in the button field because the shot cone is
- *  built on the server, so steering the client's view alone cannot stop a
- *  round scattering on bloom or dropping under the target. */
-export const BTN_AIMBOT = 1 << 8;
 
 export interface InputCommand {
   seq: number;
@@ -73,6 +71,11 @@ export interface MovementState {
   stamina: number;
   /** Seconds since sprinting stopped, for the regeneration delay. */
   staminaIdle: number;
+  /** How open the shot cone currently is, 0 (set and still) to 1 (moving at
+   *  full speed, or airborne). Part of the reconciled state: the server builds
+   *  the cone from it, so the client cannot keep a private copy without its
+   *  crosshair promising an accuracy the shot will not deliver. */
+  bloom: number;
   /** Height of the fall that ended on this tick, or 0. Fall damage reads this
    *  instead of an impact speed: several code paths (ramp snap, step-up settle,
    *  ground clamp) all produce an impact speed, which is exactly why fall
@@ -119,7 +122,7 @@ export function newMovementState(): MovementState {
     yaw: 0, pitch: 0, grounded: false, lastLandingSpeed: 0,
     crouch: 0, sliding: false, slideLockout: 0, crouchHeld: false,
     sprinting: false, stamina: SPRINT_STAMINA_MAX, staminaIdle: 0,
-    fallPeakY: 0, lastFallHeight: 0,
+    fallPeakY: 0, lastFallHeight: 0, bloom: 0,
   };
 }
 
@@ -299,6 +302,30 @@ export function stepPlayer(
   if (s.vy < MAX_FALL_SPEED) s.vy = MAX_FALL_SPEED;
 
   moveAndCollide(s, world, dt, input, previousCrouch);
+  updateBloom(s, dt);
+}
+
+/**
+ * Open or settle the shot cone for this tick.
+ *
+ * Read off the velocity the solver just produced rather than off the input, so
+ * it answers "am I actually moving?" instead of "am I holding a key?" -- being
+ * shoved down a ramp or sliding both spread the cone, and walking into a wall
+ * does not.
+ */
+function updateBloom(s: MovementState, dt: number): void {
+  // Ground friction is exponential, so a player who has stopped pressing keys
+  // keeps a vanishing trickle of speed forever. Without a deadzone the cone
+  // would approach its floor and never actually arrive, and "set and still"
+  // would not be a state the game could ever be in.
+  const speed = Math.hypot(s.vx, s.vz);
+  let target = speed < BLOOM_STILL_SPEED ? 0 : Math.min(1, speed / MOVE_SPEED);
+  if (!s.grounded) target = Math.max(target, BLOOM_AIR_FLOOR);
+  else if (s.crouch > 0.5) target *= BLOOM_CROUCH_MULT;
+  const previous = s.bloom > 0 ? s.bloom : 0; // a NaN here would poison the cone
+  s.bloom = target > previous
+    ? Math.min(target, previous + BLOOM_RISE_RATE * dt)
+    : Math.max(target, previous - BLOOM_FALL_RATE * dt);
 }
 
 /**
@@ -372,6 +399,9 @@ function moveAndCollide(
   const startX = s.x;
   const startZ = s.z;
   const startY = s.y;
+  // Captured BEFORE the sweeps, which zero the velocity on whichever axis they
+  // block. A step that succeeds has to give this back -- see below.
+  const entryVx = s.vx, entryVz = s.vz;
 
   // --- horizontal, axis at a time ---
   const blockedX = sweepAxis(s, 0, dx);
@@ -385,8 +415,8 @@ function moveAndCollide(
     s.x = startX; s.z = startZ; s.y = startY + STEP_HEIGHT;
 
     if (!collidesAt(s)) {
-      sweepAxis(s, 0, dx);
-      sweepAxis(s, 2, dz);
+      const stepBlockedX = sweepAxis(s, 0, dx);
+      const stepBlockedZ = sweepAxis(s, 2, dz);
       // Settle back onto whatever we stepped onto.
       let drop = 0;
       const maxDrop = STEP_HEIGHT + 0.02;
@@ -399,6 +429,17 @@ function moveAndCollide(
                            Math.hypot(savedX - startX, savedZ - startZ) + 1e-4;
       if (gainedGround) {
         s.grounded = true;
+        // Stepping over something must not cost you your momentum.
+        //
+        // The sweep that failed had already zeroed the blocked axis, and that
+        // zero was being kept even when the step then succeeded -- so walking
+        // up a ramp went full speed, dead stop, full speed, dead stop, once per
+        // stair step in the collision approximation. It cost about a third of
+        // the player's speed and is most of why ramps felt sticky. A step the
+        // player actually completed is not an impact, so the entry velocity is
+        // restored on any axis the step itself did not block.
+        if (!stepBlockedX) s.vx = entryVx;
+        if (!stepBlockedZ) s.vz = entryVz;
       } else {
         s.x = savedX; s.z = savedZ; s.y = startY;
         s.vx = savedVx; s.vz = savedVz;
@@ -442,11 +483,22 @@ function moveAndCollide(
   }
 
   // --- ramps: treat the slope as a floor we snap onto ---
+  //
+  // The snap has to be able to pull the player DOWN as well as up, or walking
+  // down a slope turns into a series of small falls onto the collision stairs
+  // underneath it. What it must never do is pull them down through something
+  // solid they are already standing on: a ramp rises to exactly the surface of
+  // the floor in the cell above it, so a player who has just landed on that
+  // floor is a few centimetres above the slope and was being sucked straight
+  // through it onto the ramp below. That is the "falling through solid builds"
+  // case -- it only needed a floor with a ramp under it, which is every
+  // staircase in the game.
   if (scratchRamps.length > 0) {
     const reach = wasGrounded ? STEP_HEIGHT : 0.05;
     const surface = world.rampSurfaceAt(scratchRamps, s.x, s.z, Math.max(startY, s.y) + reach);
     if (surface > -Infinity && s.y <= surface + reach && Math.max(startY, s.y) >= surface - reach) {
-      if (s.vy <= 0.001) {
+      const wouldSink = s.y > surface + EPS && restingOnBox(s);
+      if (s.vy <= 0.001 && !wouldSink) {
         if (!s.grounded && s.vy < 0) s.lastLandingSpeed = Math.abs(s.vy);
         s.y = surface;
         s.vy = 0;
@@ -578,6 +630,43 @@ function sweepAxis(s: MovementState, axis: 0 | 1 | 2, delta: number): boolean {
   else if(axis===1)s.y=before+allowed;
   else {s.z=before+allowed;if(blocked)s.vz=0;}
   return blocked;
+}
+
+/**
+ * True when something OTHER than the ramp itself is holding the player up.
+ *
+ * Used to tell "standing on a floor that happens to have a ramp under it" from
+ * "standing on the ramp's own collision stairs", which are a couple of
+ * centimetres apart and mean opposite things: the first must not be snapped
+ * down onto the slope, and the second must.
+ *
+ * A ramp's step boxes all start at its cell's base and stay inside its cell,
+ * which is what separates them from the floor slab at the top of the climb --
+ * that slab's top is at the same height the ramp reaches, so height alone
+ * cannot tell them apart.
+ */
+function restingOnBox(s: MovementState): boolean {
+  const minX = s.x - PLAYER_RADIUS, maxX = s.x + PLAYER_RADIUS;
+  const minZ = s.z - PLAYER_RADIUS, maxZ = s.z + PLAYER_RADIUS;
+  for (const b of scratchBoxes) {
+    if (Math.abs(b[4] - s.y) > 0.02) continue;
+    if (minX >= b[3] || maxX <= b[0] || minZ >= b[5] || maxZ <= b[2]) continue;
+    if (ownedByRamp(b)) continue;
+    return true;
+  }
+  return false;
+}
+
+/** Whether a collision box is one of a nearby ramp's own steps. */
+function ownedByRamp(b: Box): boolean {
+  for (const r of scratchRamps) {
+    const x0 = r.gx * TILE, y0 = r.gy * TILE, z0 = r.gz * TILE;
+    if (Math.abs(b[1] - y0) > 1e-6) continue;
+    if (b[0] < x0 - 1e-6 || b[3] > x0 + TILE + 1e-6) continue;
+    if (b[2] < z0 - 1e-6 || b[5] > z0 + TILE + 1e-6) continue;
+    return true;
+  }
+  return false;
 }
 
 function collidesAt(s: MovementState): boolean {

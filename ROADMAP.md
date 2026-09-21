@@ -15,7 +15,10 @@ These make the game feel broken, so they come first.
 - [x] Ramps have no solid collision — you walk through the sides
 - [x] Sitting on a ramp drops you through it
 - [x] Cones fill the whole block and can't be stood on
-- [ ] Falling through solid builds (other cases)
+- [x] Falling through solid builds *(Claude — the remaining case was a floor
+      with a ramp under it: the ramp surface snap pulled a player who had just
+      landed on the floor down through it onto the slope, which is every
+      staircase in the game. See `restingOnBox` in `sim.ts`.)*
 - [x] Floor and ramp placed at the same spot don't line up in height *(Claude)*
 - [x] Can't build in many open places in certain areas *(Claude)*
 - [x] Climbing mechanic bugs *(Claude)*
@@ -29,10 +32,12 @@ These make the game feel broken, so they come first.
 
 ## Combat feel
 
-- [ ] Weapon bloom: spread grows while moving, shrinks when still, smallest when
-      stopped. *Built, then removed at request: the cone tripled at its ceiling
-      and dragged the crosshair with it, so both went back to the per-weapon
-      values. Recover from git if it is wanted again, at a gentler strength.*
+- [x] Weapon bloom: spread grows while moving, shrinks when still, smallest when
+      stopped *(Claude — back at a gentler strength. The cone grows by at most
+      70% of the weapon's own spread rather than tripling, and the crosshair is
+      a readout of a few pixels rather than a projection of the world angle,
+      which is what made the first version unusable. `bloom` is reconciled
+      state, so the crosshair and the shot always agree.)*
 - [x] Inconsistent fire delay — sometimes present, sometimes not *(Claude)*
 - [x] Bullet drop past a certain distance *(Claude)*
 - [x] Damage falls off further out (tune existing falloff) *(Claude)*
@@ -69,27 +74,67 @@ These make the game feel broken, so they come first.
 - [x] Real sniper scope when aiming *(Claude)*
 - [x] Full touch playability: tappable weapon/build/material bars, latched aim
       and sprint, on-screen sprint, build, crouch, reload and scoreboard *(Claude)*
-- [x] Cmd/Ctrl+M aim-assist dev toggle, with a permanent on-screen badge *(Claude)*
+- [x] Touch layout reworked so the HUD and the thumbs stop sharing space: the
+      readouts run down the right edge from the top, the two thumb clusters own
+      the bottom corners, and landscape gets its own compressed pass *(Claude)*
+- [x] A tap on FIRE or JUMP can no longer fall between input ticks and be
+      swallowed; a cancelled touch can no longer leave the stick stuck on
+      *(Claude — both are things phones do constantly and neither was handled)*
+- [x] Aim lock removed entirely *(Claude — the key, the chord, the touch
+      button, the HUD badge, the button bit, the server-side `lockOn` and its
+      test are all gone)*
 
 ## World and content
 
-- [ ] Map needs more verticality, and tighter spacing for faster matches
-- [ ] Cars in the map — proper sports cars *(deferred by request)*
-- [ ] Birds in the air; shooting one grants health *(deferred by request)*
-- [ ] Fish; shooting one grants a little health *(deferred by request)*
+- [x] Map needs more verticality, and tighter spacing for faster matches
+      *(Claude — re-authored. MAP_HALF 360 → 240 and the districts 156 → 108 m
+      out, so the longest walk is ~30% shorter. Each district sits on its own
+      plateau at a different height, with rolling hills between them and a
+      central mesa. Buildings flatten a pad under themselves, which is what
+      lets structures and real terrain coexist.)*
+- [x] Cars in the map — proper sports cars *(Claude — 16 of them, built from
+      primitives like everything else, solid cover you can climb onto. Their
+      positions are checked against the building footprints at load, so a
+      re-authored district cannot park one inside a wall.)*
+- [x] Birds in the air; shooting one grants health *(Claude)*
+- [x] Fish; shooting one grants a little health *(Claude — both in
+      `shared/src/critters.ts`. Positions are a pure function of index and
+      time, so nothing about them is networked except "this one is gone".)*
 - [x] Climb and sit inside trees *(Claude)*
 - [x] ADS inside a tree makes it translucent for you *(Claude)*
 - [x] Shooting a tree strips leaves, making it translucent to others *(Claude)*
-- [ ] One shield block per match that reflects bullets *(deferred by request)*
+- [x] One shield block per match that reflects bullets *(Claude — its own build
+      slot, free, one per match, 45 s lifetime, immune to bullets and broken by
+      a pickaxe. It sends rounds back down their own path rather than
+      mirroring off its normal; see the comment in `combat.ts` for why.)*
 
 ## Architecture
 
-- [ ] **Double the build grid size** so the world can be bigger and more
-      detailed while the player stays the same size.
-      *Attempted by ChatGPT and reverted twice — see `a47353c`, `b9bfc7b`,
-      `c42d033`. Needs a plan before a third attempt: the grid size is baked
-      into placement, collision, the packed piece key, the map data and every
-      tuned constant, so it cannot be changed in one pass. Deferred by request.*
+- [x] **Double the build grid size** so the world can be bigger and more
+      detailed while the player stays the same size *(Claude — TILE is 6.0 m)*.
+
+      What made the two earlier attempts fail was that the figure `3` was
+      written out by hand in the map data and the renderer, and several tuned
+      constants silently assumed a tile they could fit inside. Both were fixed
+      before the number was changed:
+
+      * every cell-to-metre conversion goes through `TILE` (the hard-coded
+        `*3` in `map.ts` and `landscape.ts` is gone);
+      * `MANTLE_REACH`, `MANTLE_SPEED`, `BUILD_RANGE`, `EDIT_RANGE` and
+        `RAMP_STEPS` are all derived from `TILE`. `RAMP_STEPS` is the one that
+        actually breaks the game if it is not: at a fixed 8 steps a 6 m ramp
+        has 75 cm stairs, which is taller than `STEP_HEIGHT`, so every ramp
+        becomes a wall;
+      * the map was re-authored, because the old coordinates put the districts
+        at ±420 m once the cell grew.
+
+      Setting `TILE` back to `3.0` restores the old scale exactly.
+
+      **The honest trade:** a bigger cell is a *coarser* cell. The world is
+      larger and more imposing, but each cell holds half as much detail, so
+      fine structure now has to come from props, cars and terrain rather than
+      from the grid. That is the opposite of what "more intricate environments"
+      asks for, and it is worth knowing before anyone doubles it again.
 
 ---
 
@@ -135,6 +180,20 @@ collider per tree sharing the trunk's key. `treeIndexFromKey()` maps a collider
 back to its `SCENERY` index; the server emits `EV_FOLIAGE` with that index when
 a tree is shot, and the client fades it through `Landscape.setTreeAlpha()`,
 which drives a per-instance alpha attribute on the foliage material.
+
+**The stairwell alternates columns.** `buildArena` puts each floor's ramp in a
+different column from the one below (`stairCol`), because a ramp fills its cell
+and the flight above was acting as a solid ceiling over the flight below --
+a player wedged about two thirds of the way up every flight. Anything with more
+than one floor therefore needs at least three cells of width, so the two stair
+columns and the doorway column do not collide; `tests/navigation.test.ts`
+checks that and climbs every flight of every building style.
+
+**Wildlife is derived, not networked.** `shared/src/critters.ts` gives every
+bird and fish a position as a pure function of (index, time). The server and
+the client must evaluate it at the SAME instant or the thing you shoot at is
+not the thing the server tests, so both use the lag-compensated render time
+that remote players already use.
 
 **Ramps and cones are multi-box now.** `pieceBoxes()` in `shared/src/build.ts`
 returns every solid box for a piece; ramps decompose into stair steps sized to

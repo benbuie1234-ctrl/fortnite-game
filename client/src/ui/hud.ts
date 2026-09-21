@@ -14,7 +14,12 @@ const SLOT_LABELS = [
   { key: "E", ico: "▭", name: "Floor" },
   { key: "R", ico: "◢", name: "Ramp" },
   { key: "F", ico: "▲", name: "Cone" },
+  { key: "V", ico: "◈", name: "Shield" },
 ];
+
+/** Where each entry of SLOT_LABELS sits in the slot field the server reads.
+ *  The shield is 12, not 9: 9-11 are the material switches. */
+const SLOT_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 12];
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -44,7 +49,6 @@ export class Hud {
   private scope = el("scope");
   private staminaBar = el("staminaBar");
   private staminaFill = el("staminaFill");
-  private aimbotBadge = el("aimbotBadge");
   /** Tapping a HUD slot selects it. Wired by main so the HUD does not need to
    *  know what a weapon is. */
   onSlotTapped: ((slot: number) => void) | null = null;
@@ -70,7 +74,7 @@ export class Hud {
       const index = this.slotNodes.length;
       node.addEventListener("pointerdown", (e) => {
         e.preventDefault();
-        this.onSlotTapped?.(index);
+        this.onSlotTapped?.(SLOT_IDS[index]);
       });
       (index < 5 ? this.slotsEl : el("buildSlots")).appendChild(node);
       this.slotNodes.push(node);
@@ -202,6 +206,15 @@ export class Hud {
     el("structureLabel").textContent=arena?(piece.key<0?'SCENERY · SOLID COVER':'MAP STRUCTURE · INDESTRUCTIBLE'):`${MATERIALS[piece.mat].name.toUpperCase()} · ${Math.ceil(hp)} / ${piece.maxHp}`;
     el("structureFill").style.width=`${arena?100:100*hp/piece.maxHp}%`;
   }
+  /** A green pop for health gained, so a hit on a bird reads as a reward
+   *  rather than as a shot that did nothing. */
+  showHeal(amount:number):void {
+    const node=document.createElement("div");
+    node.className="damage-number heal";
+    node.textContent=`+${amount}`;
+    this.hud.appendChild(node);
+    setTimeout(()=>node.remove(),900);
+  }
   showDamage(amount:number, headshot:boolean):void {
     const node=document.createElement("div");
     node.className="damage-number";
@@ -211,15 +224,19 @@ export class Hud {
     setTimeout(()=>node.remove(),700);
   }
   /**
-   * Fixed sizes per weapon class, as it was before.
+   * A fixed size per weapon class, opened by a fraction of the current bloom.
    *
-   * It briefly scaled with the live shot cone, which sounded better than it
-   * looked: at 620 px per radian an assault rifle sat at 44 px standing still
-   * and near 100 px moving, so the crosshair was a large blob most of the time
-   * and covered the thing you were shooting at.
+   * An earlier version scaled the crosshair with the live shot cone in world
+   * angle, which at 620 px per radian put an assault rifle at 44 px standing
+   * still and near 100 px moving -- a blob that covered the thing you were
+   * shooting at. The reticle is a readout here, not a projection: it shows
+   * that the cone is open and roughly how much, in a handful of pixels rather
+   * than in whatever the trigonometry happens to produce.
    */
-  setReticle(aiming:boolean,slot:number,building:boolean):void {
-    const size=building?18:slot===1?(aiming?32:48):aiming?12:22;
+  setReticle(aiming:boolean,slot:number,building:boolean,bloom=0):void {
+    const open=bloom>0?(bloom<1?bloom:1):0;
+    const size=(building?18:slot===1?(aiming?32:48):aiming?12:22)
+      +(building?0:(aiming?6:16)*open);
     this.crosshair.style.width=`${size}px`;
     this.crosshair.style.height=`${size}px`;
     this.crosshair.style.margin=`-${size/2}px 0 0 -${size/2}px`;
@@ -231,20 +248,6 @@ export class Hud {
     this.scope.classList.toggle("on", on);
     this.hud.classList.toggle("scoped", on);
     this.crosshair.style.display = on ? "none" : "";
-  }
-
-  setAimbot(on: boolean): void {
-    this.aimbotBadge.classList.toggle("on", on);
-    if (!on) this.aimbotBadge.textContent = "AIM LOCK";
-  }
-
-  /** Whether the lock currently has a clear shot, so the badge says which.
-   *  "SEARCHING" is the honest answer on an empty server, which otherwise
-   *  looks identical to the toggle not having worked. */
-  setAimbotLocked(locked: boolean, hasTarget = true): void {
-    this.aimbotBadge.textContent = !hasTarget
-      ? "AIM LOCK · SEARCHING"
-      : locked ? "AIM LOCK · LOCKED" : "AIM LOCK · NO SHOT";
   }
 
   /** Sprint stamina. Turns warm once it is too low to start a sprint with, so
@@ -295,18 +298,40 @@ export class Hud {
    * were indexed differently and hid the fact that the build readout showed
    * only the piece and never the material it would be made of.
    */
+  /** Grey out the shield slot once it has been spent. */
+  setShieldSpent(spent: boolean): void {
+    this.slotNodes[SLOT_IDS.length - 1]?.classList.toggle("spent", spent);
+  }
+
   setSlot(slot: number, building: boolean, material = 0): void {
+    const index = SLOT_IDS.indexOf(slot);
     for (let i = 0; i < this.slotNodes.length; i++) {
-      this.slotNodes[i].classList.toggle("active", i === slot);
+      this.slotNodes[i].classList.toggle("active", i === index);
     }
     this.crosshair.classList.toggle("build", building);
     if (!building) { this.buildPreview.textContent = ""; return; }
-    const piece = SLOT_LABELS[slot]?.name ?? "";
+    const piece = SLOT_LABELS[index]?.name ?? "";
+    // The shield is not made of anything, so naming a material for it would be
+    // a readout that never matches what gets placed.
+    if (slot === SLOT_IDS[SLOT_IDS.length - 1]) {
+      this.buildPreview.textContent = this.buildReason || "SHIELD BLOCK";
+      return;
+    }
     const mat = MATERIALS[material] ?? MATERIALS[0];
     this.buildPreview.textContent = this.buildReason || `${mat.name} ${piece}`.toUpperCase();
   }
 
-  setAmmo(weaponIdx: number, ammo: number, reloading: boolean, building = false, mats = 0): void {
+  setAmmo(weaponIdx: number, ammo: number, reloading: boolean, building = false, mats = 0,
+          shield = false, shieldUsed = false): void {
+    if (shield) {
+      // The shield is not paid for in materials, so showing the material
+      // budget for it would be answering a question nobody asked.
+      this.ammoEl.className = shieldUsed ? "reloading" : "";
+      this.ammoEl.innerHTML = shieldUsed
+        ? "SHIELD USED"
+        : '1<small> / match</small>';
+      return;
+    }
     if (building) {
       // Build mode used to fall through to the weapon readout with a forced
       // index of 0, so it showed the pickaxe's ammo -- a number that has

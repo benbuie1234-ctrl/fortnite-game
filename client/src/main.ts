@@ -2,15 +2,16 @@ import { cameraPose, easeCameraDistance } from "@shared/camera";
 import * as THREE from "three";
 import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE } from "@shared/constants";
 import { eyeHeightFor } from "@shared/sim";
-import { resolvePlacement, placementIssue } from "@shared/placement";
+import { resolvePlacement, placementIssue, BUILD_SHIELD } from "@shared/placement";
 import { unpackKey } from "@shared/build";
 import { weaponById, ARENA_LOADOUT, W_SNIPER, W_PICKAXE } from "@shared/weapons";
 import { locationAt, SCENERY } from "@shared/map";
-import { TREE_PERCH_RADIUS, PLAYER_HEIGHT, CROUCH_HEIGHT } from "@shared/constants";
+import { TREE_PERCH_RADIUS } from "@shared/constants";
+import { treePerchHeight } from "@shared/arena";
 import { SKINS } from "@shared/skins";
 import {
   EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
-  EV_FOLIAGE, PF_ALIVE, PF_GROUNDED, PF_CROUCH,
+  EV_FOLIAGE, EV_CRITTER, PF_ALIVE, PF_GROUNDED, PF_CROUCH,
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
 
@@ -25,6 +26,7 @@ import { FrameLimiter, type FpsTarget } from "./render/framelimiter";
 import { Sound } from "./audio/sound";
 import { ViewEffects } from "./render/viewfx";
 import { loadModels } from "./render/models";
+import { createCritters } from "./render/critters";
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -53,6 +55,7 @@ const effects = new Effects(view.scene);
 const sound = new Sound();
 const viewfx = new ViewEffects();
 const limiter = new FrameLimiter();
+const critters = createCritters(view.scene);
 
 const characters = new Map<number, Character>();
 let selfCharacter: Character | null = null;
@@ -110,10 +113,24 @@ if (matchMedia("(pointer: coarse)").matches || navigator.maxTouchPoints > 0) {
 }
 const mobile = document.getElementById("mobileControls");
 const stick = document.getElementById("mobileStick");
+
+/**
+ * Pointer capture, but never fatal.
+ *
+ * setPointerCapture throws NotFoundError when the pointer is no longer active,
+ * which happens more often than it sounds: a stale touch, a synthetic event, a
+ * browser that has already released it. It used to be called before the rest
+ * of the pointerdown handler, so a throw meant the stick never registered the
+ * touch at all -- the control looked dead rather than degraded.
+ */
+function capture(el: HTMLElement, id: number): void {
+  try { el.setPointerCapture(id); } catch { /* works without it, just less reliably */ }
+}
+
 if (mobile && stick) {
   const knob = stick.querySelector("i") as HTMLElement | null;
   let stickId = -1;
-  const moveStick = (e: PointerEvent) => {
+  const moveStick = (e: { clientX: number; clientY: number }) => {
     const r = stick.getBoundingClientRect(), max = r.width * 0.34;
     let x = e.clientX - (r.left + r.width / 2), y = e.clientY - (r.top + r.height / 2);
     const d = Math.hypot(x, y);
@@ -121,24 +138,45 @@ if (mobile && stick) {
     if (knob) knob.style.transform = `translate(${x}px,${y}px)`;
     controls.setTouchMove(x / max, -y / max);
   };
-  stick.addEventListener("pointerdown", e => { stickId = e.pointerId; stick.setPointerCapture(stickId); moveStick(e); });
+  const releaseStick = () => {
+    stickId = -1;
+    if (knob) knob.style.transform = "";
+    controls.setTouchMove(0, 0);
+  };
+  stick.addEventListener("pointerdown", e => { e.preventDefault(); stickId = e.pointerId; capture(stick, stickId); moveStick(e); });
   stick.addEventListener("pointermove", e => { if (e.pointerId === stickId) moveStick(e); });
-  stick.addEventListener("pointerup", e => { if (e.pointerId === stickId) { stickId = -1; if (knob) knob.style.transform = ""; controls.setTouchMove(0, 0); } });
+  // pointercancel as well as pointerup, and a blur for good measure. A touch
+  // that is cancelled -- an incoming call, the browser taking the gesture for
+  // a system swipe, the tab going to the background -- never delivers a
+  // pointerup, so without these the stick stays wherever it was last pushed
+  // and the player runs into a wall until they notice.
+  for (const kind of ["pointerup", "pointercancel", "pointerleave"]) {
+    stick.addEventListener(kind, (e) => { if ((e as PointerEvent).pointerId === stickId) releaseStick(); });
+  }
+  window.addEventListener("blur", releaseStick);
+
   const look = document.getElementById("mobileLook");
   let lookId = -1, lastX = 0, lastY = 0;
   if (look) {
-    look.addEventListener("pointerdown", e => { lookId = e.pointerId; lastX = e.clientX; lastY = e.clientY; look.setPointerCapture(lookId); });
-    look.addEventListener("pointermove", e => { if (e.pointerId === lookId) { controls.touchLook(e.clientX - lastX, e.clientY - lastY); lastX = e.clientX; lastY = e.clientY; } });
-    look.addEventListener("pointerup", e => { if (e.pointerId === lookId) lookId = -1; });
+    look.addEventListener("pointerdown", e => { lookId = e.pointerId; lastX = e.clientX; lastY = e.clientY; capture(look, lookId); });
+    look.addEventListener("pointermove", e => {
+      if (e.pointerId !== lookId) return;
+      controls.touchLook(e.clientX - lastX, e.clientY - lastY);
+      lastX = e.clientX; lastY = e.clientY;
+    });
+    for (const kind of ["pointerup", "pointercancel"]) {
+      look.addEventListener(kind, (e) => { if ((e as PointerEvent).pointerId === lookId) lookId = -1; });
+    }
   }
   mobile.querySelectorAll<HTMLButtonElement>("[data-touch]").forEach(b => {
     const a = b.dataset.touch!;
     // Toggles report back whether they are now on, so a latched AIM or SPRINT
     // button looks latched instead of leaving the player guessing.
     const paint = (on: boolean) => b.classList.toggle("held", on);
-    b.addEventListener("pointerdown", e => { e.preventDefault(); paint(controls.setTouchAction(a, true)); });
-    b.addEventListener("pointerup", () => paint(controls.setTouchAction(a, false)));
-    b.addEventListener("pointercancel", () => paint(controls.setTouchAction(a, false)));
+    b.addEventListener("pointerdown", e => { e.preventDefault(); capture(b, e.pointerId); paint(controls.setTouchAction(a, true)); });
+    for (const kind of ["pointerup", "pointercancel", "lostpointercapture"]) {
+      b.addEventListener(kind, () => paint(controls.setTouchAction(a, false)));
+    }
   });
 }
 
@@ -338,7 +376,6 @@ app.addEventListener("click", () => {
 // and muting is exactly what you want to do when you have just tabbed away.
 window.addEventListener("keydown", (e) => {
   if (e.code !== "KeyM" || e.repeat) return;
-  // Cmd/Ctrl+M is the aim-assist chord below, not mute.
   if (e.metaKey || e.ctrlKey) return;
   const target = e.target as HTMLElement | null;
   if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
@@ -434,7 +471,8 @@ function handleEvents(events: readonly GameEvent[]): void {
         // A piece breaking nearby should register physically, falling off with
         // distance so the whole map does not shake every time anyone builds.
         const dist = Math.hypot(bx - conn.self.x, by - conn.self.y, bz - conn.self.z);
-        if (dist < 18) viewfx.bump(0.22 * (1 - dist / 18));
+        const audible = TILE * 3;
+        if (dist < audible) viewfx.bump(0.22 * (1 - dist / audible));
         break;
       }
       case EV_HIT:
@@ -466,6 +504,22 @@ function handleEvents(events: readonly GameEvent[]): void {
         strippedTrees.set(e.index, performance.now() + FOLIAGE_REGROW_MS);
         refreshTreeAlpha(e.index);
         break;
+      case EV_CRITTER: {
+        // Mirror the server's downed set, then put a burst where it was. The
+        // position comes from the shared path function rather than the event,
+        // which is the whole reason the event is four bytes.
+        const where = critters.positionOf(e.index, conn.renderTime() / 1000);
+        critters.state.down(e.index, Date.now() / 1000);
+        if (where) {
+          effects.breakBurst(where.x, where.y, where.z);
+          sound.destroy(where.x, where.y, where.z);
+        }
+        if (e.shooter === conn.selfId) {
+          hud.showHeal(e.heal);
+          sound.hitmarker(false);
+        }
+        break;
+      }
       case EV_RESPAWN:
         if (e.id === conn.selfId) {
           respawnAtMs = 0;
@@ -501,8 +555,10 @@ function treeAt(x: number, y: number, z: number): number {
     const p = SCENERY[i];
     if (p.kind !== "tree") continue;
     if (Math.abs(p.x - x) > reach || Math.abs(p.z - z) > reach) continue;
-    // Only once you are actually up in it; standing at the base does not count.
-    if (y < p.y + 1.2 || y > p.y + p.size * 1.7) continue;
+    // Only once you are actually up in it; standing at the base does not
+    // count. Measured against the perch rather than a fixed 1.2 m, which stops
+    // meaning "up in the tree" the moment the perches move.
+    if (y < p.y + treePerchHeight(p.size) - 0.6 || y > p.y + p.size * 1.7) continue;
     return i;
   }
   return -1;
@@ -530,96 +586,6 @@ function updateTreeCover(aiming: boolean, x: number, y: number, z: number): void
     strippedTrees.delete(index);
     refreshTreeAlpha(index);
   }
-}
-
-// ---------------------------------------------------------------------------
-// Aim assist (development toggle)
-//
-// Cmd/Ctrl+M. Steers the local look angles onto the nearest living opponent's
-// head. It has to work this way round rather than server-side, because the
-// server traces every shot from the player's own yaw and pitch -- so the only
-// thing that can move a shot is the aim itself.
-//
-// It is deliberately loud: a badge sits on the HUD the entire time it is on.
-// This is a multiplayer game, so a silent version of this would be a cheat
-// rather than a tool.
-// ---------------------------------------------------------------------------
-
-// Controls owns the flag. The key, the chord and the on-screen button all go
-// through it, so they cannot disagree about whether the lock is on.
-let aimAssistShown = false;
-
-function announceAimLock(): void {
-  const on = controls.aimbot;
-  if (on === aimAssistShown) return;
-  aimAssistShown = on;
-  hud.setAimbot(on);
-  hud.setCenterMessage(on ? "AIM LOCK ON" : "Aim lock off");
-  setTimeout(() => hud.setCenterMessage(""), 900);
-}
-
-// Cmd/Ctrl+M still works where the browser allows it, but it is a fallback
-// rather than the binding: on macOS Cmd+M is Minimise Window, and when the OS
-// takes it the page never sees the keystroke at all -- which is
-// indistinguishable from the feature being broken. The real binding is a plain
-// rebindable key (J by default), handled in Controls.
-window.addEventListener("keydown", (e) => {
-  if (e.code !== "KeyM" || e.repeat) return;
-  if (!e.metaKey && !e.ctrlKey) return;
-  e.preventDefault();
-  controls.toggleAimLock();
-});
-
-/**
- * Point the view at whoever the server's lock is about to shoot.
- *
- * This no longer does the aiming -- the server does, from BTN_AIMBOT -- so its
- * only job is to keep the crosshair on the same target the round is going to.
- * It therefore has to pick the target the same way: the head, at the target's
- * real stance, preferring one that is not behind cover. No drop compensation
- * here on purpose; the camera should sit on the target while the round arcs to
- * it, rather than tilting off into the sky at long range.
- */
-function applyAimAssist(): void {
-  announceAimLock();
-  if (!controls.aimbot) return;
-  // On, but with nobody to lock onto. Say so, or an empty server looks like a
-  // broken toggle.
-  hud.setAimbotLocked(false, false);
-  if (!conn.self.alive) return;
-  const eyeY = conn.self.y + eyeHeightFor(conn.self.crouch);
-  const now = Date.now() / 1000;
-  let bestDistance = Infinity;
-  let bestVisible = false;
-  let bx = 0, by = 0, bz = 0;
-
-  for (const pose of conn.remotePoses()) {
-    if ((pose.state.flags & PF_ALIVE) === 0) continue;
-    const height = (pose.state.flags & PF_CROUCH) !== 0 ? CROUCH_HEIGHT : PLAYER_HEIGHT;
-    const dx = pose.x - conn.self.x;
-    const dy = pose.y + height - 0.14 - eyeY;
-    const dz = pose.z - conn.self.z;
-    const distance = Math.hypot(dx, dy, dz);
-    if (distance < 1e-3) continue;
-
-    const blocked = conn.world.raycast(
-      conn.self.x, eyeY, conn.self.z,
-      dx / distance, dy / distance, dz / distance,
-      distance - 0.05, now,
-    );
-    const visible = blocked === null;
-    if (bestVisible && !visible) continue;
-    if (visible === bestVisible && distance >= bestDistance) continue;
-
-    bestDistance = distance;
-    bestVisible = visible;
-    bx = dx; by = dy; bz = dz;
-  }
-  // No target: leave the player's own aim completely alone.
-  if (bestDistance === Infinity) return;
-  controls.yaw = Math.atan2(-bx, bz);
-  controls.pitch = Math.atan2(by, Math.hypot(bx, bz));
-  hud.setAimbotLocked(bestVisible, true);
 }
 
 // ---------------------------------------------------------------------------
@@ -715,7 +681,6 @@ function frame(now: number): void {
   // aiming impossible on a phone.
   const canAct = controls.isLocked || document.body.classList.contains("touch");
   const aiming = canAct && !controls.inBuildMode && controls.aiming;
-  applyAimAssist();
 
   const distance=Math.hypot(self.x-renderSelf.x,self.y-renderSelf.y,self.z-renderSelf.z);
   const blend=1-Math.exp(-24*dt);
@@ -729,10 +694,14 @@ function frame(now: number): void {
   const direction=view.camera.getWorldDirection(new THREE.Vector3());
   const aimRange=weaponById(ARENA_LOADOUT[controls.slot]??0).range;
   const targetPiece=conn.world.raycast(view.camera.position.x,view.camera.position.y,view.camera.position.z,direction.x,direction.y,direction.z,aimRange,nowSec);
-  hud.setStructure(targetPiece&&targetPiece.t<=18?targetPiece.piece:null,nowSec);
+  hud.setStructure(targetPiece&&targetPiece.t<=TILE*3?targetPiece.piece:null,nowSec);
   hud.setLocation(locationAt(self.x, self.z));
   const aimPoint=view.camera.position.clone().addScaledVector(direction,targetPiece?.t??aimRange);
   effects.update(dt);
+  // Wildlife is drawn at the same past instant remote players are, because the
+  // server validates shots against it at that instant too. Drawing it at "now"
+  // would put every bird half a round trip ahead of the one you can hit.
+  critters.update(conn.renderTime() / 1000, nowSec);
 
   // --- build ghost ---
   if (controls.inBuildMode && self.alive) {
@@ -820,9 +789,12 @@ function frame(now: number): void {
   hud.setStamina(self.stamina);
   hud.setMats(self.mats, self.material);
   hud.setSlot(controls.slot, controls.inBuildMode, self.material);
-  hud.setReticle(aiming, controls.slot, controls.inBuildMode);
+  hud.setReticle(aiming, controls.slot, controls.inBuildMode, self.bloom);
   const weaponIdx = controls.inBuildMode ? 0 : controls.slot;
-  hud.setAmmo(weaponIdx, self.ammo, self.reloadMs > 0, controls.inBuildMode, self.mats);
+  const onShield = controls.slot === BUILD_SHIELD;
+  hud.setAmmo(weaponIdx, self.ammo, self.reloadMs > 0, controls.inBuildMode, self.mats,
+    onShield, self.shieldUsed);
+  hud.setShieldSpent(self.shieldUsed);
   hud.setScore(matchPlayers, conn.selfId, scoreTarget);
   hud.updateCompass(self.x, self.z, controls.yaw);
   hud.setScoreboard(matchPlayers, conn.selfId);

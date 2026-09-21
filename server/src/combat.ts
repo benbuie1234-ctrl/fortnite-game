@@ -2,7 +2,7 @@ import {
   EYE_HEIGHT, MAX_LAG_COMP_MS, INTERP_DELAY_MS, BUILD_COOLDOWN, BUILD_RANGE,
   MATERIALS, TILE,
 } from "@shared/constants";
-import { makePiece, inGridBounds, currentHp, packKey } from "@shared/build";
+import { makePiece, inGridBounds, currentHp, packKey, SLOT_SHIELD } from "@shared/build";
 import { World, rayVsBox, type RayHit } from "@shared/world";
 import {
   weaponById, damageAtRange, W_PICKAXE, W_SNIPER,
@@ -11,85 +11,15 @@ import {
 import { eyeHeightFor } from "@shared/sim";
 import { forwardVector, applySpread } from "@shared/vec";
 import {
-  EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_FOLIAGE,
+  EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_FOLIAGE, EV_CRITTER,
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
 import { ServerPlayer, hitBoxes } from "./player";
-import { resolvePlacement, placementIssue } from "@shared/placement";
+import { resolvePlacement, placementIssue, BUILD_SHIELD } from "@shared/placement";
 import { cameraPose } from "@shared/camera";
 import { ARENA_OWNER, treeIndexFromKey } from "@shared/arena";
-
-/**
- * Pick a target for the aim lock and return the exact launch direction that
- * puts a round on its head.
- *
- * Three things have to be solved together or the shot still misses:
- *
- *  - The target has to be the one the SERVER will hit-test, so it is read at
- *    the lag-compensated time rather than wherever it is right now.
- *  - Bullet drop has to be cancelled. Past 45 m a round falls away from a
- *    straight line -- about 1.5 m at 200 m -- so the launch angle is solved by
- *    firing the real trajectory, measuring where it ends up, and lifting the
- *    aim by the error. Three passes converge well inside a head.
- *  - Line of sight has to be checked, because a perfect direction into a wall
- *    is still a miss. Blocked targets are only chosen if nothing else is
- *    available, so the lock tracks without ever shooting through cover.
- */
-function lockOn(
-  world: World,
-  shooter: ServerPlayer,
-  players: readonly ServerPlayer[],
-  rewindTo: number,
-  nowSec: number,
-  weapon: { range: number },
-  ox: number, oy: number, oz: number,
-): [number, number, number] | null {
-  let bestDistance = Infinity;
-  let bestVisible = false;
-  let tx = 0, ty = 0, tz = 0;
-
-  for (const target of players) {
-    if (target.id === shooter.id || !target.alive) continue;
-    const p = target.positionAt(rewindTo);
-    const { head } = hitBoxes(p.x, p.y, p.z, target.crouch);
-    const cx = (head[0] + head[3]) / 2;
-    const cy = (head[1] + head[4]) / 2;
-    const cz = (head[2] + head[5]) / 2;
-
-    const distance = Math.hypot(cx - ox, cy - oy, cz - oz);
-    if (distance > weapon.range) continue;
-
-    const blocked = world.raycast(
-      ox, oy, oz,
-      (cx - ox) / distance, (cy - oy) / distance, (cz - oz) / distance,
-      distance - 0.05, nowSec,
-    );
-    const visible = blocked === null;
-    // A target you can actually shoot always beats a nearer one you cannot.
-    if (bestVisible && !visible) continue;
-    if (visible === bestVisible && distance >= bestDistance) continue;
-
-    bestDistance = distance;
-    bestVisible = visible;
-    tx = cx; ty = cy; tz = cz;
-  }
-  if (bestDistance === Infinity) return null;
-
-  let aimY = ty;
-  for (let pass = 0; pass < 3; pass++) {
-    const dx = tx - ox, dy = aimY - oy, dz = tz - oz;
-    const length = Math.hypot(dx, dy, dz) || 1;
-    // Fly the real trajectory out to the target's range and see where it lands.
-    const end = traceWithDrop(
-      ox, oy, oz, dx / length, dy / length, dz / length, bestDistance, () => null,
-    );
-    aimY += ty - end.y;
-  }
-
-  const dx = tx - ox, dy = aimY - oy, dz = tz - oz;
-  const length = Math.hypot(dx, dy, dz) || 1;
-  return [dx / length, dy / length, dz / length];
-}
+import { critterHit, critterHeal, CritterState } from "@shared/critters";
+import { PLAYER_MAX_HP } from "@shared/constants";
 
 /**
  * Resolve one trigger pull. Everything here is authoritative: the client never
@@ -102,6 +32,7 @@ export function resolveFire(
   nowSec: number,
   nowMs: number,
   events: GameEvent[],
+  critters?: CritterState,
 ): void {
   const weapon = weaponById(shooter.weaponId);
 
@@ -127,16 +58,10 @@ export function resolveFire(
   const oz = shooter.z;
   let baseDir = forwardVector(shooter.yaw, shooter.pitch);
 
-  // The aim lock replaces the whole aiming path, including the camera
-  // correction below: that correction exists to make the crosshair agree with
-  // an over-the-shoulder camera, and a locked shot is already pointed exactly
-  // where it needs to go.
-  const locked = shooter.aimbot && weapon.id !== W_PICKAXE
-    ? lockOn(world, shooter, players, rewindTo, nowSec, weapon, ox, oy, oz)
-    : null;
-
-  if (locked) baseDir = locked;
-  else if (weapon.id !== W_PICKAXE) {
+  // The crosshair sits on an over-the-shoulder camera, not on the muzzle, so
+  // the shot has to be re-aimed at whatever the camera ray actually meets or
+  // every round lands beside the thing under the reticle.
+  if (weapon.id !== W_PICKAXE) {
     const camera = cameraPose(shooter, shooter.aiming, world, nowSec, weapon.id===W_SNIPER);
     const [cx,cy,cz] = camera.origin;
     const [fx,fy,fz] = camera.forward;
@@ -154,79 +79,172 @@ export function resolveFire(
     const length=Math.hypot(...delta);
     if(length>0.001) baseDir=delta.map(v=>v/length) as [number,number,number];
   }
-  // A locked shot has no cone at all: any spread is a chance to miss, which is
-  // the one thing that toggle exists to remove.
-  const spread = locked ? 0 : spreadFor(weapon, shooter.aiming);
+  const spread = spreadFor(weapon, shooter.aiming, shooter.bloom);
 
-  for (let pellet = 0; pellet < weapon.pellets; pellet++) {
-    const dir = applySpread(baseDir, spread, Math.random);
-    const [dx, dy, dz] = dir;
-
+  /**
+   * Fly one pellet from a point in a direction, and report what it met.
+   *
+   * Pulled out of the loop below because a shot can now be sent back the way
+   * it came: a shield panel reflects it, and the returned leg has to be traced
+   * with exactly the same rules as the first one -- same drop, same lag
+   * compensation, same hit order -- or a reflected round would behave like a
+   * different weapon.
+   */
+  function tracePellet(
+    px: number, py: number, pz: number,
+    dx: number, dy: number, dz: number,
+    range: number,
+    /** Who this leg may hit. The shooter is a legal target on a reflection. */
+    canHitShooter: boolean,
+  ) {
     let pieceHit: RayHit | null = null;
     let hitPlayer: ServerPlayer | null = null;
+    let hitCritter = -1;
     let hitHead = false;
 
     // Segmented so the round can drop. Inside the flat zone this is identical
     // to a straight raycast; past it the path bends and the hit tests follow.
     const shot = traceWithDrop(
-      ox, oy, oz, dx, dy, dz, weapon.range,
+      px, py, pz, dx, dy, dz, range,
       (x, y, z, sx, sy, sz, segment) => {
         let nearest = segment;
         let found = false;
 
         const piece = world.raycast(x, y, z, sx, sy, sz, segment, nowSec);
         if (piece && piece.t <= nearest) {
-          nearest = piece.t; pieceHit = piece; hitPlayer = null; found = true;
+          nearest = piece.t; pieceHit = piece; hitPlayer = null; hitCritter = -1; found = true;
         }
 
         for (const target of players) {
-          if (target.id === shooter.id || !target.alive) continue;
+          if (!target.alive) continue;
+          if (target.id === shooter.id && !canHitShooter) continue;
           const p = target.positionAt(rewindTo);
           const { body, head } = hitBoxes(p.x, p.y, p.z, target.crouch);
 
           const headHit = rayVsBox(head, x, y, z, sx, sy, sz);
           if (headHit && headHit.t <= nearest) {
-            nearest = headHit.t; hitPlayer = target; hitHead = true; pieceHit = null; found = true;
+            nearest = headHit.t; hitPlayer = target; hitHead = true; pieceHit = null; hitCritter = -1; found = true;
           }
           const bodyHit = rayVsBox(body, x, y, z, sx, sy, sz);
           if (bodyHit && bodyHit.t <= nearest) {
-            nearest = bodyHit.t; hitPlayer = target; hitHead = false; pieceHit = null; found = true;
+            nearest = bodyHit.t; hitPlayer = target; hitHead = false; pieceHit = null; hitCritter = -1; found = true;
+          }
+        }
+
+        // Wildlife is tested at the same rewound instant as players, because
+        // the client draws it at the same instant too -- a bird evaluated at
+        // "now" on the server would sit half a round trip ahead of the one the
+        // shooter was actually looking at.
+        if (critters) {
+          const critter = critterHit(
+            x, y, z, sx, sy, sz, nearest, rewindTo / 1000,
+            (i) => critters.alive(i, nowSec),
+          );
+          if (critter) {
+            nearest = critter.t; hitCritter = critter.index;
+            pieceHit = null; hitPlayer = null; found = true;
           }
         }
         return found ? nearest : null;
       },
     );
-
-    const victim = hitPlayer as ServerPlayer | null;
-    const struck = pieceHit as RayHit | null;
-
-    if (victim) {
-      // Falloff is measured along the path travelled, not the straight-line
-      // distance, so a long arcing shot is priced at what it actually flew.
-      let dmg = damageAtRange(weapon, shot.t);
-      if (hitHead) dmg *= weapon.headMult;
-      applyPlayerDamage(victim, dmg, shooter, nowSec);
-      events.push({
-        kind: EV_HIT, target: victim.id, shooter: shooter.id,
-        damage: Math.round(dmg), headshot: hitHead ? 1 : 0,
-      });
-    } else if (struck) {
-      damagePiece(world, struck.piece.key, pieceDamage(weapon, struck.piece.mat), nowSec, events, shooter);
-      // Shooting a tree knocks its leaves off. The trunk is indestructible
-      // cover either way; what changes is that everyone can now see through
-      // the canopy, so hiding in one stops being free once you fire from it.
-      const tree = treeIndexFromKey(struck.piece.key);
-      if (tree >= 0) events.push({ kind: EV_FOLIAGE, index: tree });
-    }
-
-    events.push({
-      kind: EV_SHOT, shooter: shooter.id, weapon: weapon.id,
-      ox, oy, oz,
-      ex: shot.x, ey: shot.y, ez: shot.z,
-      hit: victim ? 2 : (struck ? 1 : 0),
-    });
+    return {
+      shot,
+      victim: hitPlayer as ServerPlayer | null,
+      struck: pieceHit as RayHit | null,
+      critter: hitCritter,
+      head: hitHead,
+    };
   }
 
+  for (let pellet = 0; pellet < weapon.pellets; pellet++) {
+    let [dx, dy, dz] = applySpread(baseDir, spread, Math.random);
+    let px = ox, py = oy, pz = oz;
+    let range = weapon.range;
+    // Distance already flown, so damage falloff prices the WHOLE path a
+    // reflected round took rather than restarting at zero after the bounce.
+    let flown = 0;
+    let reflected = false;
+
+    // At most one bounce. Two shields facing each other would otherwise be a
+    // loop, and a round that has been round the houses twice is not something
+    // any player could reason about anyway.
+    for (let leg = 0; leg < 2; leg++) {
+      const { shot, victim, struck, critter, head } =
+        tracePellet(px, py, pz, dx, dy, dz, range, reflected);
+
+      events.push({
+        kind: EV_SHOT, shooter: shooter.id, weapon: weapon.id,
+        ox: px, oy: py, oz: pz,
+        ex: shot.x, ey: shot.y, ez: shot.z,
+        hit: victim || critter >= 0 ? 2 : (struck ? 1 : 0),
+      });
+
+      // A shield throws the round back instead of stopping it, and takes
+      // nothing for doing so -- bullets are what it is for. It still falls to
+      // a pickaxe, and it expires on its own; see MatchRoom.
+      if (!victim && critter < 0 && struck && struck.piece.slot === SLOT_SHIELD
+          && leg === 0 && weapon.id !== W_PICKAXE) {
+        // Straight back down the path it came in on, not a mirror bounce off
+        // the panel's normal.
+        //
+        // A real mirror is the obvious implementation and it makes the item
+        // look broken. The crosshair sits on an over-the-shoulder camera, so a
+        // shot converges on its aim point at about two degrees off the
+        // shooter's own axis; mirrored off a flat panel that returns a round
+        // most of a metre wide of them, every time. "Reflects bullets back"
+        // means back at the person who fired, so that is what it does -- it is
+        // a slab of hard light, and it can be a corner reflector if it likes.
+        dx = -dx; dy = -dy; dz = -dz;
+        // Start clear of the panel, or the new leg immediately hits it again.
+        px = shot.x + dx * 0.05;
+        py = shot.y + dy * 0.05;
+        pz = shot.z + dz * 0.05;
+        flown += shot.t;
+        range = Math.max(0, range - shot.t);
+        reflected = true;
+        if (range <= 0.1) break;
+        continue;
+      }
+
+      if (victim) {
+        // Falloff is measured along the path travelled, not the straight-line
+        // distance, so a long arcing shot is priced at what it actually flew.
+        let dmg = damageAtRange(weapon, flown + shot.t);
+        if (head) dmg *= weapon.headMult;
+        // A reflected round is nobody's shot. Crediting it to the person who
+        // pulled the trigger would mean walking into your own bullet counts as
+        // a kill for you; crediting it to the shield's owner would turn a
+        // placed panel into a kill farm. It kills, and it feeds the kill feed
+        // as an accident.
+        applyPlayerDamage(victim, dmg, reflected ? null : shooter, nowSec);
+        events.push({
+          kind: EV_HIT, target: victim.id,
+          shooter: reflected ? 255 : shooter.id,
+          damage: Math.round(dmg), headshot: head ? 1 : 0,
+        });
+      } else if (critter >= 0 && critters) {
+        // Shooting wildlife pays out health, which is the whole point of it:
+        // something to do between fights that is worth interrupting a fight for.
+        critters.down(critter, nowSec);
+        const heal = critterHeal(critter);
+        if (!reflected) {
+          shooter.hp = Math.min(PLAYER_MAX_HP, shooter.hp + heal);
+          events.push({ kind: EV_CRITTER, index: critter, shooter: shooter.id, heal });
+        } else {
+          events.push({ kind: EV_CRITTER, index: critter, shooter: 255, heal: 0 });
+        }
+      } else if (struck) {
+        damagePiece(world, struck.piece.key, pieceDamage(weapon, struck.piece.mat), nowSec, events, shooter);
+        // Shooting a tree knocks its leaves off. The trunk is indestructible
+        // cover either way; what changes is that everyone can now see through
+        // the canopy, so hiding in one stops being free once you fire from it.
+        const tree = treeIndexFromKey(struck.piece.key);
+        if (tree >= 0) events.push({ kind: EV_FOLIAGE, index: tree });
+      }
+      break;
+    }
+  }
 
   if (Number.isFinite(shooter.ammo[shooter.weaponIdx]) && shooter.ammo[shooter.weaponIdx] <= 0) {
     beginReload(shooter, nowSec);
@@ -274,6 +292,10 @@ export function damagePiece(
   const piece = world.pieces.get(key);
   if (!piece) return;
   if (piece.ownerId === ARENA_OWNER) return; // arena geometry is indestructible
+  // A shield eats bullets for a living, so a bullet must not wear it down --
+  // otherwise the reflection is just a slower way of breaking it. A pickaxe
+  // still takes it apart, which is the counter-play.
+  if (piece.slot === SLOT_SHIELD && (!source || source.weaponId !== W_PICKAXE)) return;
 
   // Grow-in means a fresh piece has less effective HP than its stored value.
   const effective = currentHp(piece, nowSec);
@@ -304,8 +326,12 @@ export function tryPlace(
   if (!p.inBuildMode || !p.alive) return false;
   if (nowSec - p.lastBuildAt < BUILD_COOLDOWN) return false;
 
+  // The shield costs nothing and is limited by count instead. Charging for it
+  // as well would make it a thing players hoard and never actually use.
+  const shield = p.buildSlot === BUILD_SHIELD;
+  if (shield && p.shieldUsed) return false;
   const matDef = MATERIALS[p.material] ?? MATERIALS[0];
-  if (p.mats < matDef.cost) return false;
+  if (!shield && p.mats < matDef.cost) return false;
 
   const target = resolvePlacement(p, world);
   if (!target) return false;
@@ -323,7 +349,8 @@ export function tryPlace(
 
   const piece = makePiece(gx, gy, gz, slot, p.material, facing, p.id, nowSec);
   world.set(piece);
-  p.mats -= matDef.cost;
+  if (shield) p.shieldUsed = true;
+  else p.mats -= matDef.cost;
   p.lastBuildAt = nowSec;
 
   events.push({

@@ -29,6 +29,9 @@ export const EV_SOUND = 8;
 /** A tree took a hit and lost its leaves. Carries the SCENERY index, so every
  *  client can strip the same tree without the server sending geometry. */
 export const EV_FOLIAGE = 9;
+/** A bird or a fish was shot down. Carries the index into CRITTERS, so every
+ *  client removes the same one without the server ever sending its position. */
+export const EV_CRITTER = 10;
 
 // ---------------------------------------------------------------------------
 // Quantisation
@@ -200,3 +203,6 @@ export const PF_CROUCH = 1 << 3;
 export const PF_FIRING = 1 << 4;
 export const PF_MOVING = 1 << 5;
 export const PF_SLIDING = 1 << 6;
+/** The player's one shield block for this match has been placed. Only ever
+ *  set on your own state; nobody else's spent shield is your business. */
+export const PF_SHIELD_SPENT = 1 << 7;

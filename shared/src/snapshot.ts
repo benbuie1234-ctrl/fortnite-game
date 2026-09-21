@@ -1,7 +1,7 @@
 import {
   Writer, Reader, S_SNAPSHOT,
   EV_PIECE_ADD, EV_PIECE_REMOVE, EV_PIECE_DAMAGE,
-  EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_SOUND, EV_FOLIAGE,
+  EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_SOUND, EV_FOLIAGE, EV_CRITTER,
 } from "./protocol";
 
 /** Authoritative state for the player receiving this snapshot. Full precision:
@@ -21,6 +21,10 @@ export interface SelfState {
   /** Sprint stamina, 0-255. Reconciled like the stance: the speed cap depends
    *  on it, so the client cannot keep its own copy without drifting. */
   stamina: number;
+  /** Shot-cone bloom, 0-255. Reconciled for the same reason as the other two:
+   *  the server builds the cone from it, so a drifting local copy would mean
+   *  the crosshair size and the actual spread disagreed. */
+  bloom: number;
 }
 
 /** Everyone else, quantised. They are interpolated, so 3 cm is invisible. */
@@ -42,7 +46,8 @@ export type GameEvent =
   | { kind: typeof EV_DEATH; victim: number; killer: number; weapon: number }
   | { kind: typeof EV_RESPAWN; id: number; x: number; y: number; z: number }
   | { kind: typeof EV_SOUND; sound: number; x: number; y: number; z: number }
-  | { kind: typeof EV_FOLIAGE; index: number };
+  | { kind: typeof EV_FOLIAGE; index: number }
+  | { kind: typeof EV_CRITTER; index: number; shooter: number; heal: number };
 
 export interface Snapshot {
   serverTimeMs: number;
@@ -73,6 +78,7 @@ export function writeSnapshot(w: Writer, s: Snapshot): void {
   w.u16(Math.max(0, Math.min(65535, Math.round(self.reloadMs))));
   w.u8(Math.max(0, Math.min(255, Math.round(self.stance))));
   w.u8(Math.max(0, Math.min(255, Math.round(self.stamina))));
+  w.u8(Math.max(0, Math.min(255, Math.round(self.bloom))));
 
   w.u8(s.others.length);
   for (const o of s.others) {
@@ -121,6 +127,9 @@ export function writeSnapshot(w: Writer, s: Snapshot): void {
       case EV_FOLIAGE:
         w.u16(e.index);
         break;
+      case EV_CRITTER:
+        w.u16(e.index); w.u8(e.shooter); w.u8(e.heal);
+        break;
     }
   }
 }
@@ -139,6 +148,7 @@ export function readSnapshot(r: Reader): Snapshot {
     buildSlot: r.u8(), material: r.u8(), reloadMs: r.u16(),
     stance: r.u8(),
     stamina: r.u8(),
+    bloom: r.u8(),
   };
   if (self.ammo === 0xffff) self.ammo = Infinity;
 
@@ -191,6 +201,9 @@ export function readSnapshot(r: Reader): Snapshot {
         break;
       case EV_FOLIAGE:
         events.push({ kind: EV_FOLIAGE, index: r.u16() });
+        break;
+      case EV_CRITTER:
+        events.push({ kind: EV_CRITTER, index: r.u16(), shooter: r.u8(), heal: r.u8() });
         break;
       default:
         // Unknown event kind: the rest of the buffer is no longer parseable.

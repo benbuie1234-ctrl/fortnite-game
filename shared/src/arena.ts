@@ -1,7 +1,7 @@
 import { TILE } from './constants';
 import { Piece,Slot,SLOT_FLOOR,SLOT_WALL_X,SLOT_WALL_Z,SLOT_RAMP,Facing,packKey } from './build';
 import { World } from './world';
-import { MAP_HALF,BUILDINGS,SCENERY,PROPS,terrainHeight } from './map';
+import { MAP_HALF,BUILDINGS,SCENERY,PROPS,CARS,CAR_LENGTH,CAR_WIDTH,CAR_HEIGHT,terrainHeight,cell } from './map';
 import { TREE_PERCH_MIN_HEIGHT,TREE_PERCH_MAX_HEIGHT,TREE_PERCH_RADIUS,TREE_PERCH_THICKNESS } from './constants';
 export const ARENA_OWNER=255;
 export const ARENA_HALF_TILES=MAP_HALF/TILE;
@@ -12,6 +12,10 @@ export function isArenaPiece(p:Piece):boolean{return p.ownerId===ARENA_OWNER;}
 export function treePerchHeight(size:number):number {
   return Math.max(TREE_PERCH_MIN_HEIGHT,Math.min(TREE_PERCH_MAX_HEIGHT,size*.55));
 }
+/** Cars are keyed from here downward, clear of scenery (-2 down) and props
+ *  (-10000 down), so a collider can always be traced back to what it is. */
+export const CAR_KEY_BASE=-20000;
+
 /** Scenery obstacles are keyed negatively; recover the SCENERY index. */
 export function sceneryIndexFromKey(key:number):number { return -key-2; }
 /** The SCENERY index of the tree this collider belongs to, or -1. Props are
@@ -41,13 +45,47 @@ export function buildArena(world:World,_seed=1):void {
    ],-i-2);}
  });
  PROPS.forEach((p,i)=>world.addObstacle([p.x-p.w/2,p.y,p.z-p.d/2,p.x+p.w/2,p.y+p.h,p.z+p.d/2],-10000-i));
+ // Cars. The collider is an axis-aligned box sized to whichever way round the
+ // car is parked: the collision system has no rotated boxes, and a body-sized
+ // box that ignored the yaw would let you walk through the front of half of
+ // them. Squaring it up costs a little air at the corners and is honest from
+ // every side, which is the trade the ramps and cones already make.
+ CARS.forEach((c,i)=>{
+  const cos=Math.abs(Math.cos(c.yaw)),sin=Math.abs(Math.sin(c.yaw));
+  const halfX=(CAR_LENGTH*sin+CAR_WIDTH*cos)/2;
+  const halfZ=(CAR_LENGTH*cos+CAR_WIDTH*sin)/2;
+  const y=terrainHeight(c.x,c.z);
+  world.addObstacle([c.x-halfX,y,c.z-halfZ,c.x+halfX,y+CAR_HEIGHT,c.z+halfZ],CAR_KEY_BASE-i);
+ });
  for(const b of BUILDINGS) {
   const door=Math.floor(b.w/2);
+  // The stairwell alternates columns floor by floor, and never uses the
+  // doorway's column.
+  //
+  // It used to be one fixed cell, with every level's ramp stacked directly
+  // above the last. A ramp fills its whole cell, so the ramp above was a solid
+  // ceiling over the one below: a player climbing had TILE minus their own
+  // height of headroom and wedged solid about two thirds of the way up every
+  // flight. Putting consecutive flights in different columns leaves nothing
+  // over a ramp but the hole it climbs through.
+  //
+  // Alternating needs two free columns, which is why anything with more than
+  // one floor is at least three cells wide -- see the check in map.ts.
+  const stairCol=(level:number):number=>level%2===0?0:b.w-1;
+  // A pitched roof is a solid wedge sitting on the top floor's ceiling, so
+  // there is no attic under it and the last flight of a house would climb into
+  // the underside of its own roof and stop. Those buildings simply do not get
+  // a top flight -- and without a flight there is no hole in the ceiling over
+  // it either, which is what `hasFlight` is consulted twice for.
+  const pitched=b.style==='house'||b.style==='cabin';
+  const hasFlight=(level:number):boolean=>
+    level>=0&&level<b.floors&&!(pitched&&level===b.floors-1);
   for(let level=0;level<=b.floors;level++) {
    const gy=b.base+level;
    for(let x=0;x<b.w;x++)for(let z=0;z<b.d;z++) {
-    // Hole over the stairs. The neighboring landing remains solid.
-    if(level>0&&x===1&&z===1)continue;
+    // Hole over the flight below, so the climb can come through. The rest of
+    // the landing stays solid.
+    if(level>0&&hasFlight(level-1)&&x===stairCol(level-1)&&z===0)continue;
     place(world,b.x+x,gy,b.z+z,SLOT_FLOOR);
    }
    if(level===b.floors)continue;
@@ -62,7 +100,9 @@ export function buildArena(world:World,_seed=1):void {
     if(z%3===1)continue; // Full-height window openings double as escape routes.
     place(world,b.x+side,gy,b.z+z,SLOT_WALL_X);
    }
-   place(world,b.x+1,gy,b.z+1,SLOT_RAMP,1);
+   // Rises toward +Z from the front wall inward, so the flight is inside the
+   // building rather than climbing into the back wall.
+   if(hasFlight(level))place(world,b.x+stairCol(level),gy,b.z,SLOT_RAMP,1);
   }
   if(b.style==='house'||b.style==='cabin') {
    for(let z=0;z<b.d;z++)for(let x=0;x<b.w;x++) {
@@ -71,25 +111,28 @@ export function buildArena(world:World,_seed=1):void {
    }
   }
  }
- // Docks run toward the shallow lake. Broad decking has matching collision.
- for(let x=-80;x<=-67;x++)for(let z=50;z<54;z++)place(world,x,0,z,SLOT_FLOOR);
- // Cargo stacks form short-range cover between the warehouses and docks.
- for(let i=0;i<12;i++) {
-  const x=-70+(i%4)*8,z=72+Math.floor(i/4)*4;
-  for(let dx=0;dx<5;dx++) {
-   place(world,x+dx,0,z,SLOT_WALL_Z);place(world,x+dx,0,z+2,SLOT_WALL_Z);
-   for(let dz=0;dz<2;dz++)place(world,x+dx,1,z+dz,SLOT_FLOOR);
-  }
-  for(let dz=0;dz<2;dz++){place(world,x,0,z+dz,SLOT_WALL_X);place(world,x+5,0,z+dz,SLOT_WALL_X);}
+ // Decking out over the lake, running out between the two warehouses.
+ //
+ // The deck sits on the cell line at y=0: above the water, and a short step
+ // down from the shore at its landward end, so it can be walked onto. Its cell
+ // range is chosen to abut the warehouse district rather than overlap it -- an
+ // earlier span put decking and a railing straight through the middle of a
+ // warehouse, which is the sort of thing that only shows up when somebody
+ // walks there.
+ const deckX0=cell(-198), deckX1=cell(-144), deckZ0=cell(102), deckZ1=cell(114);
+ for(let x=deckX0;x<=deckX1;x++)for(let z=deckZ0;z<=deckZ1;z++)place(world,x,0,z,SLOT_FLOOR);
+ // Railings down both long sides; the landward end stays open.
+ for(let x=deckX0;x<=deckX1;x++) {
+  place(world,x,0,deckZ0,SLOT_WALL_Z);
+  place(world,x,0,deckZ1+1,SLOT_WALL_Z);
  }
- // Crossroads rest stop keeps the centre useful for small groups.
- for(const x of [-4,3])for(const z of [-4,3]) {
-  place(world,x,0,z,SLOT_WALL_X);place(world,x,0,z,SLOT_WALL_Z);
- }
+
 }
 export function arenaSpawns():Array<{x:number;y:number;z:number;yaw:number}> {
- // Start close together at the central hub; the four districts are exploration routes.
- return [[0,-21],[0,21],[-21,0],[21,0]].map(([x,z])=>({x,y:terrainHeight(x,z)+.05,z,yaw:Math.atan2(x,-z)}));
+ // Around the central mesa, facing inward. Close together on purpose: the
+ // districts are somewhere to go, not somewhere to start, and a round that
+ // opens with four people walking apart is a round that takes too long.
+ return [[0,-26],[0,26],[-26,0],[26,0]].map(([x,z])=>({x,y:terrainHeight(x,z)+.05,z,yaw:Math.atan2(x,-z)}));
 }
 export function isOutOfBounds(x:number,y:number,z:number):boolean {
  return Math.abs(x)>MAP_HALF+12||Math.abs(z)>MAP_HALF+12||y< -20||y>220;
