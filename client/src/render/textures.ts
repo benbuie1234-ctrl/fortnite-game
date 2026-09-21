@@ -246,11 +246,46 @@ function tint(hex: number, mul: number, alpha = 1): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+/**
+ * Neutral, near-white surface grain.
+ *
+ * Designed to MULTIPLY over an existing colour rather than supply one, so it
+ * can be dropped onto the terrain, the buildings and the props without
+ * overriding any of their palettes. Everything in the world was a flat
+ * untextured colour; this gives each surface something for the light to catch
+ * without changing what colour it is.
+ *
+ * Kept in a narrow range (about 0.84-1.0) so it reads as grain, not dirt.
+ */
+function detailCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x5eed06);
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Broad mottling first, so the surface varies at a distance too.
+  for (let i = 0; i < 120; i++) {
+    const shade = 0.86 + rand() * 0.12;
+    ctx.fillStyle = `rgba(${Math.round(255 * shade)},${Math.round(255 * shade)},${Math.round(255 * shade)},0.5)`;
+    wrapDot(ctx, rand() * SIZE, rand() * SIZE, 10 + rand() * 34);
+  }
+  // Then fine grain, which is what catches a grazing light.
+  for (let i = 0; i < 2600; i++) {
+    const shade = 0.84 + rand() * 0.16;
+    ctx.fillStyle = `rgba(${Math.round(255 * shade)},${Math.round(255 * shade)},${Math.round(255 * shade)},0.55)`;
+    wrapDot(ctx, rand() * SIZE, rand() * SIZE, 0.6 + rand() * 1.7);
+  }
+  return cv;
+}
+
 export interface TextureSet {
   /** Indexed by material id: wood, brick, metal. */
   build: THREE.CanvasTexture[];
   grass: THREE.CanvasTexture;
   concrete: THREE.CanvasTexture;
+  /** Neutral grain, meant to multiply over an existing colour. */
+  detail: THREE.CanvasTexture;
 }
 
 let cached: TextureSet | null = null;
@@ -266,6 +301,7 @@ export function getTextures(anisotropy: number): TextureSet {
     ],
     grass: finish(grassCanvas(), anisotropy),
     concrete: finish(concreteCanvas(), anisotropy),
+    detail: finish(detailCanvas(), anisotropy),
   };
   return cached;
 }

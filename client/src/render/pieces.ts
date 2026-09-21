@@ -197,6 +197,8 @@ const SURFACE = [
 interface MaterialPool {
   build: THREE.MeshStandardMaterial[][]; // [materialId][bucket]
   arena: THREE.MeshStandardMaterial;
+  /** Shared neutral grain, for surfaces that supply their own colour. */
+  detail: THREE.CanvasTexture;
 }
 
 let pool: MaterialPool | null = null;
@@ -226,6 +228,7 @@ function materials(anisotropy: number): MaterialPool {
       map: tex.concrete, color: 0xffffff, vertexColors: true,
       roughness: 0.92, metalness: 0, envMapIntensity: 0.8,
     }),
+    detail: tex.detail,
   };
   return pool;
 }
@@ -313,8 +316,13 @@ export class PieceRenderer {
     // Physical, not Lambert. Lambert takes no light from the environment map,
     // so every map building was lit by the hemisphere term alone and any face
     // turned away from the sun crushed to black.
+    // Neutral grain over the per-instance colour. The map buildings were flat
+    // untextured boxes, which no amount of lighting can rescue; this gives
+    // every surface something for the light to grab without touching the
+    // colours the map data defines.
     const material=new THREE.MeshStandardMaterial({
       color:0xffffff, roughness:0.9, metalness:0, envMapIntensity:0.95,
+      map:this.pool.detail,
     });
     for(const list of batches.values()) {
       const batch=new THREE.InstancedMesh(geometryFor(list[0].slot),material,list.length);

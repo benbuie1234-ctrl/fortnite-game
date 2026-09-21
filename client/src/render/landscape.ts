@@ -1,9 +1,11 @@
 import * as THREE from 'three';
 import { MAP_HALF,terrainHeight,BUILDINGS,LOCATIONS,SCENERY,PROPS } from '@shared/map';
+import { getTextures, planarUVs } from './textures';
 
 export function createLandscape(scene:THREE.Scene):void {
  const trunkGeo=new THREE.BoxGeometry(.56,1,.56),rockGeo=new THREE.BoxGeometry(1,1,1),leafGeo=new THREE.ConeGeometry(1,1,7);
- const solidMaterial=new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.88,metalness:0,envMapIntensity:0.9});
+ const detail=getTextures(1).detail;
+ const solidMaterial=new THREE.MeshStandardMaterial({color:0xffffff,map:detail,roughness:0.88,metalness:0,envMapIntensity:0.9});
  const treeList=SCENERY.filter(p=>p.kind==='tree'),rockList=SCENERY.filter(p=>p.kind==='rock');
  const trunks=new THREE.InstancedMesh(trunkGeo,solidMaterial,treeList.length);
  const leaves=new THREE.InstancedMesh(leafGeo,solidMaterial,treeList.length*2);
@@ -28,7 +30,10 @@ export function createLandscape(scene:THREE.Scene):void {
   const color=new THREE.Color(h<-.1?0xbfae7b:h>10?0x638957:0x80aa63);color.multiplyScalar(.94+noise);colors.push(color.r,color.g,color.b);
  }
  ground.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));ground.computeVertexNormals();
- const terrain=new THREE.Mesh(ground,new THREE.MeshStandardMaterial({vertexColors:true,roughness:0.95,metalness:0,envMapIntensity:0.9}));terrain.receiveShadow=true;scene.add(terrain);
+ // Project world-space UVs so the grain tiles at a fixed real-world size
+ // rather than stretching once across the entire map.
+ planarUVs(ground,7);
+ const terrain=new THREE.Mesh(ground,new THREE.MeshStandardMaterial({vertexColors:true,map:detail,roughness:0.95,metalness:0,envMapIntensity:0.9}));terrain.receiveShadow=true;scene.add(terrain);
  const water=new THREE.Mesh(new THREE.CircleGeometry(1,64),new THREE.MeshStandardMaterial({color:0x53b6c8,transparent:true,opacity:.78,roughness:0.08,metalness:0.25,envMapIntensity:1.4}));
  water.rotation.x=-Math.PI/2;water.scale.set(49,75,1);water.position.set(-251,.025,170);scene.add(water);
  // Roads are tessellated to follow the actual shared terrain, including the ridge ascent.
