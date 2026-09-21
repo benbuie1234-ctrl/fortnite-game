@@ -27,14 +27,14 @@ against yourself.
 
 **WASD** move · **Space** jump · **Left click** shoot or place · **Right click** aim
 **1-5** weapons · **Q E R F** wall, floor, ramp, cone · **Z X C** wood, brick, metal
-**G** reload · **Esc** release mouse
+**G** reload · **M** mute · **Esc** release mouse
 
 ## How it is put together
 
 ```
 shared/   simulation, collision, protocol  <- both sides import this
 server/   Cloudflare Worker + MatchRoom Durable Object
-client/   Three.js renderer, input, HUD
+client/   Three.js renderer, input, audio, HUD
 tests/    node test suites, no framework
 ```
 
@@ -88,6 +88,45 @@ Placement lives in `shared/src/placement.ts` and is used by **both** the
 client's build ghost and the server's validation, so the yellow preview can
 never point at a different cell than the one that actually gets built.
 
+## Everything is generated, nothing is downloaded
+
+There is not a single image or audio file in this repo, and that is deliberate.
+Thirty kids opening the game on the same school wifi at lunchtime is the real
+performance constraint, so every asset is synthesised in code at load time.
+
+**Textures** (`client/src/render/textures.ts`) are drawn to a canvas: wood
+grain, brick courses, brushed metal, grass and concrete. Each one is authored
+to tile seamlessly — patterns use periods that divide the canvas, and scattered
+detail is drawn with wraparound so nothing clips at the seam. All five cost
+about **1.7 kB of JavaScript** instead of several hundred kB of PNGs.
+
+Because the textures are shared between every piece, tiling density is baked
+into each geometry's UVs rather than set per-texture. Otherwise a 3 m wall and
+a 0.25 m floor slab would show wildly different brick sizes.
+
+**Sound** (`client/src/audio/sound.ts`) is synthesised with the Web Audio API.
+Each gunshot layers a filtered noise "crack" over a low oscillator "body",
+which is how real gunshot foley is built up. Positioning is done by hand —
+distance sets gain, direction sets stereo pan — which is cheaper and far more
+predictable than the full HRTF panner. The whole system is about **2 kB**.
+
+Two details worth knowing if you touch this:
+
+- The `AudioContext` must be created inside a real user gesture. It is started
+  from the Quick Play click; anywhere else and browsers leave it suspended
+  forever, silently.
+- A shotgun emits one `EV_SHOT` per pellet, so nine events describe a single
+  trigger pull. Tracers want all nine, the gunshot must fire exactly **once**.
+  `handleEvents` dedupes on shooter+weapon.
+
+### Previewing them
+
+`npx vite` then open <http://localhost:5173/texture-preview.html>. It shows
+every texture tiled 2x2 (any visible cross means a broken seam), renders one of
+every build piece in every material through the real `PieceRenderer`, and gives
+you a button per sound so you can audition and tune them. It is a dev page only
+— Vite's production build never includes it.
+
 ## What Cloudflare actually costs
 
 The client is static and served from Cloudflare's CDN, which is free and
@@ -122,6 +161,26 @@ putting in an hour a day.
 A room shuts its tick loop down and clears its builds when the last player
 leaves, so empty rooms cost nothing.
 
+### Sharing an account with other sites
+
+The free daily limit is **per account**, not per Worker, and a Worker that
+exhausts it returns error 1027. So it matters what else lives on the account.
+
+What is safe: **static sites cost nothing and are never affected.** Cloudflare
+is explicit that *"requests to static assets are free and unlimited"*, and a
+request served by a static asset does not invoke a Worker at all. A plain
+HTML/CSS portfolio — including one embedding YouTube or Instagram, since those
+are served by YouTube and Instagram — can sit on the same account safely.
+
+What is not: **Pages Functions share the same pool.** *"Requests to your Pages
+Functions count towards your quota for the Workers Free plan."* Any other site
+on the account running Functions or its own Worker is drawing from the same
+100,000/day.
+
+If you want total isolation, either put the game on the $5 Paid plan (there is
+no daily cap at all, so nothing can be exhausted) or run it under a separate
+Cloudflare account, which costs nothing but a second email address.
+
 ## Deploying
 
 ```bash
@@ -138,18 +197,19 @@ share a code land together.
 Working: movement, collision, building (wall/floor/ramp/cone × 3 materials with
 grow-in and destruction), 5 weapons with falloff and headshots, lag-compensated
 hit registration, respawns, scoring, rounds, kill feed, quickplay and room
-codes.
+codes, procedural textures, and positional sound.
 
 Not built yet:
 
 - **Build editing** (the Fortnite `T` edit mechanic). The input bit is already
   on the wire; the server ignores it.
 - **Crouch** — also on the wire, not in the simulation.
-- **Sound.** There is none at all yet, and it matters more than it sounds like.
 - **Skins are a catalogue, not a store.** `shared/src/skins.ts` defines six
-  skins and the rendering path is a pure recolour, but there is no purchase
-  flow. Unlocks must be granted server-side from a Stripe webhook — never
-  trusted from the client.
+  skins and the rendering path is a pure recolour, but there is deliberately no
+  purchase flow yet. When one is built, unlocks must be granted server-side
+  from a Stripe webhook and never trusted from the client. Selling to
+  under-18s also carries real obligations (COPPA under 13, and a high
+  chargeback rate), so it wants designing in rather than bolting on.
 - **Battle royale.** The engine is mode-agnostic; a BR mode needs a larger map,
   loot, and a storm circle.
 

@@ -1,12 +1,13 @@
 import * as THREE from "three";
-import { TICK_DT, TICK_HZ, EYE_HEIGHT } from "@shared/constants";
+import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE } from "@shared/constants";
 import { forwardVector, rightVector } from "@shared/vec";
 import { resolvePlacement } from "@shared/placement";
-import { packKey } from "@shared/build";
+import { packKey, unpackKey } from "@shared/build";
 import { weaponById, ARENA_LOADOUT, W_SNIPER } from "@shared/weapons";
 import { SKINS } from "@shared/skins";
 import {
-  EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, PF_ALIVE, PF_GROUNDED,
+  EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
+  PF_ALIVE, PF_GROUNDED,
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
 
@@ -17,6 +18,7 @@ import { Effects } from "./render/effects";
 import { Controls } from "./input/controls";
 import { Connection, type MatchPlayerInfo } from "./net/connection";
 import { Hud } from "./ui/hud";
+import { Sound } from "./audio/sound";
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -32,9 +34,10 @@ const joinBtn = document.getElementById("joinBtn") as HTMLButtonElement;
 
 const view = createRenderer(app);
 const hud = new Hud();
-const pieces = new PieceRenderer(view.scene);
+const pieces = new PieceRenderer(view.scene, view.maxAnisotropy);
 const ghost = new BuildGhost(view.scene);
 const effects = new Effects(view.scene);
+const sound = new Sound();
 
 const characters = new Map<number, Character>();
 let selfCharacter: Character | null = null;
@@ -56,6 +59,7 @@ const conn = new Connection({
     if (typeof msg.target === "number") scoreTarget = msg.target;
     if (msg.roundOver) {
       const winner = String(msg.winnerName ?? "Someone");
+      sound.win();
       hud.setCenterMessage(`${winner} wins!`, "Next round starting");
       setTimeout(() => hud.setCenterMessage(""), 3000);
     }
@@ -89,6 +93,9 @@ function serverUrl(name: string, room: string): string {
 let connectAttempt = 0;
 
 function startConnect(room: string): void {
+  // Must happen inside the click handler: browsers refuse to start an
+  // AudioContext outside a user gesture, and it would stay muted forever.
+  sound.init();
   const name = (nameInput.value || "Player").slice(0, 16);
   statusEl.className = "status";
   statusEl.textContent = room ? `Joining ${room}...` : "Finding a match...";
@@ -155,6 +162,17 @@ app.addEventListener("click", () => {
   if (playing && !controls.isLocked) controls.requestLock();
 });
 
+// Mute lives outside Controls because that only listens while pointer-locked,
+// and muting is exactly what you want to do when you have just tabbed away.
+window.addEventListener("keydown", (e) => {
+  if (e.code !== "KeyM" || e.repeat) return;
+  const target = e.target as HTMLElement | null;
+  if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
+  const muted = sound.toggleMute();
+  hud.setCenterMessage(muted ? "Sound off" : "Sound on");
+  setTimeout(() => hud.setCenterMessage(""), 900);
+});
+
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
@@ -165,23 +183,50 @@ function nameOf(id: number): string {
 }
 
 function handleEvents(events: readonly GameEvent[]): void {
+  // A shotgun emits one EV_SHOT per pellet, so nine events describe a single
+  // trigger pull. Tracers want all nine; the gunshot must fire exactly once.
+  const voiced = new Set<number>();
+
   for (const e of events) {
     switch (e.kind) {
       case EV_SHOT: {
         const sniper = e.weapon === W_SNIPER;
         effects.spawnTracer(e.ox, e.oy, e.oz, e.ex, e.ey, e.ez, sniper ? 0xbfe6ff : 0xfff0b0);
         effects.spawnImpact(e.ex, e.ey, e.ez);
+
+        const voice = e.shooter * 256 + e.weapon;
+        if (!voiced.has(voice)) {
+          voiced.add(voice);
+          sound.shot(e.weapon, e.ox, e.oy, e.oz);
+        }
+        break;
+      }
+      case EV_PIECE_ADD: {
+        const c = unpackKey(e.key);
+        sound.build((c.gx + 0.5) * TILE, (c.gy + 0.5) * TILE, (c.gz + 0.5) * TILE);
+        break;
+      }
+      case EV_PIECE_REMOVE: {
+        const c = unpackKey(e.key);
+        sound.destroy((c.gx + 0.5) * TILE, (c.gy + 0.5) * TILE, (c.gz + 0.5) * TILE);
         break;
       }
       case EV_HIT:
-        if (e.shooter === conn.selfId) hud.showHitmarker(e.headshot === 1);
-        if (e.target === conn.selfId) hud.flashDamage();
+        if (e.shooter === conn.selfId) {
+          hud.showHitmarker(e.headshot === 1);
+          sound.hitmarker(e.headshot === 1);
+        }
+        if (e.target === conn.selfId) {
+          hud.flashDamage();
+          sound.damage();
+        }
         break;
       case EV_DEATH: {
         const victim = nameOf(e.victim);
         const killer = e.killer === 255 ? null : nameOf(e.killer);
         const text = killer ? `${killer} eliminated ${victim}` : `${victim} was eliminated`;
         hud.addKillFeed(text, e.victim === conn.selfId || e.killer === conn.selfId);
+        sound.death();
         if (e.victim === conn.selfId) {
           respawnAtMs = performance.now() + 3000;
         }
@@ -191,6 +236,7 @@ function handleEvents(events: readonly GameEvent[]): void {
         if (e.id === conn.selfId) {
           respawnAtMs = 0;
           hud.setCenterMessage("");
+          sound.respawn();
         }
         break;
       default: break;
@@ -254,6 +300,32 @@ function updateCamera(aiming: boolean): void {
 
 let lastFrame = performance.now();
 let fps = 60;
+let prevGrounded = false;
+let prevVy = 0;
+
+// Footsteps are driven by distance travelled rather than a timer, so they stay
+// in step with actual movement instead of drifting when someone strafes.
+const STEP_DISTANCE = 2.1;
+const stepAccum = new Map<number, number>();
+const stepLast = new Map<number, { x: number; z: number }>();
+
+function footsteps(id: number, x: number, y: number, z: number, active: boolean): void {
+  const prev = stepLast.get(id);
+  stepLast.set(id, { x, z });
+  if (!prev || !active) return;
+
+  const d = Math.hypot(x - prev.x, z - prev.z);
+  // A large jump means a respawn or teleport, not running.
+  if (d > 1.5) return;
+
+  const acc = (stepAccum.get(id) ?? 0) + d;
+  if (acc >= STEP_DISTANCE) {
+    stepAccum.set(id, 0);
+    sound.step(x, y, z);
+  } else {
+    stepAccum.set(id, acc);
+  }
+}
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
@@ -272,6 +344,7 @@ function frame(now: number): void {
   const aiming = controls.isLocked && !controls.inBuildMode && controls.aiming;
 
   updateCamera(aiming);
+  sound.setListener(self.x, self.y + EYE_HEIGHT, self.z, controls.yaw);
   pieces.sync(conn.world, nowSec);
   effects.update(dt);
 
@@ -291,6 +364,18 @@ function frame(now: number): void {
   } else {
     ghost.hide();
   }
+
+  // --- local jump and landing, from grounded transitions ---
+  if (self.alive) {
+    if (!prevGrounded && self.grounded) {
+      sound.land(self.x, self.y, self.z, Math.abs(prevVy));
+    } else if (prevGrounded && !self.grounded && self.vy > 2) {
+      sound.jump(self.x, self.y, self.z);
+    }
+    footsteps(-1, self.x, self.y, self.z, self.grounded && Math.hypot(self.vx, self.vz) > 1);
+  }
+  prevGrounded = self.grounded;
+  prevVy = self.vy;
 
   // --- local body ---
   if (selfCharacter) {
@@ -319,10 +404,12 @@ function frame(now: number): void {
     // Remote speed is not transmitted; derive it from the flag the server sets
     // so the walk cycle still plays.
     const moving = (pose.state.flags & 32) !== 0;
+    const grounded = (pose.state.flags & PF_GROUNDED) !== 0;
     ch.update(
       pose.x, pose.y, pose.z, pose.yaw, pose.pitch,
-      moving ? 6 : 0, (pose.state.flags & PF_GROUNDED) !== 0, dt,
+      moving ? 6 : 0, grounded, dt,
     );
+    if (alive) footsteps(pose.id, pose.x, pose.y, pose.z, grounded && moving);
   }
   for (const [id, ch] of characters) {
     if (seen.has(id)) continue;

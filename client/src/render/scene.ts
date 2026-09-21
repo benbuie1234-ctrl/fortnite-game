@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { TILE } from "@shared/constants";
 import { ARENA_HALF_TILES } from "@shared/arena";
+import { getTextures } from "./textures";
 
 export interface Renderer {
   renderer: THREE.WebGLRenderer;
@@ -9,6 +10,8 @@ export interface Renderer {
   render(): void;
   resize(): void;
   setFov(fov: number): void;
+  /** Passed to the texture builder; depends on the GPU. */
+  maxAnisotropy: number;
 }
 
 export function createRenderer(mount: HTMLElement): Renderer {
@@ -59,10 +62,17 @@ export function createRenderer(mount: HTMLElement): Renderer {
   scene.add(sun.target);
 
   // --- ground ---------------------------------------------------------------
+  const anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const tex = getTextures(anisotropy);
+
   const groundSize = (ARENA_HALF_TILES + 1) * TILE * 2;
+  const groundGeo = new THREE.PlaneGeometry(groundSize, groundSize);
+  // A PlaneGeometry's UVs span 0..1 across the whole plane, so scale them to
+  // get one grass tile every couple of metres instead of one enormous stretch.
+  tileUVs(groundGeo, groundSize, groundSize, 2.5);
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(groundSize, groundSize),
-    new THREE.MeshLambertMaterial({ color: 0x6f8f5a }),
+    groundGeo,
+    new THREE.MeshLambertMaterial({ map: tex.grass }),
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
@@ -74,14 +84,16 @@ export function createRenderer(mount: HTMLElement): Renderer {
     groundSize, groundSize / TILE, 0x4e6b3f, 0x5c7a4b,
   );
   grid.position.y = 0.02;
-  (grid.material as THREE.Material).opacity = 0.35;
+  (grid.material as THREE.Material).opacity = 0.16;
   (grid.material as THREE.Material).transparent = true;
   scene.add(grid);
 
   // Skirt beyond the arena so the horizon is not an abrupt edge.
+  const skirtGeo = new THREE.PlaneGeometry(900, 900);
+  tileUVs(skirtGeo, 900, 900, 2.5);
   const skirt = new THREE.Mesh(
-    new THREE.PlaneGeometry(900, 900),
-    new THREE.MeshLambertMaterial({ color: 0x5d7a4d }),
+    skirtGeo,
+    new THREE.MeshLambertMaterial({ map: tex.grass, color: 0xbfc9b4 }),
   );
   skirt.rotation.x = -Math.PI / 2;
   skirt.position.y = -0.4;
@@ -96,6 +108,7 @@ export function createRenderer(mount: HTMLElement): Renderer {
 
   return {
     renderer, scene, camera,
+    maxAnisotropy: anisotropy,
     render: () => renderer.render(scene, camera),
     resize,
     setFov(fov: number) {
@@ -104,4 +117,18 @@ export function createRenderer(mount: HTMLElement): Renderer {
       camera.updateProjectionMatrix();
     },
   };
+}
+
+/** Scale a plane's 0..1 UVs so one texture tile covers `metersPerTile`. */
+function tileUVs(
+  geo: THREE.BufferGeometry, w: number, h: number, metersPerTile: number,
+): void {
+  const uv = geo.getAttribute("uv");
+  if (!uv) return;
+  const ru = w / metersPerTile;
+  const rv = h / metersPerTile;
+  for (let i = 0; i < uv.count; i++) {
+    uv.setXY(i, uv.getX(i) * ru, uv.getY(i) * rv);
+  }
+  uv.needsUpdate = true;
 }

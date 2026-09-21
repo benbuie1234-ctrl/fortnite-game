@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Texture preview</title>
+<style>
+  body { background:#12151c; color:#e8ecf4; font-family:system-ui,sans-serif; margin:0; padding:24px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p { color:#8a94a8; font-size:13px; margin:0 0 20px; }
+  .grid { display:flex; flex-wrap:wrap; gap:20px; }
+  figure { margin:0; }
+  figcaption { font-size:12px; color:#8a94a8; margin-top:6px; }
+  canvas { border:1px solid #2a3344; border-radius:6px; display:block; image-rendering:auto; }
+  #scene { max-width:960px; }
+  #audio { display:flex; flex-wrap:wrap; gap:8px; max-width:960px; }
+  #audio button { background:#222b3a; color:#e8ecf4; border:1px solid #2a3344; border-radius:7px;
+    padding:9px 14px; font-size:13px; font-family:inherit; cursor:pointer; }
+  #audio button:hover { background:#2c3850; }
+  #scene canvas { width:100%; }
+</style>
+</head>
+<body>
+  <h1>Procedural texture preview</h1>
+  <p>Each swatch is drawn 2&times;2 tiled. Any visible cross or edge line means the texture is not seamless.</p>
+  <div class="grid" id="grid"></div>
+
+  <h1 style="margin-top:28px">On real geometry</h1>
+  <p id="labels"></p>
+  <div id="scene"></div>
+
+  <h1 style="margin-top:28px">Audio</h1>
+  <p id="audioStatus"></p>
+  <div id="audio"></div>
+  <script type="module" src="/src/texture-preview.ts"></script>
+</body>
+</html>
