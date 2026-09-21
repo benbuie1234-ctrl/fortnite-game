@@ -1,4 +1,7 @@
-name = "clutch"
+# Must match the Worker service name in the Cloudflare dashboard, which was
+# created from the GitHub repo name. A mismatch makes Workers Builds fail
+# instantly, before it even starts building.
+name = "fortnite-game"
 main = "server/src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
