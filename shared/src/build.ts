@@ -172,3 +172,85 @@ export function rampUnderBox(piece: Piece): Box {
   const z0 = piece.gz * TILE;
   return [x0, y0, z0, x0 + TILE, y0 + TILE, z0 + TILE];
 }
+
+/**
+ * Every solid box a piece contributes to collision.
+ *
+ * Ramps and cones cannot be represented by one axis-aligned box, and trying to
+ * was the cause of two bad bugs: a ramp had NO solid geometry whatsoever (only
+ * a surface-snap that placed you on top, so you could walk straight through its
+ * sides and fall through it), and a cone was a full-cell box that swallowed the
+ * entire block instead of being a pyramid you can stand on.
+ *
+ * Both are decomposed into stacked boxes instead. For ramps each step is sized
+ * to the LOWER edge of its span, so the collision never sits above the visible
+ * slope -- the surface snap in the movement solver then lifts the player the
+ * last fraction onto the true slope, giving a shape that is solid from every
+ * side and still smooth to walk up.
+ */
+export function pieceBoxes(piece: Piece): Box[] {
+  if (piece.slot === SLOT_RAMP) return rampStepBoxes(piece);
+  if (piece.slot === SLOT_CONE) return coneStepBoxes(piece);
+  const single = pieceBox(piece);
+  return single ? [single] : [];
+}
+
+/** How finely a ramp and a cone are approximated. */
+const RAMP_STEPS = 8;
+const CONE_STEPS = 3;
+
+function rampStepBoxes(piece: Piece): Box[] {
+  const x0 = piece.gx * TILE;
+  const y0 = piece.gy * TILE;
+  const z0 = piece.gz * TILE;
+  const step = TILE / RAMP_STEPS;
+  const boxes: Box[] = [];
+
+  for (let i = 0; i < RAMP_STEPS; i++) {
+    // Fraction along the rise at each edge of this strip.
+    const a = i / RAMP_STEPS;
+    const b = (i + 1) / RAMP_STEPS;
+    // Take the lower of the two, so the box stays under the visible slope.
+    const height = Math.min(a, b) * TILE;
+    if (height <= 1e-6) continue; // the thin end contributes nothing solid
+
+    switch (piece.facing) {
+      case 0: // rises toward +X
+        boxes.push([x0 + i * step, y0, z0, x0 + (i + 1) * step, y0 + height, z0 + TILE]);
+        break;
+      case 1: // rises toward +Z
+        boxes.push([x0, y0, z0 + i * step, x0 + TILE, y0 + height, z0 + (i + 1) * step]);
+        break;
+      case 2: // rises toward -X
+        boxes.push([x0 + TILE - (i + 1) * step, y0, z0, x0 + TILE - i * step, y0 + height, z0 + TILE]);
+        break;
+      default: // rises toward -Z
+        boxes.push([x0, y0, z0 + TILE - (i + 1) * step, x0 + TILE, y0 + height, z0 + TILE - i * step]);
+        break;
+    }
+  }
+  return boxes;
+}
+
+/**
+ * A cone is a pyramid, so it narrows as it rises. A single full-cell box made
+ * it behave like a solid plinth filling the whole block.
+ */
+function coneStepBoxes(piece: Piece): Box[] {
+  const cx = piece.gx * TILE + TILE / 2;
+  const cz = piece.gz * TILE + TILE / 2;
+  const y0 = piece.gy * TILE;
+  const height = TILE * 0.5;
+  const layer = height / CONE_STEPS;
+  const boxes: Box[] = [];
+
+  for (let i = 0; i < CONE_STEPS; i++) {
+    // Half-width shrinks toward the apex, leaving a small flat top to stand on.
+    const halfWidth = (TILE / 2) * (1 - i / (CONE_STEPS + 0.6));
+    boxes.push([
+      cx - halfWidth, y0 + i * layer, cz - halfWidth,
+      cx + halfWidth, y0 + (i + 1) * layer, cz + halfWidth,
+    ]);
+  }
+  return boxes;
+}

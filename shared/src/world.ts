@@ -2,7 +2,7 @@ import { terrainHeight } from "./map";
 import { TILE } from "./constants";
 import {
   Piece, Box, Slot, SLOT_COUNT, SLOT_RAMP,
-  packKey, pieceBox, rampUnderBox, rampHeightAt, inGridBounds, currentHp,
+  packKey, pieceBox, pieceBoxes, rampUnderBox, rampHeightAt, inGridBounds, currentHp,
 } from "./build";
 
 export interface RayHit {
@@ -79,12 +79,13 @@ export class World {
           for (let slot = 0; slot < SLOT_COUNT; slot++) {
             const piece = this.pieces.get(packKey(gx, gy, gz, slot as Slot));
             if (!piece) continue;
-            if (piece.slot === SLOT_RAMP) {
-              outRamps.push(piece);
-              continue;
-            }
-            const box = pieceBox(piece);
-            if (box) outBoxes.push(box);
+            // Ramps still register for the surface snap, which is what makes
+            // walking up one smooth -- but they now ALSO contribute solid
+            // boxes. Previously they contributed none at all, which is why a
+            // ramp could be walked through from the side and fallen through
+            // from above.
+            if (piece.slot === SLOT_RAMP) outRamps.push(piece);
+            for (const box of pieceBoxes(piece)) outBoxes.push(box);
           }
         }
       }
