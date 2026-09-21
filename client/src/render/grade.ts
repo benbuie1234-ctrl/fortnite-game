@@ -22,8 +22,8 @@ export function createGradePass(): ShaderPass {
     name: "ColorGrade",
     uniforms: {
       tDiffuse: { value: null },
-      contrast: { value: 1.14 },
-      saturation: { value: 1.28 },
+      contrast: { value: 1.18 },
+      saturation: { value: 1.34 },
       shadowTint: { value: new THREE.Color(0.92, 0.96, 1.08) },
       highlightTint: { value: new THREE.Color(1.06, 1.02, 0.94) },
       vignette: { value: 0.2 },

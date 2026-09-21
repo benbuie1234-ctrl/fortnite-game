@@ -243,8 +243,16 @@ function handleEvents(events: readonly GameEvent[]): void {
     switch (e.kind) {
       case EV_SHOT: {
         const sniper = e.weapon === W_SNIPER;
-        if(e.weapon!==W_PICKAXE) effects.spawnTracer(e.ox, e.oy, e.oz, e.ex, e.ey, e.ez, sniper ? 0xbfe6ff : 0xfff0b0);
-        effects.spawnImpact(e.ex, e.ey, e.ez);
+        // A pickaxe swing is not a bullet: no tracer, and no spark unless it
+        // actually connected.
+        if (e.weapon !== W_PICKAXE) {
+          effects.spawnTracer(e.ox, e.oy, e.oz, e.ex, e.ey, e.ez, sniper ? 0xbfe6ff : 0xfff0b0);
+        }
+        // Only spark on a real impact. This used to fire on every shot, so a
+        // miss left a spark hanging in empty air at the weapon's max range.
+        if (e.hit !== 0) {
+          effects.spawnImpact(e.ex, e.ey, e.ez, e.hit === 2 ? 0xff8a7a : 0xffd27a);
+        }
 
         const voice = e.shooter * 256 + e.weapon;
         if (!voiced.has(voice)) {

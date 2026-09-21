@@ -112,6 +112,7 @@ export function resolveFire(
       kind: EV_SHOT, shooter: shooter.id, weapon: weapon.id,
       ox, oy, oz,
       ex: ox + dx * bestT, ey: oy + dy * bestT, ez: oz + dz * bestT,
+      hit: hitPlayer ? 2 : (pieceHit && bestT === pieceHit.t ? 1 : 0),
     });
   }
 

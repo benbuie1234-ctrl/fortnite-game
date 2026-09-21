@@ -30,7 +30,7 @@ export type GameEvent =
   | { kind: typeof EV_PIECE_ADD; key: number; mat: number; facing: number; owner: number; placedAtMs: number }
   | { kind: typeof EV_PIECE_REMOVE; key: number }
   | { kind: typeof EV_PIECE_DAMAGE; key: number; hp: number }
-  | { kind: typeof EV_SHOT; shooter: number; weapon: number; ox: number; oy: number; oz: number; ex: number; ey: number; ez: number }
+  | { kind: typeof EV_SHOT; shooter: number; weapon: number; ox: number; oy: number; oz: number; ex: number; ey: number; ez: number; hit: number }
   | { kind: typeof EV_HIT; target: number; shooter: number; damage: number; headshot: number }
   | { kind: typeof EV_DEATH; victim: number; killer: number; weapon: number }
   | { kind: typeof EV_RESPAWN; id: number; x: number; y: number; z: number }
@@ -91,6 +91,10 @@ export function writeSnapshot(w: Writer, s: Snapshot): void {
         w.u8(e.shooter); w.u8(e.weapon);
         w.pos(e.ox); w.pos(e.oy); w.pos(e.oz);
         w.pos(e.ex); w.pos(e.ey); w.pos(e.ez);
+        // 0 = hit nothing, 1 = hit a build piece, 2 = hit a player. Without
+        // this the client cannot tell a miss from a hit, and was drawing an
+        // impact spark in mid-air at max range every time anyone missed.
+        w.u8(e.hit);
         break;
       case EV_HIT:
         w.u8(e.target); w.u8(e.shooter); w.u16(Math.round(e.damage)); w.u8(e.headshot);
@@ -155,6 +159,7 @@ export function readSnapshot(r: Reader): Snapshot {
           kind: EV_SHOT, shooter: r.u8(), weapon: r.u8(),
           ox: r.pos(), oy: r.pos(), oz: r.pos(),
           ex: r.pos(), ey: r.pos(), ez: r.pos(),
+          hit: r.u8(),
         });
         break;
       case EV_HIT:

@@ -54,9 +54,11 @@ export class FrameLimiter {
    * frame callback and return early when it is false.
    */
   shouldRender(now: number): boolean {
-    // Never draw into a hidden tab. rAF usually stops on its own, but an
-    // occluded-but-"visible" pane can keep firing.
-    if (typeof document !== "undefined" && document.hidden) return false;
+    // Deliberately no document.hidden check. requestAnimationFrame already
+    // stops firing in a genuinely hidden tab, so the guard bought nothing --
+    // and it actively broke rendering in embedded or occluded contexts where
+    // rAF keeps running but the document still reports itself as hidden. The
+    // symptom is a permanently black canvas with a frozen HUD.
 
     if (this.intervalMs <= 0) return true;
 

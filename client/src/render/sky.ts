@@ -92,7 +92,11 @@ export function createSky(
   const envTarget = pmrem.fromScene(skyScene, 0.02, 0.1, 40000);
   scene.environment = envTarget.texture;
   // Sky light is the primary ambient source, so it carries real weight.
-  scene.environmentIntensity = 0.7;
+  // Deliberately small. The environment map is baked from the UNDIMMED sky,
+  // whose radiance is many times greater than 1 -- so even a modest-looking
+  // intensity here floods the scene with ambient and drowns out the sun's
+  // contrast. That flood is what "bright and washed out" actually was.
+  scene.environmentIntensity = 0.22;
 
   // --- fog colour -----------------------------------------------------------
   // Sample the sky just above the horizon rather than guessing, so distant

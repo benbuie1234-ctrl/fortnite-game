@@ -46,7 +46,7 @@ export function createRenderer(mount: HTMLElement): Renderer {
   // brightness; the ambient floor below controls how dark the darkest parts
   // are allowed to get. Those are separate problems and need separate knobs --
   // dimming the fill to fix washout is what produced black shadows last time.
-  renderer.toneMappingExposure = 0.82;
+  renderer.toneMappingExposure = 0.95;
   mount.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -89,7 +89,7 @@ export function createRenderer(mount: HTMLElement): Renderer {
   // shadows get. Pushing the sun and keeping a real ambient floor gives depth
   // and readable shade at the same time; darkening the fill would only trade
   // one problem for the other.
-  const sun = new THREE.DirectionalLight(0xffeec4, 3.4);
+  const sun = new THREE.DirectionalLight(0xffeec4, 2.7);
   // Positioned along the sky's own sun direction, so the light and the sun you
   // can see in the sky agree. A low raking angle throws long shadows and gives
   // vertical surfaces form; the old near-overhead angle flattened everything.
