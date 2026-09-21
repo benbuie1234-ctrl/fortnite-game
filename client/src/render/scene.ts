@@ -41,7 +41,12 @@ export function createRenderer(mount: HTMLElement): Renderer {
   // most of why the scene read as "untextured prototype" rather than "game".
   // ACES darkens the midtones, so every light below is brighter to compensate.
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
+  // Pulled down from 1.0. The image was sitting almost entirely in the upper
+  // midtones, which is what made it look milky. Exposure controls overall
+  // brightness; the ambient floor below controls how dark the darkest parts
+  // are allowed to get. Those are separate problems and need separate knobs --
+  // dimming the fill to fix washout is what produced black shadows last time.
+  renderer.toneMappingExposure = 0.82;
   mount.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -70,11 +75,21 @@ export function createRenderer(mount: HTMLElement): Renderer {
   // ambient, and it varies by direction -- blue from the sky above, warm
   // bounce from the ground below -- which a constant term never could. Leaving
   // the old values in would double-count and flatten it straight back out.
-  const hemi = new THREE.HemisphereLight(0xa8d4ff, 0x8a7a5c, 0.18);
+  // A real ambient floor, not a whisper. Two reasons it has to be this high:
+  // image-based lighting only reaches physical materials, so anything else
+  // depends entirely on this; and more importantly, shade should be *lit* --
+  // cool and full of colour -- rather than an absence of light. Blacking out
+  // every surface facing away from the sun is not contrast, it is missing
+  // information.
+  const hemi = new THREE.HemisphereLight(0xa8d4ff, 0x8a7a5c, 0.32);
   scene.add(hemi);
 
 
-  const sun = new THREE.DirectionalLight(0xffeec4, 2.6);
+  // Contrast comes from how bright the LIT surfaces are, not from how dark the
+  // shadows get. Pushing the sun and keeping a real ambient floor gives depth
+  // and readable shade at the same time; darkening the fill would only trade
+  // one problem for the other.
+  const sun = new THREE.DirectionalLight(0xffeec4, 3.4);
   // Positioned along the sky's own sun direction, so the light and the sun you
   // can see in the sky agree. A low raking angle throws long shadows and gives
   // vertical surfaces form; the old near-overhead angle flattened everything.

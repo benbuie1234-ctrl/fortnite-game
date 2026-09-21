@@ -217,9 +217,12 @@ export class Sound {
     // Air absorption. Halving the cutoff every ABSORPTION_HALF_DISTANCE metres
     // tracks how high frequencies actually die off with range closely enough
     // that the ear reads it as distance rather than as a filter sweep.
+    // Clamped to just under Nyquist: a BiquadFilter rejects anything above
+    // half the sample rate and warns on every single sound otherwise.
+    const ceiling = Math.min(20000, ctx.sampleRate * 0.45);
     const cutoff = Math.max(
       MIN_CUTOFF_HZ,
-      20000 * Math.pow(0.5, dist / ABSORPTION_HALF_DISTANCE),
+      Math.min(ceiling, ceiling * Math.pow(0.5, dist / ABSORPTION_HALF_DISTANCE)),
     );
     const filter = ctx.createBiquadFilter();
     filter.type = "lowpass";

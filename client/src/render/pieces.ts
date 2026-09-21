@@ -310,7 +310,12 @@ export class PieceRenderer {
       const list=batches.get(key)??[];list.push(p);batches.set(key,list);
     }
     const transform=new THREE.Object3D();
-    const material=new THREE.MeshLambertMaterial({color:0xffffff});
+    // Physical, not Lambert. Lambert takes no light from the environment map,
+    // so every map building was lit by the hemisphere term alone and any face
+    // turned away from the sun crushed to black.
+    const material=new THREE.MeshStandardMaterial({
+      color:0xffffff, roughness:0.9, metalness:0, envMapIntensity:0.95,
+    });
     for(const list of batches.values()) {
       const batch=new THREE.InstancedMesh(geometryFor(list[0].slot),material,list.length);
       list.forEach((p,i)=>{

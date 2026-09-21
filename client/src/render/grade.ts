@@ -22,11 +22,15 @@ export function createGradePass(): ShaderPass {
     name: "ColorGrade",
     uniforms: {
       tDiffuse: { value: null },
-      contrast: { value: 1.1 },
-      saturation: { value: 1.16 },
+      contrast: { value: 1.14 },
+      saturation: { value: 1.28 },
       shadowTint: { value: new THREE.Color(0.92, 0.96, 1.08) },
       highlightTint: { value: new THREE.Color(1.06, 1.02, 0.94) },
-      vignette: { value: 0.26 },
+      vignette: { value: 0.2 },
+      // Raised black point. Deliberately blue: shadows in daylight are lit by
+      // the sky, so the darkest thing on screen should be dark blue, never
+      // black. This is the guarantee that shade stays readable.
+      lift: { value: new THREE.Color(0.026, 0.032, 0.046) },
     },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
@@ -42,6 +46,7 @@ export function createGradePass(): ShaderPass {
       uniform vec3 shadowTint;
       uniform vec3 highlightTint;
       uniform float vignette;
+      uniform vec3 lift;
       varying vec2 vUv;
 
       void main() {
@@ -59,6 +64,10 @@ export function createGradePass(): ShaderPass {
 
         float d = distance(vUv, vec2(0.5));
         color *= 1.0 - vignette * smoothstep(0.32, 0.86, d);
+
+        // Lift last, so it applies after everything that could have darkened
+        // the image. Black now maps to the lift colour instead of to zero.
+        color = lift + color * (1.0 - lift);
 
         gl_FragColor = vec4(clamp(color, 0.0, 1.0), texel.a);
       }

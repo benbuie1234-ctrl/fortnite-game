@@ -91,7 +91,8 @@ export function createSky(
   // contribution independently of how the sky looks.
   const envTarget = pmrem.fromScene(skyScene, 0.02, 0.1, 40000);
   scene.environment = envTarget.texture;
-  scene.environmentIntensity = 0.42;
+  // Sky light is the primary ambient source, so it carries real weight.
+  scene.environmentIntensity = 0.7;
 
   // --- fog colour -----------------------------------------------------------
   // Sample the sky just above the horizon rather than guessing, so distant
