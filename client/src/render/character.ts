@@ -12,6 +12,11 @@ const TORSO_H = 0.62;
 const HEAD_H = 0.34;
 const ARM_H = 0.56;
 
+/** How far the hip drops at a full crouch, and how far the torso leans over
+ *  it. Together they take roughly the 0.65 m the collision capsule loses. */
+const LEG_DROP = 0.42;
+const CROUCH_LEAN = 0.5;
+
 /**
  * One player's body. Built from boxes so there is no asset pipeline, no
  * loading, and no rig: the walk cycle is four rotations driven by speed.
@@ -33,6 +38,10 @@ export class Character {
   private nameTexture: THREE.CanvasTexture;
 
   private phase = 0;
+  /** Smoothed crouch, 0-1. Smoothed here rather than by the caller because
+   *  remote players only send a crouch BIT, and a bit applied straight to the
+   *  pose snaps. */
+  private crouch = 0;
   private kick = 0;
   private muzzle: THREE.Mesh;
   private lastName = "";
@@ -198,7 +207,13 @@ export class Character {
     x: number, y: number, z: number,
     yaw: number, pitch: number,
     speed: number, grounded: boolean, dt: number,
+    crouchTarget = 0,
   ): void {
+    // Track the stance. The simulation already shrinks the collision capsule
+    // and drops the eye; without this the model stayed bolt upright, so
+    // crouching looked like it did nothing at all.
+    this.crouch += (crouchTarget - this.crouch) * (1 - Math.exp(-14 * dt));
+    const crouch = this.crouch < 0.001 ? 0 : this.crouch;
     this.root.position.set(x, y, z);
     // The model faces +Z at yaw 0, matching forwardVector in shared/vec.ts.
     this.root.rotation.y = -yaw;
@@ -208,7 +223,6 @@ export class Character {
     this.muzzle.visible = this.weaponId!==W_PICKAXE&&this.kick>.045;
     this.pickaxe.rotation.x=-pitch+(this.kick>0?Math.sin((.35-this.kick)/.35*Math.PI)*1.6:0);
     this.gun.rotation.x = -pitch - this.kick*1.2;
-    this.gun.position.z = .3-this.kick;
 
     const moving = speed > 0.6;
     if (moving && grounded) {
@@ -233,8 +247,48 @@ export class Character {
 
     // Idle breathing, and a slight bob while running.
     const bob = moving && grounded ? Math.abs(Math.sin(this.phase)) * 0.035 : Math.sin(this.phase * 0.5) * 0.012;
-    this.torso.position.y = LEG_H + TORSO_H / 2 + bob;
-    this.head.position.y = LEG_H + TORSO_H + bob;
+
+    // --- crouch pose ---------------------------------------------------------
+    //
+    // Fold the legs and drop the hip, then lean the torso over it. Legs alone
+    // would leave a standing torso hovering lower; the lean is what makes the
+    // silhouette read as a crouch from across the map, which is the whole
+    // point of a stance that also shrinks your hitbox.
+    const hipDrop = crouch * LEG_DROP;
+    const hipY = LEG_H - hipDrop;
+    const legScale = hipY / LEG_H;
+    const lean = crouch * CROUCH_LEAN;
+
+    this.legL.position.y = hipY;
+    this.legR.position.y = hipY;
+    this.legL.scale.y = legScale;
+    this.legR.scale.y = legScale;
+    // Knees splay forward as they fold, so the legs do not simply shrink.
+    this.legL.rotation.x += crouch * 0.55;
+    this.legR.rotation.x += crouch * 0.55;
+
+    this.torso.rotation.x = lean;
+    this.torso.position.y = hipY + Math.cos(lean) * TORSO_H / 2 + bob;
+    this.torso.position.z = Math.sin(lean) * TORSO_H / 2;
+
+    // Everything above the waist hangs off the shoulder line, which the lean
+    // moves. Arms and the weapon are siblings of the torso rather than
+    // children of it, so they have to be carried down explicitly or they float
+    // at standing height over a crouched body.
+    const shoulderY = hipY + Math.cos(lean) * TORSO_H + bob;
+    const shoulderZ = Math.sin(lean) * TORSO_H;
+
+    this.head.rotation.x = -pitch * 0.55 - lean * 0.6;
+    this.head.position.y = shoulderY;
+    this.head.position.z = shoulderZ;
+
+    this.armL.position.set(-0.32, shoulderY - 0.04, shoulderZ);
+    this.armR.position.set(0.32, shoulderY - 0.04, shoulderZ);
+    this.gun.position.set(-0.28, shoulderY - 0.18, shoulderZ + 0.3 - this.kick);
+    this.pickaxe.position.set(-0.3, shoulderY - 0.3, shoulderZ + 0.4);
+
+    // Keep the nameplate just above the head, wherever the head now is.
+    this.nameplate.position.y = shoulderY + HEAD_H + 0.45;
   }
 
   dispose(scene: THREE.Scene): void {

@@ -1,6 +1,6 @@
 import {
   TICK_HZ, TICK_DT, SNAPSHOT_HZ, MAX_PLAYERS_PER_MATCH, RESPAWN_DELAY_S,
-  ROUND_WIN_SCORE, PLAYER_MAX_HP, MATERIALS, BLOOM_MAX, SPRINT_STAMINA_MAX,
+  ROUND_WIN_SCORE, PLAYER_MAX_HP, MATERIALS, SPRINT_STAMINA_MAX,
 } from "@shared/constants";
 import {
   C_HELLO, C_INPUT, C_PING, C_CHAT,
@@ -13,7 +13,7 @@ import { writeSnapshot, type GameEvent, type OtherState } from "@shared/snapshot
 import { World } from "@shared/world";
 import { buildArena, arenaSpawns, isOutOfBounds, ARENA_OWNER } from "@shared/arena";
 import { stepPlayer, fallDamage, BTN_FIRE, BTN_AIM, BTN_RELOAD, BTN_JUMP, BTN_AIMBOT } from "@shared/sim";
-import { weaponById, ARENA_LOADOUT, stepBloom, bloomPerShot } from "@shared/weapons";
+import { weaponById, ARENA_LOADOUT } from "@shared/weapons";
 import { ServerPlayer } from "./player";
 import { resolveFire, tryPlace, beginReload, finishReloads } from "./combat";
 
@@ -353,16 +353,6 @@ export class MatchRoom implements DurableObject {
         }
       }
       player.wasFiring = firing;
-
-      // Bloom settles or grows once per simulated tick, then takes whatever the
-      // trigger just cost it.
-      player.bloom = stepBloom(player.bloom, Math.hypot(player.vx, player.vz), TICK_DT);
-      if (player.pendingBloomShots > 0) {
-        player.bloom = Math.min(
-          BLOOM_MAX, player.bloom + player.pendingBloomShots * bloomPerShot(weapon),
-        );
-        player.pendingBloomShots = 0;
-      }
     }
 
     // The queue should hover near empty. A persistent backlog means the client

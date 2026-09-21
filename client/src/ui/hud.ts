@@ -1,7 +1,7 @@
 import { currentHp, type Piece } from "@shared/build";
 import { ARENA_OWNER } from "@shared/arena";
 import { PLAYER_MAX_HP, PLAYER_MAX_SHIELD, MATERIALS, SPRINT_MIN_TO_START, SPRINT_STAMINA_MAX } from "@shared/constants";
-import { ARENA_LOADOUT, weaponById, spreadFor } from "@shared/weapons";
+import { ARENA_LOADOUT, weaponById } from "@shared/weapons";
 import type { MatchPlayerInfo } from "../net/connection";
 
 const SLOT_LABELS = [
@@ -211,18 +211,15 @@ export class Hud {
     setTimeout(()=>node.remove(),700);
   }
   /**
-   * Size the crosshair to the shot cone the server would actually fire.
+   * Fixed sizes per weapon class, as it was before.
    *
-   * Derived from the same spreadFor() the shot uses, so the crosshair is a
-   * readout of the weapon's real accuracy rather than a decoration that
-   * happens to be near it: it opens as you move, tightens as you slow, and is
-   * at its smallest standing still.
+   * It briefly scaled with the live shot cone, which sounded better than it
+   * looked: at 620 px per radian an assault rifle sat at 44 px standing still
+   * and near 100 px moving, so the crosshair was a large blob most of the time
+   * and covered the thing you were shooting at.
    */
-  setReticle(aiming:boolean,slot:number,building:boolean,bloom=0):void {
-    const weapon=weaponById(ARENA_LOADOUT[slot]??0);
-    const cone=spreadFor(weapon,aiming,bloom);
-    const base=building?18:slot===1?(aiming?32:48):aiming?12:22;
-    const size=building?base:Math.round(base+cone*RETICLE_PIXELS_PER_RADIAN);
+  setReticle(aiming:boolean,slot:number,building:boolean):void {
+    const size=building?18:slot===1?(aiming?32:48):aiming?12:22;
     this.crosshair.style.width=`${size}px`;
     this.crosshair.style.height=`${size}px`;
     this.crosshair.style.margin=`-${size/2}px 0 0 -${size/2}px`;
@@ -433,8 +430,6 @@ const COMPASS_LABELS = [
 const COMPASS_HALF_PX = 180;
 const COMPASS_HALF_DEG = 100;
 const GUNSHOT_LIFETIME_MS = 4000;
-/** How aggressively the crosshair opens with the shot cone. */
-const RETICLE_PIXELS_PER_RADIAN = 620;
 
 /**
  * Where a world direction lands on the compass strip.

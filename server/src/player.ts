@@ -31,12 +31,6 @@ export class ServerPlayer implements MovementState {
   fallPeakY = 0;
   lastFallHeight = 0;
 
-  /** Current weapon bloom. Authoritative: the client predicts the same value
-   *  for its crosshair, but this is the one the shot cone is built from. */
-  bloom = 0;
-  /** Rounds fired but not yet charged to bloom, so a burst inside one tick
-   *  still costs what it should. */
-  pendingBloomShots = 0;
 
   /** Wins across rounds, for the leaderboard. Survives endRound, unlike kills. */
   wins = 0;
@@ -137,8 +131,6 @@ export class ServerPlayer implements MovementState {
     this.staminaIdle = 0;
     this.fallPeakY = y;
     this.lastFallHeight = 0;
-    this.bloom = 0;
-    this.pendingBloomShots = 0;
     this.hp = PLAYER_MAX_HP;
     this.shield = PLAYER_MAX_SHIELD * 0.5;
     this.mats = START_MATS;

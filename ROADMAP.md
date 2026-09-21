@@ -20,7 +20,8 @@ These make the game feel broken, so they come first.
 - [x] Can't build in many open places in certain areas *(Claude)*
 - [x] Climbing mechanic bugs *(Claude)*
 - [x] Fall damage feels random — needs a readable curve *(Claude)*
-- [x] Jumping backwards gives a speed boost *(Claude)*
+- [x] Jumping backwards gives a speed boost — the accidental version is gone;
+      it is now a deliberate mechanic, see Movement *(Claude)*
 - [x] Camera glitches when walking into ramps *(Claude)*
 - [x] Camera should only pull in when actually against a solid object *(Claude)*
 - [x] ADS is glitchy with character movement *(Claude)*
@@ -28,7 +29,10 @@ These make the game feel broken, so they come first.
 
 ## Combat feel
 
-- [x] Weapon bloom: spread grows while moving, shrinks when still, smallest when stopped *(Claude)*
+- [ ] Weapon bloom: spread grows while moving, shrinks when still, smallest when
+      stopped. *Built, then removed at request: the cone tripled at its ceiling
+      and dragged the crosshair with it, so both went back to the per-weapon
+      values. Recover from git if it is wanted again, at a gentler strength.*
 - [x] Inconsistent fire delay — sometimes present, sometimes not *(Claude)*
 - [x] Bullet drop past a certain distance *(Claude)*
 - [x] Damage falls off further out (tune existing falloff) *(Claude)*
@@ -43,6 +47,9 @@ These make the game feel broken, so they come first.
 - [x] Sliding *(Claude — tiered: crouch to slide, sprint first to slide further)*
 - [x] Crouching *(Claude)*
 - [x] Sprint stamina, with a recovery delay *(Claude)*
+- [x] Backwards in the AIR is fast, on the ground slow, so retreating rewards a
+      jump rather than a strafe *(Claude)*
+- [x] Crouching actually poses the character *(Claude)*
 - [x] Scroll wheel cycles build pieces as well as weapons *(Claude)*
 - [x] Scroll wheel weapon switching *(ChatGPT)*
 - [x] Customisable key binds *(Claude)*

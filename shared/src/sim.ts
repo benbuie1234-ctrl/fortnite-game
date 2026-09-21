@@ -2,7 +2,7 @@ import {
   TICK_DT, PLAYER_HEIGHT, PLAYER_RADIUS, GRAVITY, JUMP_VELOCITY, MOVE_SPEED,
   GROUND_ACCEL, AIR_ACCEL, GROUND_FRICTION, MAX_FALL_SPEED, STEP_HEIGHT,
   EYE_HEIGHT, PLAYER_MAX_HP,
-  BACKPEDAL_SPEED_MULT, STRAFE_SPEED_MULT, SPRINT_SPEED_MULT,
+  BACKPEDAL_SPEED_MULT, BACKPEDAL_AIR_SPEED_MULT, STRAFE_SPEED_MULT, SPRINT_SPEED_MULT,
   CROUCH_HEIGHT, CROUCH_EYE_HEIGHT, CROUCH_SPEED_MULT, CROUCH_TRANSITION_SPEED,
   SLIDE_MIN_SPEED, SLIDE_BOOST_SPEED, SLIDE_SPRINT_BOOST_SPEED, SLIDE_FRICTION,
   SLIDE_END_SPEED, SLIDE_MAX_SPEED, SLIDE_COOLDOWN, SLIDE_STEER_RATE,
@@ -316,8 +316,15 @@ function speedLimitFor(input: InputCommand, s: MovementState): number {
   // not still pay out the sprint speed.
   if (s.sprinting && !crouched) limit *= SPRINT_SPEED_MULT;
   if (crouched) limit *= CROUCH_SPEED_MULT;
-  if (input.moveZ < 0) limit *= BACKPEDAL_SPEED_MULT;
-  else if (input.moveZ === 0 && input.moveX !== 0) limit *= STRAFE_SPEED_MULT;
+  if (input.moveZ < 0) {
+    // On the ground, backing up is slow. In the air it is the fastest way to
+    // disengage -- a deliberate movement option rather than the accidental one
+    // a mis-ordered jump used to produce, and the reason retreating rewards a
+    // jump instead of a sideways shuffle.
+    limit *= s.grounded ? BACKPEDAL_SPEED_MULT : BACKPEDAL_AIR_SPEED_MULT;
+  } else if (input.moveZ === 0 && input.moveX !== 0) {
+    limit *= STRAFE_SPEED_MULT;
+  }
   return limit - projected(s, input);
 }
 

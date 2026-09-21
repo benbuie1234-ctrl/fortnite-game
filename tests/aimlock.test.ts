@@ -8,7 +8,7 @@ import { resolveFire } from "../server/src/combat";
 import { EV_HIT, EV_SHOT } from "../shared/src/protocol";
 import type { GameEvent } from "../shared/src/snapshot";
 import { makePiece, SLOT_WALL_Z } from "../shared/src/build";
-import { BLOOM_MAX, CROUCH_HEIGHT, PLAYER_HEIGHT } from "../shared/src/constants";
+import { CROUCH_HEIGHT, PLAYER_HEIGHT } from "../shared/src/constants";
 import { weaponById, W_AR, W_SHOTGUN, W_SNIPER } from "../shared/src/weapons";
 import { Writer, Reader, writeInputBatch, readInputBatch } from "../shared/src/protocol";
 import { BTN_AIMBOT, BTN_FIRE, BTN_SPRINT } from "../shared/src/sim";
@@ -24,7 +24,6 @@ const socket = {} as WebSocket;
 interface Options {
   weaponIdx?: number;
   aimbot?: boolean;
-  bloom?: number;
   crouch?: number;
   yaw?: number;
   world?: World;
@@ -41,7 +40,6 @@ function fire(distance: number, options: Options = {}): GameEvent[] {
     aiming: false,
     weaponIdx: options.weaponIdx ?? 2,
     aimbot: options.aimbot ?? true,
-    bloom: options.bloom ?? 0,
     nextFireAt: 0, reloadEndAt: 0,
   });
 
@@ -62,9 +60,9 @@ const hits = (events: GameEvent[]): number =>
 // ---------------------------------------------------------------------------
 console.log("the lock cannot miss");
 {
-  // Bloom at its ceiling would otherwise scatter every one of these.
+  // Each of these is well outside the weapon's own cone at range.
   for (const distance of [6, 25, 60, 140]) {
-    const events = fire(distance, { bloom: BLOOM_MAX });
+    const events = fire(distance);
     check(`assault rifle connects at ${distance} m through full bloom`,
       hits(events) === 1, `${hits(events)} hits`);
   }
@@ -72,7 +70,7 @@ console.log("the lock cannot miss");
 {
   // Well past the flat zone: a straight shot here falls roughly 11 m short,
   // which the launch-angle solve has to cancel.
-  const events = fire(350, { weaponIdx: 4, bloom: BLOOM_MAX });
+  const events = fire(350, { weaponIdx: 4 });
   check("the sniper connects at 350 m, where drop is metres",
     hits(events) === 1, `${hits(events)} hits`);
   check("and it is the sniper firing",
@@ -81,21 +79,21 @@ console.log("the lock cannot miss");
 {
   // Every pellet, not just the one nearest the middle of the cone.
   const weapon = weaponById(W_SHOTGUN);
-  const events = fire(9, { weaponIdx: 1, bloom: BLOOM_MAX });
+  const events = fire(9, { weaponIdx: 1 });
   check("every shotgun pellet connects",
     hits(events) === weapon.pellets, `${hits(events)} of ${weapon.pellets}`);
 }
 {
   // A crouched target's head is lower; aiming at a standing head would sail
   // straight over it.
-  const events = fire(30, { crouch: 1, bloom: BLOOM_MAX });
+  const events = fire(30, { crouch: 1 });
   check("a crouching target is still hit", hits(events) === 1, `${hits(events)} hits`);
   check("and crouching really does lower the head", CROUCH_HEIGHT < PLAYER_HEIGHT);
 }
 {
   // The shooter is facing the wrong way entirely. The lock has to do all of
   // the aiming, or this proves nothing.
-  const events = fire(40, { yaw: Math.PI, offsetX: 18, bloom: BLOOM_MAX });
+  const events = fire(40, { yaw: Math.PI, offsetX: 18 });
   check("it connects while facing the other way",
     hits(events) === 1, `${hits(events)} hits`);
 }
@@ -123,14 +121,17 @@ console.log("and it is off unless asked for");
     hits(straight) === 0, `${hits(straight)} hits`);
 }
 {
-  // Bloom still applies to everyone else. Fired straight down the axis at long
-  // range with the cone wide open, an unlocked burst must not be perfect.
-  let landed = 0;
+  // Spread still applies to everyone else. Fired straight down the axis at
+  // long range, an unlocked burst must not be perfect -- and the locked one
+  // must be, or this comparison proves nothing.
+  let loose = 0;
+  let locked = 0;
   for (let i = 0; i < 40; i++) {
-    landed += hits(fire(120, { aimbot: false, bloom: BLOOM_MAX, weaponIdx: 2 }));
+    loose += hits(fire(120, { aimbot: false, weaponIdx: 2 }));
+    locked += hits(fire(120));
   }
-  check("an unlocked shot still scatters", landed < 40, `${landed}/40 landed`);
-  check("(sanity) the locked equivalent does not", hits(fire(120, { bloom: BLOOM_MAX })) === 1);
+  check("an unlocked burst scatters", loose < 40, `${loose}/40 landed`);
+  check("a locked burst does not", locked === 40, `${locked}/40 landed`);
   void W_AR;
 }
 

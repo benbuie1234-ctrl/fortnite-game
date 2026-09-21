@@ -56,11 +56,19 @@ export const MAX_FALL_SPEED = -60.0;
 /** Vertical lip the player walks over without jumping (ramp seams, piece edges). */
 export const STEP_HEIGHT = 0.55;
 
-/** Backpedalling is slower than advancing. Without this, jumping backwards was
- *  a free speed boost, because a jump kept whatever speed it left the ground
- *  with and nothing ever capped reverse travel. */
+/** Backpedalling on the ground is slower than advancing. */
 export const BACKPEDAL_SPEED_MULT = 0.78;
 export const STRAFE_SPEED_MULT = 0.92;
+/**
+ * Backpedalling in the AIR, as a multiple of base speed.
+ *
+ * Above 1 on purpose. Walking backwards stays slow, but a backwards jump is a
+ * deliberate movement option: it is the quickest way to break off a fight, and
+ * it costs you your forward momentum and your aim stability to use. Strafing
+ * is what it is -- the point is that retreating should reward the jump rather
+ * than a sideways shuffle.
+ */
+export const BACKPEDAL_AIR_SPEED_MULT = 1.26;
 export const SPRINT_SPEED_MULT = 1.28;
 
 // --- crouch and slide ------------------------------------------------------
@@ -190,28 +198,6 @@ export const MAX_MATS = 999;
 export const MAX_PLAYERS_PER_MATCH = 4;
 export const RESPAWN_DELAY_S = 3.0;
 export const ROUND_WIN_SCORE = 5;
-
-// ---------------------------------------------------------------------------
-// Weapon bloom
-//
-// Spread is not a constant per weapon any more. It grows while you move and
-// while you fire, and settles back toward the weapon's floor when you stand
-// still. Both sides compute it from the same state so the cone the server
-// traces is the cone the crosshair draws.
-// ---------------------------------------------------------------------------
-
-/** Bloom added per second at full movement speed. */
-export const BLOOM_MOVE_RATE = 2.1;
-/** Bloom added by a single shot, as a multiple of the weapon's hip spread. */
-export const BLOOM_PER_SHOT = 0.55;
-/** Bloom recovered per second while standing still. */
-export const BLOOM_RECOVER_RATE = 2.6;
-/** Standing perfectly still recovers this much faster again. */
-export const BLOOM_STILL_BONUS = 1.9;
-/** Ceiling, as a multiple of the weapon's hip spread. */
-export const BLOOM_MAX = 2.4;
-/** Speed below which the player counts as fully stopped. */
-export const BLOOM_STILL_SPEED = 0.35;
 
 // ---------------------------------------------------------------------------
 // Bullet drop

@@ -406,10 +406,9 @@ function handleEvents(events: readonly GameEvent[]): void {
           else characters.get(e.shooter)?.fire();
           sound.shot(e.weapon, e.ox, e.oy, e.oz);
           if (e.weapon !== W_PICKAXE) effects.spawnMuzzleFlash(e.ox, e.oy, e.oz);
-          // Only your own shots kick your own camera, or bloom your own cone.
+          // Only your own shots kick your own camera.
           if (e.shooter === conn.selfId) {
             viewfx.fire(e.weapon);
-            conn.notePredictedShot(e.weapon);
           } else if (e.weapon !== W_PICKAXE) {
             // Somebody else fired: put it on the compass. Sound alone tells you
             // a fight started, not which way to turn.
@@ -776,6 +775,7 @@ function frame(now: number): void {
       renderSelf.x, renderSelf.y, renderSelf.z,
       controls.yaw, controls.pitch,
       Math.hypot(self.vx, self.vz), self.grounded, dt,
+      self.crouch,
     );
     selfCharacter.aimAt(aimPoint);
     // No nameplate on your own body.
@@ -802,6 +802,7 @@ function frame(now: number): void {
     ch.update(
       pose.x, pose.y, pose.z, pose.yaw, pose.pitch,
       moving ? 6 : 0, grounded, dt,
+      (pose.state.flags & PF_CROUCH) !== 0 ? 1 : 0,
     );
     if (alive) footsteps(pose.id, pose.x, pose.y, pose.z, grounded && moving);
   }
@@ -819,7 +820,7 @@ function frame(now: number): void {
   hud.setStamina(self.stamina);
   hud.setMats(self.mats, self.material);
   hud.setSlot(controls.slot, controls.inBuildMode, self.material);
-  hud.setReticle(aiming, controls.slot, controls.inBuildMode, self.bloom);
+  hud.setReticle(aiming, controls.slot, controls.inBuildMode);
   const weaponIdx = controls.inBuildMode ? 0 : controls.slot;
   hud.setAmmo(weaponIdx, self.ammo, self.reloadMs > 0, controls.inBuildMode, self.mats);
   hud.setScore(matchPlayers, conn.selfId, scoreTarget);

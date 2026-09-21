@@ -154,11 +154,9 @@ export function resolveFire(
     const length=Math.hypot(...delta);
     if(length>0.001) baseDir=delta.map(v=>v/length) as [number,number,number];
   }
-  // Spread is the weapon's floor plus however much bloom the shooter has
-  // accumulated from moving and firing, so standing still is rewarded. A
-  // locked shot has none: any cone at all is a chance to miss, which is the
-  // one thing this toggle exists to remove.
-  const spread = locked ? 0 : spreadFor(weapon, shooter.aiming, shooter.bloom);
+  // A locked shot has no cone at all: any spread is a chance to miss, which is
+  // the one thing that toggle exists to remove.
+  const spread = locked ? 0 : spreadFor(weapon, shooter.aiming);
 
   for (let pellet = 0; pellet < weapon.pellets; pellet++) {
     const dir = applySpread(baseDir, spread, Math.random);
@@ -229,9 +227,6 @@ export function resolveFire(
     });
   }
 
-  // Firing blooms the cone. Charged per trigger pull, not per pellet, so a
-  // shotgun is not punished nine times for one shot.
-  shooter.pendingBloomShots++;
 
   if (Number.isFinite(shooter.ammo[shooter.weaponIdx]) && shooter.ammo[shooter.weaponIdx] <= 0) {
     beginReload(shooter, nowSec);

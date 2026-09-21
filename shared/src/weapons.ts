@@ -1,7 +1,5 @@
 import {
-  MATERIALS, BLOOM_MOVE_RATE, BLOOM_PER_SHOT, BLOOM_RECOVER_RATE,
-  BLOOM_STILL_BONUS, BLOOM_MAX, BLOOM_STILL_SPEED, MOVE_SPEED,
-  BULLET_DROP_START, BULLET_DROP_RATE, BULLET_SEGMENT,
+  MATERIALS, BULLET_DROP_START, BULLET_DROP_RATE, BULLET_SEGMENT,
 } from "./constants";
 
 export interface WeaponDef {
@@ -145,52 +143,20 @@ export function pieceDamage(w: WeaponDef, mat: number): number {
 }
 
 // ---------------------------------------------------------------------------
-// Bloom
-//
-// Spread is state, not a constant. It grows while you move and while you fire,
-// and settles back toward the weapon's floor when you stand still. Both sides
-// run this same integrator over the same inputs, so the cone the server traces
-// is the cone the crosshair draws.
-// ---------------------------------------------------------------------------
-
-/** Cone half-angle for a shot, in radians. */
-export function spreadFor(w: WeaponDef, aiming: boolean, bloom: number): number {
-  const base = aiming ? w.spreadAds : w.spreadHip;
-  return base + w.spreadHip * Math.max(0, bloom);
-}
-
-/**
- * Advance the bloom value by one tick.
- *
- * `speed` is the player's horizontal speed. Recovery is tiered rather than
- * linear so the three states the player is asked to feel -- moving, slowing,
- * stopped -- are actually distinguishable: standing still recovers markedly
- * faster than merely walking slowly.
- */
-export function stepBloom(bloom: number, speed: number, dt: number): number {
-  const moving = Math.min(1, speed / MOVE_SPEED);
-  let next = bloom;
-  if (speed > BLOOM_STILL_SPEED) {
-    next += BLOOM_MOVE_RATE * moving * dt;
-    // Even while moving, slowing down should start paying the cone back.
-    next -= BLOOM_RECOVER_RATE * (1 - moving) * dt;
-  } else {
-    next -= BLOOM_RECOVER_RATE * BLOOM_STILL_BONUS * dt;
-  }
-  return Math.max(0, Math.min(BLOOM_MAX, next));
-}
-
-/** Bloom added by pulling the trigger once. */
-export function bloomPerShot(w: WeaponDef): number {
-  // Slower weapons kick the cone harder per shot, so a sniper's second shot is
-  // punished while an SMG's spread comes from the stream rather than any one
-  // round in it.
-  return BLOOM_PER_SHOT * Math.min(2.5, Math.max(0.5, w.fireInterval / 0.15));
-}
-
-// ---------------------------------------------------------------------------
 // Ballistics
 // ---------------------------------------------------------------------------
+
+/**
+ * Cone half-angle for a shot, in radians.
+ *
+ * Just the weapon's own figure. A movement-driven bloom term used to be added
+ * on top; it tripled the effective cone at its ceiling and took the crosshair
+ * with it, which made every gun feel wildly inaccurate. Spread is back to the
+ * per-weapon values, which are the ones the weapons were tuned around.
+ */
+export function spreadFor(w: WeaponDef, aiming: boolean): number {
+  return aiming ? w.spreadAds : w.spreadHip;
+}
 
 /**
  * Trace a shot as a chain of straight segments with gravity applied between

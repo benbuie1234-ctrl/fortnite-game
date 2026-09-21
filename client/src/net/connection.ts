@@ -1,5 +1,5 @@
 import {
-  TICK_DT, INTERP_DELAY_MS, INPUTS_PER_MESSAGE, BLOOM_MAX, SPRINT_STAMINA_MAX,
+  TICK_DT, INTERP_DELAY_MS, INPUTS_PER_MESSAGE, SPRINT_STAMINA_MAX,
 } from "@shared/constants";
 import {
   Writer, Reader, writeInputBatch, C_PING, C_CHAT,
@@ -11,7 +11,6 @@ import { readSnapshot, type GameEvent, type OtherState } from "@shared/snapshot"
 import { World } from "@shared/world";
 import { buildArena } from "@shared/arena";
 import { stepPlayer, newMovementState, type InputCommand, type MovementState } from "@shared/sim";
-import { stepBloom, bloomPerShot, weaponById } from "@shared/weapons";
 import { makePiece, type Slot, type Facing, unpackKey } from "@shared/build";
 
 export interface MatchPlayerInfo {
@@ -30,9 +29,6 @@ export interface ClientSelf extends MovementState {
   material: number;
   reloadMs: number;
   alive: boolean;
-  /** Predicted weapon bloom, for the crosshair. The server owns the value the
-   *  shot cone is actually built from; this only has to look right. */
-  bloom: number;
 }
 
 interface RemoteSample {
@@ -111,7 +107,6 @@ export class Connection {
     ...newMovementState(),
     hp: 100, shield: 0, mats: 0, weapon: 0, ammo: 0,
     buildSlot: -1, material: 0, reloadMs: 0, alive: true,
-    bloom: 0,
   };
 
   selfId = -1;
@@ -208,8 +203,6 @@ export class Connection {
     if (!this.connected || this.pending.length >= 90) return;
     if (this.self.alive) {
       stepPlayer(this.self, cmd, this.world, TICK_DT);
-      const s = this.self;
-      s.bloom = stepBloom(s.bloom, Math.hypot(s.vx, s.vz), TICK_DT);
     }
     this.pending.push(cmd);
     this.unsent.push(cmd);
@@ -395,14 +388,6 @@ export class Connection {
       out.push({ id, ...p });
     }
     return out;
-  }
-
-  /** Charge the predicted crosshair for a shot the local player just fired.
-   *  The server does the same to the value it traces with. */
-  notePredictedShot(weaponId: number): void {
-    this.self.bloom = Math.min(
-      BLOOM_MAX, this.self.bloom + bloomPerShot(weaponById(weaponId)),
-    );
   }
 
   get pendingInputCount(): number { return this.pending.length; }

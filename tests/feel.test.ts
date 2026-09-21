@@ -10,11 +10,9 @@ import {
 import { makePiece, pieceBox, SLOT_FLOOR, SLOT_RAMP, rampHeightAt } from "../shared/src/build";
 import {
   TILE, TICK_DT, MOVE_SPEED, PLAYER_MAX_HP, CROUCH_HEIGHT, PLAYER_HEIGHT,
-  FALL_SAFE_HEIGHT, FALL_LETHAL_HEIGHT, BLOOM_MAX, MATERIALS,
+  FALL_SAFE_HEIGHT, FALL_LETHAL_HEIGHT, MATERIALS,
 } from "../shared/src/constants";
-import {
-  weaponById, spreadFor, stepBloom, pieceDamage, W_SNIPER, W_AR,
-} from "../shared/src/weapons";
+import { weaponById, spreadFor, pieceDamage, W_SNIPER, W_AR } from "../shared/src/weapons";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = ""): void {
@@ -38,29 +36,39 @@ function topSpeed(s: MovementState, w: World, cmd: InputCommand, ticks: number):
 }
 
 // ---------------------------------------------------------------------------
-console.log("jumping does not grant speed");
+console.log("jumping, backwards and sideways");
 {
-  // The bug: acceleration picked GROUND_ACCEL, then the jump cleared the
-  // grounded flag in the same tick, so every jump spent one tick of ground
-  // acceleration in mid-air. Backwards, where nothing capped reverse travel,
-  // it was most obvious.
   const world = new World();
 
+  // The original bug: acceleration picked GROUND_ACCEL and the jump then
+  // cleared the grounded flag in the same tick, spending one tick of ground
+  // acceleration in mid-air. Forward has no air bonus of its own, so it is
+  // where that leak would still show.
   const runner = { ...newMovementState(), y: 0, grounded: true };
-  const runFlat = topSpeed(runner, world, input(0, -1), 40);
-
+  const forwardRun = topSpeed(runner, world, input(0, 1), 40);
   const jumper = { ...newMovementState(), y: 0, grounded: true };
-  const runJump = topSpeed(jumper, world, input(0, -1, BTN_JUMP), 40);
+  const forwardJump = topSpeed(jumper, world, input(0, 1, BTN_JUMP), 40);
+  check("a forward jump grants no free speed",
+    forwardJump <= forwardRun + 0.02, `run ${forwardRun.toFixed(3)} jump ${forwardJump.toFixed(3)}`);
+  check("and forwards still reaches full speed",
+    Math.abs(forwardRun - MOVE_SPEED) < 0.2, `${forwardRun.toFixed(3)}`);
 
-  check("a backwards jump is no faster than backwards running",
-    runJump <= runFlat + 0.02, `run ${runFlat.toFixed(3)} jump ${runJump.toFixed(3)}`);
+  // Backwards is the opposite case, and deliberately so: slow on the ground,
+  // quick in the air, so breaking off a fight rewards a jump.
+  const backer = { ...newMovementState(), y: 0, grounded: true };
+  const backRun = topSpeed(backer, world, input(0, -1), 40);
+  const backJumper = { ...newMovementState(), y: 0, grounded: true };
+  const backJump = topSpeed(backJumper, world, input(0, -1, BTN_JUMP), 60);
 
-  const forward = { ...newMovementState(), y: 0, grounded: true };
-  const forwardSpeed = topSpeed(forward, world, input(0, 1), 40);
-  check("backwards is slower than forwards",
-    runFlat < forwardSpeed - 0.3, `back ${runFlat.toFixed(2)} fwd ${forwardSpeed.toFixed(2)}`);
-  check("forwards still reaches full speed",
-    Math.abs(forwardSpeed - MOVE_SPEED) < 0.2, `${forwardSpeed.toFixed(3)}`);
+  check("backing up on the ground is slower than advancing",
+    backRun < forwardRun - 0.3, `back ${backRun.toFixed(2)} fwd ${forwardRun.toFixed(2)}`);
+  check("but a backwards jump is faster than backing up",
+    backJump > backRun + 1, `run ${backRun.toFixed(2)} jump ${backJump.toFixed(2)}`);
+
+  const strafer = { ...newMovementState(), y: 0, grounded: true };
+  const strafe = topSpeed(strafer, world, input(1, 0, BTN_JUMP), 60);
+  check("and faster than strafing, which is the point",
+    backJump > strafe + 1, `strafe ${strafe.toFixed(2)} back-jump ${backJump.toFixed(2)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,28 +131,12 @@ console.log("crouch and slide");
 }
 
 // ---------------------------------------------------------------------------
-console.log("weapon bloom");
+console.log("spread is the weapon's own figure");
 {
   const ar = weaponById(W_AR);
-  check("no bloom means the weapon's own spread",
-    spreadFor(ar, false, 0) === ar.spreadHip);
-  check("bloom widens the cone", spreadFor(ar, false, 1) > spreadFor(ar, false, 0));
-  check("aiming is always tighter than hip at the same bloom",
-    spreadFor(ar, true, 0.5) < spreadFor(ar, false, 0.5));
-
-  let bloom = 0;
-  for (let i = 0; i < 60; i++) bloom = stepBloom(bloom, MOVE_SPEED, TICK_DT);
-  const moving = bloom;
-  check("moving grows it", moving > 0.2, `${moving.toFixed(3)}`);
-  check("it is capped", moving <= BLOOM_MAX + 1e-9);
-
-  let walking = moving;
-  for (let i = 0; i < 20; i++) walking = stepBloom(walking, MOVE_SPEED * 0.3, TICK_DT);
-  let stopped = moving;
-  for (let i = 0; i < 20; i++) stopped = stepBloom(stopped, 0, TICK_DT);
-  check("slowing recovers some of it", walking < moving, `${walking.toFixed(3)}`);
-  check("stopping recovers more", stopped < walking, `${stopped.toFixed(3)} vs ${walking.toFixed(3)}`);
-  check("and it bottoms out at zero", stepBloom(0.001, 0, 1) === 0);
+  check("hip spread is the weapon's hip spread", spreadFor(ar, false) === ar.spreadHip);
+  check("aimed spread is the weapon's aimed spread", spreadFor(ar, true) === ar.spreadAds);
+  check("and aiming is always tighter", spreadFor(ar, true) < spreadFor(ar, false));
 }
 
 // ---------------------------------------------------------------------------
