@@ -22,6 +22,7 @@ import { Hud } from "./ui/hud";
 import { FrameLimiter, type FpsTarget } from "./render/framelimiter";
 import { Sound } from "./audio/sound";
 import { ViewEffects } from "./render/viewfx";
+import { loadModels } from "./render/models";
 
 // ---------------------------------------------------------------------------
 // Boot
@@ -38,7 +39,11 @@ const joinBtn = document.getElementById("joinBtn") as HTMLButtonElement;
 // part of the DOM lib, so the direct assertion is rejected.
 const fpsSelect = document.getElementById("fpsSelect") as unknown as HTMLSelectElement;
 
-const view = createRenderer(app);
+// Optional art, loaded before the scene is built. Resolves immediately to an
+// empty library when no models are installed, in which case everything falls
+// back to the procedural shapes and nothing waits.
+const models = await loadModels();
+const view = createRenderer(app, models);
 const hud = new Hud();
 const pieces = new PieceRenderer(view.scene, view.maxAnisotropy);
 const ghost = new BuildGhost(view.scene);

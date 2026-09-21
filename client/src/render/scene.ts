@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { createLandscape } from "./landscape";
 import { createSky } from "./sky";
+import type { ModelLibrary } from "./models";
 import { createGradePass } from "./grade";
 import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
@@ -23,7 +24,7 @@ export interface Renderer {
   maxAnisotropy: number;
 }
 
-export function createRenderer(mount: HTMLElement): Renderer {
+export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Renderer {
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     powerPreference: "high-performance",
@@ -115,7 +116,7 @@ export function createRenderer(mount: HTMLElement): Renderer {
   scene.add(sun.target);
 
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
-  createLandscape(scene);
+  createLandscape(scene, models);
 
   // --- bloom ----------------------------------------------------------------
   //

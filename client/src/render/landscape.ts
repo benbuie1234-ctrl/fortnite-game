@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { MAP_HALF,terrainHeight,BUILDINGS,LOCATIONS,SCENERY,PROPS } from '@shared/map';
 import { getTextures, planarUVs } from './textures';
+import { InstancedModel, type ModelLibrary } from './models';
 
-export function createLandscape(scene:THREE.Scene):void {
+export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
  const trunkGeo=new THREE.BoxGeometry(.56,1,.56),rockGeo=new THREE.BoxGeometry(1,1,1),leafGeo=new THREE.ConeGeometry(1,1,7);
  const detail=getTextures(1).detail;
  const solidMaterial=new THREE.MeshStandardMaterial({color:0xffffff,map:detail,roughness:0.88,metalness:0,envMapIntensity:0.9});
@@ -11,7 +12,25 @@ export function createLandscape(scene:THREE.Scene):void {
  const leaves=new THREE.InstancedMesh(leafGeo,solidMaterial,treeList.length*2);
  const rocks=new THREE.InstancedMesh(rockGeo,solidMaterial,rockList.length+PROPS.length);
  const matrix=new THREE.Object3D();
- treeList.forEach((p,i)=>{
+
+ // A real tree model replaces the box-and-cones version. Same placement data
+ // either way, so the fallback and the upgrade always agree on where trees are.
+ const treeModel=models?.get('tree');
+ const treeInstances=treeModel?new InstancedModel(treeModel,treeList.length):null;
+ if(treeInstances?.valid) {
+  treeList.forEach((p,i)=>{
+   matrix.position.set(p.x,p.y,p.z);
+   matrix.scale.setScalar(p.size*0.5);
+   matrix.rotation.set(0,(i*2.399)%(Math.PI*2),0); // vary facing so a forest is not a grid of clones
+   matrix.updateMatrix();
+   treeInstances.setMatrixAt(i,matrix.matrix);
+  });
+  treeInstances.addTo(scene);
+  matrix.rotation.set(0,0,0);
+ }
+
+ const useProceduralTrees=!treeInstances?.valid;
+ if(useProceduralTrees) treeList.forEach((p,i)=>{
    matrix.position.set(p.x,p.y+p.size/2,p.z);matrix.scale.set(1,p.size,1);matrix.updateMatrix();trunks.setMatrixAt(i,matrix.matrix);trunks.setColorAt(i,new THREE.Color(0x806445));
    for(let tier=0;tier<2;tier++){
      matrix.position.set(p.x,p.y+p.size*.85+tier*p.size*.38,p.z);matrix.scale.set(p.size*(.6-tier*.17),p.size*.95,p.size*(.6-tier*.17));matrix.updateMatrix();
@@ -20,7 +39,9 @@ export function createLandscape(scene:THREE.Scene):void {
  });
  rockList.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.size*.25,p.z);matrix.scale.set(p.size*.6,p.size*.5,p.size*.6);matrix.updateMatrix();rocks.setMatrixAt(i,matrix.matrix);rocks.setColorAt(i,new THREE.Color(0x91a098));});
  PROPS.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.h/2,p.z);matrix.scale.set(p.w,p.h,p.d);matrix.updateMatrix();rocks.setMatrixAt(rockList.length+i,matrix.matrix);rocks.setColorAt(rockList.length+i,new THREE.Color(p.color));});
- for(const batch of [trunks,leaves,rocks]){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
+ // Rocks always use the procedural boxes; trunks and leaves only when no
+ // tree model was supplied, or they would be drawn on top of the real trees.
+ for(const batch of (useProceduralTrees?[trunks,leaves,rocks]:[rocks])){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
  const size=MAP_HALF*2;
  const ground=new THREE.PlaneGeometry(size,size,240,240);ground.rotateX(-Math.PI/2);
  const positions=ground.getAttribute('position');const colors=[];
