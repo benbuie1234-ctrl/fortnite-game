@@ -10,6 +10,8 @@ import type { GameEvent } from "../shared/src/snapshot";
 import { makePiece, SLOT_WALL_Z } from "../shared/src/build";
 import { BLOOM_MAX, CROUCH_HEIGHT, PLAYER_HEIGHT } from "../shared/src/constants";
 import { weaponById, W_AR, W_SHOTGUN, W_SNIPER } from "../shared/src/weapons";
+import { Writer, Reader, writeInputBatch, readInputBatch } from "../shared/src/protocol";
+import { BTN_AIMBOT, BTN_FIRE, BTN_SPRINT } from "../shared/src/sim";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = ""): void {
@@ -130,6 +132,29 @@ console.log("and it is off unless asked for");
   check("an unlocked shot still scatters", landed < 40, `${landed}/40 landed`);
   check("(sanity) the locked equivalent does not", hits(fire(120, { bloom: BLOOM_MAX })) === 1);
   void W_AR;
+}
+
+// ---------------------------------------------------------------------------
+console.log("the flag survives the wire");
+{
+  // The lock lives on the server, so the whole feature hangs on one bit
+  // getting there. BTN_AIMBOT is bit 8 -- the first one outside a byte -- so a
+  // button field narrowed to u8 anywhere along the way would silently disable
+  // it while everything else kept working.
+  const w = new Writer(64);
+  writeInputBatch(w, [{
+    seq: 7, moveX: 1, moveZ: -1,
+    yaw: 0.25, pitch: -0.1,
+    buttons: BTN_AIMBOT | BTN_FIRE | BTN_SPRINT,
+    slot: 4,
+  }], 123_456);
+  const batch = readInputBatch(new Reader(w.finish().slice(1)));
+  const cmd = batch.commands[0];
+  check("the aim lock bit round-trips", (cmd.buttons & BTN_AIMBOT) !== 0,
+    `buttons=${cmd.buttons}`);
+  check("and does not disturb its neighbours",
+    (cmd.buttons & BTN_FIRE) !== 0 && (cmd.buttons & BTN_SPRINT) !== 0);
+  check("(it is deliberately outside the low byte)", BTN_AIMBOT > 0xff);
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);

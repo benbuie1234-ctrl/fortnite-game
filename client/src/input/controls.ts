@@ -26,7 +26,8 @@ export type Action =
   | "jump" | "crouch" | "sprint" | "reload" | "edit"
   | "weapon1" | "weapon2" | "weapon3" | "weapon4" | "weapon5"
   | "wall" | "floor" | "ramp" | "cone"
-  | "matWood" | "matBrick" | "matMetal";
+  | "matWood" | "matBrick" | "matMetal"
+  | "aimLock";
 
 export const ACTION_LABELS: ReadonlyArray<readonly [Action, string]> = [
   ["forward", "Move forward"],
@@ -50,6 +51,7 @@ export const ACTION_LABELS: ReadonlyArray<readonly [Action, string]> = [
   ["matWood", "Wood"],
   ["matBrick", "Brick"],
   ["matMetal", "Metal"],
+  ["aimLock", "Aim lock (dev)"],
 ];
 
 export const DEFAULT_BINDS: Readonly<Record<Action, string>> = {
@@ -60,6 +62,10 @@ export const DEFAULT_BINDS: Readonly<Record<Action, string>> = {
   weapon4: "Digit4", weapon5: "Digit5",
   wall: "KeyQ", floor: "KeyE", ramp: "KeyR", cone: "KeyF",
   matWood: "KeyZ", matBrick: "KeyX", matMetal: "KeyC",
+  // A plain key, not a chord. Cmd+M is Minimise Window on macOS and Ctrl+M is
+  // taken in some browsers, so a modifier binding can be swallowed before the
+  // page ever sees it -- which looks exactly like the feature being broken.
+  aimLock: "KeyJ",
 };
 
 const BINDS_STORAGE_KEY = "clutch.binds";
@@ -100,7 +106,9 @@ export class Controls {
   /** 0-4 weapon, 5-8 build piece. */
   slot = 2;
   material = 0;
-  /** Development aim lock. Travels to the server, which owns the shot cone. */
+  /** Development aim lock. Travels to the server, which owns the shot cone.
+   *  Owned here rather than in main so the key, the chord and the on-screen
+   *  button cannot disagree about whether it is on. */
   aimbot = false;
 
   private binds: Record<Action, string> = { ...DEFAULT_BINDS };
@@ -230,6 +238,9 @@ export class Controls {
       case "build":
         if (on) this.selectSlot(this.inBuildMode ? this.lastWeaponSlot : this.lastBuildSlot);
         return this.inBuildMode;
+      case "aimlock":
+        if (on) this.toggleAimLock();
+        return this.aimbot;
       default: return on;
     }
   }
@@ -244,6 +255,11 @@ export class Controls {
   }
 
   selectMaterialPublic(material: number): void { this.selectMaterial(material); }
+
+  toggleAimLock(): boolean {
+    this.aimbot = !this.aimbot;
+    return this.aimbot;
+  }
 
   requestLock(): void {
     // Returns a promise in current browsers, and rejects when the document is
@@ -348,6 +364,7 @@ export class Controls {
     else if (hit("matBrick")) this.selectMaterial(1);
     else if (hit("matMetal")) this.selectMaterial(2);
     else if (hit("reload")) this.edgeReload = true;
+    else if (hit("aimLock")) this.toggleAimLock();
   }
 
   private selectMaterial(mat: number): void {

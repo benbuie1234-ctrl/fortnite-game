@@ -238,12 +238,16 @@ export class Hud {
 
   setAimbot(on: boolean): void {
     this.aimbotBadge.classList.toggle("on", on);
-    if (!on) this.aimbotBadge.textContent = "AIMBOT";
+    if (!on) this.aimbotBadge.textContent = "AIM LOCK";
   }
 
-  /** Whether the lock currently has a clear shot, so the badge says which. */
-  setAimbotLocked(locked: boolean): void {
-    this.aimbotBadge.textContent = locked ? "AIMBOT · LOCKED" : "AIMBOT · NO SHOT";
+  /** Whether the lock currently has a clear shot, so the badge says which.
+   *  "SEARCHING" is the honest answer on an empty server, which otherwise
+   *  looks identical to the toggle not having worked. */
+  setAimbotLocked(locked: boolean, hasTarget = true): void {
+    this.aimbotBadge.textContent = !hasTarget
+      ? "AIM LOCK · SEARCHING"
+      : locked ? "AIM LOCK · LOCKED" : "AIM LOCK · NO SHOT";
   }
 
   /** Sprint stamina. Turns warm once it is too low to start a sprint with, so

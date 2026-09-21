@@ -546,17 +546,29 @@ function updateTreeCover(aiming: boolean, x: number, y: number, z: number): void
 // rather than a tool.
 // ---------------------------------------------------------------------------
 
-let aimAssist = false;
+// Controls owns the flag. The key, the chord and the on-screen button all go
+// through it, so they cannot disagree about whether the lock is on.
+let aimAssistShown = false;
 
+function announceAimLock(): void {
+  const on = controls.aimbot;
+  if (on === aimAssistShown) return;
+  aimAssistShown = on;
+  hud.setAimbot(on);
+  hud.setCenterMessage(on ? "AIM LOCK ON" : "Aim lock off");
+  setTimeout(() => hud.setCenterMessage(""), 900);
+}
+
+// Cmd/Ctrl+M still works where the browser allows it, but it is a fallback
+// rather than the binding: on macOS Cmd+M is Minimise Window, and when the OS
+// takes it the page never sees the keystroke at all -- which is
+// indistinguishable from the feature being broken. The real binding is a plain
+// rebindable key (J by default), handled in Controls.
 window.addEventListener("keydown", (e) => {
   if (e.code !== "KeyM" || e.repeat) return;
   if (!e.metaKey && !e.ctrlKey) return;
   e.preventDefault();
-  aimAssist = !aimAssist;
-  controls.aimbot = aimAssist;
-  hud.setAimbot(aimAssist);
-  hud.setCenterMessage(aimAssist ? "AIM ASSIST ON" : "Aim assist off");
-  setTimeout(() => hud.setCenterMessage(""), 900);
+  controls.toggleAimLock();
 });
 
 /**
@@ -570,7 +582,12 @@ window.addEventListener("keydown", (e) => {
  * it, rather than tilting off into the sky at long range.
  */
 function applyAimAssist(): void {
-  if (!aimAssist || !conn.self.alive) return;
+  announceAimLock();
+  if (!controls.aimbot) return;
+  // On, but with nobody to lock onto. Say so, or an empty server looks like a
+  // broken toggle.
+  hud.setAimbotLocked(false, false);
+  if (!conn.self.alive) return;
   const eyeY = conn.self.y + eyeHeightFor(conn.self.crouch);
   const now = Date.now() / 1000;
   let bestDistance = Infinity;
@@ -603,7 +620,7 @@ function applyAimAssist(): void {
   if (bestDistance === Infinity) return;
   controls.yaw = Math.atan2(-bx, bz);
   controls.pitch = Math.atan2(by, Math.hypot(bx, bz));
-  hud.setAimbotLocked(bestVisible);
+  hud.setAimbotLocked(bestVisible, true);
 }
 
 // ---------------------------------------------------------------------------

@@ -358,6 +358,7 @@ body.touch #mobileControls { display:block; }
 #mobileControls [data-touch="sprint"] { left:232px; bottom:86px; width:56px; height:56px; font-size:10px; }
 #mobileControls [data-touch="build"] { left:296px; bottom:86px; width:56px; height:56px; font-size:10px; background:rgba(120,140,40,.55); }
 #mobileControls [data-touch="scores"] { left:20px; top:20px; bottom:auto; width:56px; height:56px; font-size:9px; }
+#mobileControls [data-touch="aimlock"] { left:84px; top:20px; bottom:auto; width:56px; height:56px; font-size:10px; }
 #mobileControls [data-touch].held { background:rgba(217,255,85,.42); color:#16210a; }
 
 body.touch .slots { bottom:110px; right:16px; gap:4px; }
@@ -482,9 +483,10 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
       <button data-touch="sprint">SPRINT</button>
       <button data-touch="build">BUILD</button>
       <button data-touch="scores">SCORES</button>
+      <button data-touch="aimlock">LOCK</button>
       <button data-touch="reload">RELOAD</button>
     </div>
-    <div class="slots" id="slots"></div><div id="buildSlots"></div><div id="roomBadge"></div><div id="helpBadge">G Reload · Ctrl Crouch · Tab Scores · M Sound · Esc Release mouse</div>
+    <div class="slots" id="slots"></div><div id="buildSlots"></div><div id="roomBadge"></div><div id="helpBadge">G Reload · Ctrl Crouch · J Aim lock · Tab Scores · M Sound · Esc Release mouse</div>
   </div>
 
   <div id="menu">
@@ -522,7 +524,7 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
         <b>1-5</b> weapons &nbsp;·&nbsp; <b>Q E R F</b> wall, floor, ramp, cone<br/>
         <b>Z X C</b> wood, brick, metal &nbsp;·&nbsp; <b>G</b> reload<br/>
         <b>Ctrl</b> crouch &nbsp;·&nbsp; <b>Shift + Ctrl</b> at speed to slide<br/>
-        <b>Cmd/Ctrl + M</b> aim assist (dev) &nbsp;·&nbsp; <b>Tab</b> scoreboard &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; <b>Esc</b> release mouse
+        <b>J</b> aim lock (dev, rebindable; Cmd/Ctrl+M also works) &nbsp;·&nbsp; <b>Tab</b> scoreboard &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; <b>Esc</b> release mouse
       </details>
     </div>
   </div>
