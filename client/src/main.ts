@@ -1,6 +1,6 @@
 import { cameraPose, easeCameraDistance } from "@shared/camera";
 import * as THREE from "three";
-import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE } from "@shared/constants";
+import { TICK_DT, TICK_HZ, EYE_HEIGHT, TILE, MATERIALS } from "@shared/constants";
 import { eyeHeightFor } from "@shared/sim";
 import { resolvePlacement, placementIssue, BUILD_SHIELD } from "@shared/placement";
 import { unpackKey } from "@shared/build";
@@ -21,7 +21,7 @@ import { Character } from "./render/character";
 import { Effects } from "./render/effects";
 import { Controls, ACTION_LABELS, keyLabel, type Action } from "./input/controls";
 import { Connection, type MatchPlayerInfo } from "./net/connection";
-import { Hud } from "./ui/hud";
+import { Hud, standingsTable } from "./ui/hud";
 import { FrameLimiter, type FpsTarget } from "./render/framelimiter";
 import { Sound } from "./audio/sound";
 import { ViewEffects } from "./render/viewfx";
@@ -46,7 +46,10 @@ const fpsSelect = document.getElementById("fpsSelect") as unknown as HTMLSelectE
 // Optional art, loaded before the scene is built. Resolves immediately to an
 // empty library when no models are installed, in which case everything falls
 // back to the procedural shapes and nothing waits.
-const models = await loadModels();
+const models = await loadModels((loaded, total) => {
+  document.getElementById("loadingProgress")!.style.width = `${Math.round(loaded / Math.max(1, total) * 100)}%`;
+  document.getElementById("loadingText")!.textContent = "Loading the arena…";
+});
 const view = createRenderer(app, models);
 const hud = new Hud();
 const pieces = new PieceRenderer(view.scene, view.maxAnisotropy);
@@ -62,6 +65,8 @@ let selfCharacter: Character | null = null;
 let matchPlayers: MatchPlayerInfo[] = [];
 let scoreTarget = 5;
 let playing = false;
+let menuOpen = true;
+let helpTimer: ReturnType<typeof setTimeout> | undefined;
 let respawnAtMs = 0;
 const renderSelf={x:0,y:0,z:0};
 let renderReady=false;
@@ -81,12 +86,16 @@ const conn = new Connection({
   onEvents(events) { handleEvents(events); },
   onMatchState(msg) {
     if (Array.isArray(msg.players)) matchPlayers = msg.players as MatchPlayerInfo[];
-    if (typeof msg.target === "number") scoreTarget = msg.target;
+    if (typeof msg.target === "number") { scoreTarget = msg.target; hud.scoreTarget = scoreTarget; }
+    refreshStandings();
     if (msg.roundOver) {
       const winner = String(msg.winnerName ?? "Someone");
       sound.win();
-      hud.setCenterMessage(`${winner} wins!`, "Next round starting");
-      setTimeout(() => hud.setCenterMessage(""), 3000);
+      hud.setCenterMessage(`${winner} wins!`, `First to ${scoreTarget}`);
+      setTimeout(() => hud.setCenterMessage(""), 3200);
+      // The one moment in a match when everybody wants the table, so they do
+      // not have to go looking for it.
+      document.getElementById("lastResult")!.textContent = `${winner} won the last round`;
     }
   },
   onChat(name, text) { hud.addKillFeed(`${name}: ${text}`, false); },
@@ -96,10 +105,10 @@ const conn = new Connection({
 const controls = new Controls(view.renderer.domElement, {
   sensitivity: 0.0022,
   onPointerLockChange(locked) {
-    if (playing && !locked) hud.setCenterMessage("Paused", "Click to resume");
-    else if (locked) hud.setCenterMessage("");
+    if (playing && !locked) openMenu();
+    else if (locked) { closeMenu(); hud.setCenterMessage(""); }
   },
-  onScoreboard(open) { hud.setScoreboardOpen(open); },
+  onScoreboard(open) { if (open && playing) openMenu("standings"); },
 });
 
 // Touch controls use the same input sampler as keyboard/mouse, so prediction
@@ -186,15 +195,68 @@ if (mobile && stick) {
 hud.onSlotTapped = (slot) => controls.selectSlot(slot);
 hud.onMaterialTapped = (material) => controls.selectMaterialPublic(material);
 
+function selectMenuPanel(panel: string): void {
+  document.querySelectorAll<HTMLElement>("[data-panel]").forEach(el => { el.hidden = el.dataset.panel !== panel; });
+  document.querySelectorAll<HTMLButtonElement>("[data-menu-tab]").forEach(el => {
+    el.setAttribute("aria-selected", String(el.dataset.menuTab === panel));
+  });
+}
+function openMenu(panel?: string): void {
+  menuOpen = true;
+  controls.reset();
+  hud.hide();
+  menu.classList.remove("hidden");
+  document.body.classList.toggle("in-match", playing);
+  document.querySelectorAll("[data-touch]").forEach(el => el.classList.remove("held"));
+  document.getElementById("mobileStick")?.querySelector("i")?.removeAttribute("style");
+  document.getElementById("sessionNote")!.textContent = playing ? "Match is live. You can still take damage." : "Free-for-all · First to 5 eliminations";
+  if (panel) selectMenuPanel(panel);
+  refreshStandings();
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+function closeMenu(): void {
+  menuOpen = false;
+  menu.classList.add("hidden");
+  hud.show();
+  controls.reset();
+}
+document.querySelectorAll<HTMLButtonElement>("[data-menu-tab]").forEach(button => {
+  button.addEventListener("click", () => selectMenuPanel(button.dataset.menuTab!));
+});
+document.getElementById("resumeBtn")!.addEventListener("click", () => {
+  closeMenu();
+  if (!document.body.classList.contains("touch")) controls.requestLock();
+});
+document.getElementById("resumeFooter")!.addEventListener("click", () => document.getElementById("resumeBtn")!.click());
+document.getElementById("leaveBtn")!.addEventListener("click", () => leaveGame("You left the match."));
+document.getElementById("menuBtn")!.addEventListener("click", () => openMenu("play"));
+window.addEventListener("keydown", e => {
+  if (e.code === "Escape" && playing && !menuOpen) { e.preventDefault(); openMenu("play"); }
+});
+window.addEventListener("blur", () => { if (playing) openMenu(); });
+document.addEventListener("visibilitychange", () => { if (document.hidden && playing) openMenu(); });
+
 // ---------------------------------------------------------------------------
 // Connecting
 // ---------------------------------------------------------------------------
+
+/**
+ * Redraw the leaderboard on the menu.
+ *
+ * Kept up to date while connected and left standing afterwards, so the panel
+ * shows the result of the match you just played rather than emptying the
+ * instant you disconnect.
+ */
+function refreshStandings(): void {
+  const table = document.getElementById("standingsTable");
+  if (table) table.innerHTML = standingsTable(matchPlayers, conn.selfId, scoreTarget);
+}
 
 function serverUrl(name: string, room: string): string {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
   // In `vite dev` the client is on 5173 while the Worker runs on 8787, so
   // point at wrangler directly. In production both are the same origin.
-  const host = location.port === "5173" ? `${location.hostname}:8787` : location.host;
+  const host = location.host;
   const params = new URLSearchParams({ name });
   if (room) params.set("room", room);
   return `${proto}//${host}/ws?${params.toString()}`;
@@ -221,6 +283,7 @@ function startConnect(room: string): void {
   const attempt = ++connectAttempt;
   setTimeout(() => {
     if (attempt !== connectAttempt || playing) return;
+    conn.disconnect();
     statusEl.className = "status error";
     statusEl.textContent = "Could not reach the server. Is it running?";
     playBtn.disabled = false;
@@ -308,8 +371,8 @@ sensitivity.addEventListener("input", () => {
     toggle.checked = on;
     try { localStorage.setItem("clutch.stats", on ? "1" : "0"); } catch { /* ignore */ }
   };
-  let initial = true;
-  try { initial = localStorage.getItem("clutch.stats") !== "0"; } catch { /* default on */ }
+  let initial = false;
+  try { initial = localStorage.getItem("clutch.stats") === "1"; } catch { /* default on */ }
   apply(initial);
   toggle.addEventListener("change", () => apply(toggle.checked));
 }
@@ -334,11 +397,21 @@ function enterGame(id: number, name: string): void {
   controls.pitch = 0;
   renderReady=false;
   playing = true;
-  menu.classList.add("hidden");
-  hud.show();
+  controls.reset();
+  critters.state.reset();
+  tickAccumulator = 0;
+  closeMenu();
+  // The control reminder is for the first minute of your first match, not for
+  // every match forever. It fades itself out rather than becoming furniture.
+  const help = document.getElementById("helpBadge");
+  if (help) {
+    help.style.opacity = "1";
+    clearTimeout(helpTimer);
+    helpTimer = setTimeout(() => { help.style.opacity = "0"; }, 12_000);
+  }
   // Free skins are assigned per slot so players are visually distinct before
   // anybody has bought anything.
-  selfCharacter = new Character(SKINS[id % 2].id, name);
+  selfCharacter = new Character(SKINS[id % 2].id, name, models);
   selfCharacter.hideNameplate();
   view.scene.add(selfCharacter.root);
   if (!document.body.classList.contains("touch")) controls.requestLock();
@@ -354,14 +427,18 @@ function leaveGame(reason: string): void {
     return;
   }
   playing = false;
-  hud.hide();
-  menu.classList.remove("hidden");
+  conn.disconnect();
+  controls.reset();
+  clearTimeout(helpTimer);
+  respawnAtMs = 0;
+  openMenu("play");
   statusEl.className = "status error";
   statusEl.textContent = reason;
   playBtn.disabled = false;
   joinBtn.disabled = false;
   document.exitPointerLock();
 
+  refreshStandings();
   for (const c of characters.values()) c.dispose(view.scene);
   characters.clear();
   if (selfCharacter) { selfCharacter.dispose(view.scene); selfCharacter = null; }
@@ -369,7 +446,7 @@ function leaveGame(reason: string): void {
 
 app.addEventListener("click", () => {
   if (document.body.classList.contains("touch")) return;
-  if (playing && !controls.isLocked) controls.requestLock();
+  if (playing && !menuOpen && !controls.isLocked) controls.requestLock();
 });
 
 // Mute lives outside Controls because that only listens while pointer-locked,
@@ -671,6 +748,12 @@ function frame(now: number): void {
   fps = fps * 0.92 + (1 / Math.max(dt, 1e-4)) * 0.08;
 
   if (!playing) {
+    const orbit = now * 0.000012;
+    view.camera.position.set(Math.sin(orbit) * 100, 62, Math.cos(orbit) * 100);
+    view.camera.lookAt(0, 10, 0);
+    pieces.sync(conn.world, Date.now() / 1000);
+    pieces.updateVisibility(view.camera.position.x, view.camera.position.z);
+    critters.update(Date.now() / 1000, Date.now() / 1000);
     view.render();
     return;
   }
@@ -679,7 +762,7 @@ function frame(now: number): void {
   const self = conn.self;
   // Touch play never takes the pointer lock, so gating aim on it would make
   // aiming impossible on a phone.
-  const canAct = controls.isLocked || document.body.classList.contains("touch");
+  const canAct = !menuOpen && (controls.isLocked || document.body.classList.contains("touch"));
   const aiming = canAct && !controls.inBuildMode && controls.aiming;
 
   const distance=Math.hypot(self.x-renderSelf.x,self.y-renderSelf.y,self.z-renderSelf.z);
@@ -710,8 +793,9 @@ function frame(now: number): void {
     }, conn.world);
     if (target) {
       const issue=placementIssue(self,target,conn.world);
-      ghost.show(target,issue!==null||self.mats<10);
-      hud.setBuildReason(issue??(self.mats<10?'Not enough materials':''));
+      const unavailable = controls.slot === BUILD_SHIELD ? (self.shieldUsed ? 'Shield already used this round' : '') : (self.mats < MATERIALS[self.material].cost ? 'Not enough materials' : '');
+      ghost.show(target, issue !== null || !!unavailable);
+      hud.setBuildReason(issue ?? unavailable);
     } else {
       ghost.hide();
       hud.setBuildReason('Out of reach');
@@ -756,7 +840,7 @@ function frame(now: number): void {
     seen.add(pose.id);
     let ch = characters.get(pose.id);
     if (!ch) {
-      ch = new Character(SKINS[pose.id % 2].id, nameOf(pose.id));
+      ch = new Character(SKINS[pose.id % 2].id, nameOf(pose.id), models);
       view.scene.add(ch.root);
       characters.set(pose.id, ch);
     }
@@ -795,9 +879,7 @@ function frame(now: number): void {
   hud.setAmmo(weaponIdx, self.ammo, self.reloadMs > 0, controls.inBuildMode, self.mats,
     onShield, self.shieldUsed);
   hud.setShieldSpent(self.shieldUsed);
-  hud.setScore(matchPlayers, conn.selfId, scoreTarget);
   hud.updateCompass(self.x, self.z, controls.yaw);
-  hud.setScoreboard(matchPlayers, conn.selfId);
   hud.setNetStat(conn.rttMs, fps, conn.pendingInputCount, limiter.fpsTarget);
   if (!self.alive && respawnAtMs > 0) {
     const left = Math.max(0, (respawnAtMs - performance.now()) / 1000);
@@ -831,6 +913,7 @@ setInterval(() => {
   // Cap the catch-up: after a long stall we want to resync, not replay a
   // second of banked movement.
   while (tickAccumulator >= TICK_DT && steps < 6) {
+    if (menuOpen) controls.reset();
     if(conn.canAcceptInput) conn.pushInput(controls.sample());
     tickAccumulator -= TICK_DT;
     steps++;
@@ -840,6 +923,10 @@ setInterval(() => {
 
 requestAnimationFrame(frame);
 
+refreshStandings();
+document.getElementById("loading")!.remove();
+
 const volume=document.getElementById("volume") as HTMLInputElement;
 volume.value=localStorage.getItem("clutch.volume")??"0.6";
-volume.addEventListener("input",()=>sound.setVolume(Number(volume.value)));
+sound.setVolume(Number(volume.value));
+volume.addEventListener("input",()=>{ sound.setVolume(Number(volume.value)); localStorage.setItem("clutch.volume", volume.value); });

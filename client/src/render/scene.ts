@@ -119,6 +119,7 @@ export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Rende
 
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
   const landscape = createLandscape(scene, models);
+  const atmosphere = createAtmosphere(scene);
 
   // --- bloom ----------------------------------------------------------------
   //
@@ -168,6 +169,7 @@ export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Rende
       );
       sun.target.position.copy(camera.position);
       skySystem.update(clock.getDelta(), camera);
+      atmosphere.update(clock.getElapsedTime(), camera);
       if (bloomEnabled) composer.render();
       else renderer.render(scene, camera);
     },
@@ -179,6 +181,40 @@ export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Rende
       if (Math.abs(camera.fov - fov) < 0.01) return;
       camera.fov = fov;
       camera.updateProjectionMatrix();
+    },
+  };
+}
+
+/** A small pool of drifting motes gives the open spaces a sense of scale and
+ * life without adding object-heavy effects or network state. They are kept
+ * close to the camera so the effect reads in every district. */
+function createAtmosphere(scene: THREE.Scene): { update(time: number, camera: THREE.Camera): void } {
+  const count = 180;
+  const positions = new Float32Array(count * 3);
+  const seeds = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    seeds[i * 3] = (Math.random() - .5) * 150;
+    seeds[i * 3 + 1] = Math.random() * 28 + 1;
+    seeds[i * 3 + 2] = (Math.random() - .5) * 150;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({
+    color: 0xffe7a4, size: .055, sizeAttenuation: true,
+    transparent: true, opacity: .42, depthWrite: false,
+  });
+  const points = new THREE.Points(geometry, material);
+  points.frustumCulled = false;
+  scene.add(points);
+  return {
+    update(time, camera) {
+      for (let i = 0; i < count; i++) {
+        const j = i * 3;
+        positions[j] = camera.position.x + seeds[j] + Math.sin(time * .18 + i * 1.7) * 1.2;
+        positions[j + 1] = camera.position.y + seeds[j + 1] + Math.sin(time * .32 + i) * .35;
+        positions[j + 2] = camera.position.z + seeds[j + 2] + Math.cos(time * .16 + i * .9) * 1.2;
+      }
+      geometry.attributes.position.needsUpdate = true;
     },
   };
 }

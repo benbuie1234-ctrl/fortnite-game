@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import { unwrapTime } from '../shared/src/clock';
+import { Writer, Reader, PF_ALIVE, PF_GROUNDED, S_SNAPSHOT } from '../shared/src/protocol';
+import { writeSnapshot, readSnapshot } from '../shared/src/snapshot';
+import { newMovementState, stepPlayer, BTN_CROUCH, BTN_SPRINT } from '../shared/src/sim';
+import { World } from '../shared/src/world';
+const epoch=1_789_990_123_456;
+for(const delta of [-200,0,200])assert.equal(unwrapTime((epoch+delta)>>>0,epoch),epoch+delta);
+const wrap=Math.ceil(epoch/0x100000000)*0x100000000;
+assert.equal(unwrapTime((wrap+20)>>>0,wrap-20),wrap+20);
+assert.equal(unwrapTime((wrap-20)>>>0,wrap+20),wrap-20);
+const world=new World();const p=newMovementState();p.grounded=true;
+for(let i=0;i<90;i++)stepPlayer(p,{seq:i,moveX:0,moveZ:1,yaw:0,pitch:0,buttons:BTN_SPRINT,slot:2},world);
+for(let i=0;i<3;i++)stepPlayer(p,{seq:90+i,moveX:0,moveZ:1,yaw:0,pitch:0,buttons:BTN_CROUCH|BTN_SPRINT,slot:2},world);
+const w=new Writer(1024);writeSnapshot(w,{serverTimeMs:epoch,ackSeq:93,selfId:0,self:{...p,flags:PF_ALIVE|PF_GROUNDED,hp:100,shield:50,mats:500,weapon:0,ammo:30,buildSlot:0,material:0,reloadMs:0,stance:Math.round(p.crouch*255),stamina:Math.round(p.stamina/4*255),bloom:Math.round(p.bloom*255)},others:[],events:[]});
+const r=new Reader(w.finish());assert.equal(r.u8(),S_SNAPSHOT);const snap=readSnapshot(r);
+assert.ok(Math.abs(snap.self.slideLockout!-p.slideLockout)<1e-6);assert.equal(snap.self.crouchHeld,p.crouchHeld);assert.ok(Math.abs(snap.self.staminaIdle!-p.staminaIdle)<1e-6);assert.ok(Math.abs(snap.self.fallPeakY!-p.fallPeakY)<1e-6);
+const predicted={...p,...{slideLockout:snap.self.slideLockout!,crouchHeld:snap.self.crouchHeld!,staminaIdle:snap.self.staminaIdle!,fallPeakY:snap.self.fallPeakY!}};
+for(let i=0;i<30;i++){const cmd={seq:94+i,moveX:0,moveZ:1,yaw:0,pitch:0,buttons:BTN_CROUCH,slot:2};stepPlayer(p,cmd,world);stepPlayer(predicted,cmd,world);}
+assert.ok(Math.abs(predicted.z-p.z)<1e-5,'replaying a held crouch must not retrigger a slide');
+console.log('PASS: epoch reconstruction across clock wrap and authoritative slide/stamina replay state.');

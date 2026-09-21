@@ -1,21 +1,45 @@
 import { W_PICKAXE } from "@shared/weapons";
 import * as THREE from "three";
-import { PLAYER_HEIGHT } from "@shared/constants";
+import type { ModelLibrary } from "./models";
+import { PLAYER_HEIGHT, CROUCH_HEIGHT } from "@shared/constants";
 import { skinById, type SkinDef } from "@shared/skins";
 import { createWeaponModel, disposeWeaponModel } from "./weaponmodels";
 
 // Proportions, in metres, summing to PLAYER_HEIGHT. Deliberately blocky: it
 // reads clearly at distance, costs nothing to draw, and makes every skin a
 // recolour rather than a new asset.
-const LEG_H = 0.78;
-const TORSO_H = 0.62;
+export const LEG_H = 0.78;
+export const TORSO_H = 0.62;
 const HEAD_H = 0.34;
 const ARM_H = 0.56;
 
-/** How far the hip drops at a full crouch, and how far the torso leans over
- *  it. Together they take roughly the 0.65 m the collision capsule loses. */
-const LEG_DROP = 0.42;
-const CROUCH_LEAN = 0.5;
+/** The leg has a knee. THIGH_H + SHIN_H is LEG_H, so a straight leg is exactly
+ *  the leg it replaced and nothing else in the proportions has to move. */
+export const THIGH_H = 0.40;
+export const SHIN_H = LEG_H - THIGH_H;
+const FOOT_L = 0.26;
+
+/** Roughly how far the top of the skull sits above the shoulder line. Used to
+ *  work out how low the hip has to go for the crouched silhouette to fit
+ *  inside the collision capsule. */
+export const HEAD_RISE = 0.405;
+
+/** How far the torso leans forward at a full crouch. */
+export const CROUCH_LEAN = 0.62;
+
+/**
+ * Hip height at a full crouch.
+ *
+ * DERIVED, not chosen. A crouched player whose model is taller than their
+ * collision capsule shows a head that cannot be shot, which is worse than an
+ * ugly pose -- so the hip goes exactly as low as it needs to for the top of
+ * the skull to land on CROUCH_HEIGHT. Tuning the stance in constants.ts now
+ * moves the pose with it instead of silently desynchronising the two.
+ */
+export const CROUCH_HIP_Y = Math.max(
+  Math.abs(THIGH_H - SHIN_H) + 0.06, // below this the knee has nowhere to go
+  CROUCH_HEIGHT - Math.cos(CROUCH_LEAN) * TORSO_H - HEAD_RISE,
+);
 
 /**
  * One player's body. Built from boxes so there is no asset pipeline, no
@@ -23,11 +47,21 @@ const CROUCH_LEAN = 0.5;
  */
 export class Character {
   readonly root = new THREE.Group();
-  private legL: THREE.Mesh;
-  private legR: THREE.Mesh;
-  private armL: THREE.Mesh;
-  private armR: THREE.Mesh;
-  private torso: THREE.Mesh;
+  private mixer?: THREE.AnimationMixer;
+  private actions = new Map<string, THREE.AnimationAction>();
+  private currentAction?: THREE.AnimationAction;
+  /** Hip joints. The thigh hangs off these and the knee hangs off the thigh,
+   *  so one rotation at each joint folds the whole leg. */
+  private hipL: THREE.Group;
+  private hipR: THREE.Group;
+  private kneeL: THREE.Group;
+  private kneeR: THREE.Group;
+  /** Feet, kept level with the ground whatever the leg above them is doing. */
+  private footL: THREE.Group;
+  private footR: THREE.Group;
+  private armL: THREE.Object3D;
+  private armR: THREE.Object3D;
+  private torso: THREE.Object3D;
   private head: THREE.Group;
   private gun: THREE.Group;
   private gunModel: THREE.Group | null = null;
@@ -47,7 +81,7 @@ export class Character {
   private lastName = "";
   private materials: THREE.MeshStandardMaterial[] = [];
 
-  constructor(skinId: string, name: string) {
+  constructor(skinId: string, name: string, private models?: ModelLibrary) {
     const skin = skinById(skinId);
 
     const matPrimary = physical(skin.colors.primary);
@@ -57,11 +91,38 @@ export class Character {
     const matVisor = physical(skin.colors.visor, 0.25, 0.6);
     this.materials = [matPrimary, matSecondary, matAccent, matSkin, matVisor];
 
-    // --- legs: pivot at the hip so rotation swings the foot ---
-    this.legL = pivotBox(0.21, LEG_H, 0.21, matSecondary);
-    this.legL.position.set(-0.13, LEG_H, 0);
-    this.legR = pivotBox(0.21, LEG_H, 0.21, matSecondary);
-    this.legR.position.set(0.13, LEG_H, 0);
+    // --- legs: a hip, a thigh, a knee, a shin and a foot -------------------
+    //
+    // They used to be one box per leg, scaled down on the Y axis to crouch.
+    // That telescopes: the leg gets SHORTER rather than folding, so the whole
+    // body slides straight down and the pose reads as sinking through the
+    // floor rather than as crouching. A knee is the entire difference.
+    const leg = (side: number): [THREE.Group, THREE.Group, THREE.Group] => {
+      const hip = new THREE.Group();
+      hip.position.set(side * 0.13, LEG_H, 0);
+      hip.add(pivotBox(0.21, THIGH_H, 0.21, matSecondary));
+
+      const knee = new THREE.Group();
+      knee.position.y = -THIGH_H;
+      knee.add(pivotBox(0.19, SHIN_H, 0.19, matSecondary));
+
+      // A foot, so the leg has somewhere to end. Without one a folded leg
+      // stops in mid-air at the ankle and the character looks amputated. It
+      // gets its own group because it has to be counter-rotated back to level
+      // every frame -- an ankle that follows the shin points a deep crouch's
+      // toes at the floor.
+      const ankle = new THREE.Group();
+      ankle.position.y = -SHIN_H;
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.19, 0.09, FOOT_L), matAccent);
+      foot.position.set(0, 0.045, FOOT_L * 0.22);
+      ankle.add(foot);
+      knee.add(ankle);
+
+      hip.add(knee);
+      return [hip, knee, ankle];
+    };
+    [this.hipL, this.kneeL, this.footL] = leg(-1);
+    [this.hipR, this.kneeR, this.footR] = leg(1);
 
     // --- torso ---
     this.torso = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.22, TORSO_H, 6), matPrimary);
@@ -101,9 +162,10 @@ export class Character {
     this.muzzle.visible = false;
     this.gun.add(this.muzzle);
 
-    for (const m of [this.legL, this.legR, this.torso, this.armL, this.armR]) {
-      m.castShadow = true;
-      m.receiveShadow = true;
+    for (const node of [this.hipL, this.hipR, this.torso, this.armL, this.armR]) {
+      node.traverse((o) => {
+        if (o instanceof THREE.Mesh) { o.castShadow = true; o.receiveShadow = true; }
+      });
     }
     this.head.traverse((o) => {
       if (o instanceof THREE.Mesh) { o.castShadow = true; o.receiveShadow = true; }
@@ -123,9 +185,32 @@ export class Character {
     this.nameplate.renderOrder = 3;
 
     this.root.add(
-      this.legL, this.legR, this.torso, this.armL, this.armR,
+      this.hipL, this.hipR, this.torso, this.armL, this.armR,
       this.head, this.gun, this.nameplate,
     );
+    const art = models?.get("character");
+    if (art) {
+      const names = ["hipL", "hipR", "kneeL", "kneeR", "footL", "footR", "torso", "armL", "armR", "head"] as const;
+      if (names.every(n => art.getObjectByName(n))) {
+        for (const node of [this.hipL, this.hipR, this.torso, this.armL, this.armR, this.head]) {
+          this.root.remove(node);
+          node.traverse(n => { if (n instanceof THREE.Mesh) n.geometry.dispose(); });
+        }
+        for (const name of names) (this as unknown as Record<string, THREE.Object3D>)[name] = art.getObjectByName(name)!;
+        art.traverse(node => {
+          if (!(node instanceof THREE.Mesh)) return;
+          for (const mat of Array.isArray(node.material) ? node.material : [node.material]) {
+            if (mat instanceof THREE.MeshStandardMaterial) {
+              if (mat.name === "Armor") mat.color.setHex(skin.colors.primary);
+              if (mat.name === "Accent") mat.color.setHex(skin.colors.accent);
+            }
+          }
+        });
+        this.root.add(art);
+        this.mixer = new THREE.AnimationMixer(art);
+        for (const clip of models!.animations("character")) this.actions.set(clip.name, this.mixer.clipAction(clip));
+      }
+    }
     this.setNameplate(name);
   }
 
@@ -146,7 +231,9 @@ export class Character {
     this.gun.visible = id !== 255;
     if (!this.gun.visible) return;
 
-    this.gunModel = createWeaponModel(id);
+    const slots: Record<number, string> = { 0: "weapon_ar", 1: "weapon_shotgun", 2: "weapon_sniper", 3: "weapon_smg", 4: "weapon_pistol" };
+    const imported = this.models?.get(slots[id] as import("./models").ModelId);
+    this.gunModel = imported as THREE.Group | null ?? createWeaponModel(id);
     this.gun.add(this.gunModel);
   }
   fire():void { this.kick=this.weaponId===W_PICKAXE?.35:.09; }
@@ -209,6 +296,13 @@ export class Character {
     speed: number, grounded: boolean, dt: number,
     crouchTarget = 0,
   ): void {
+    const next = this.actions.get(!grounded ? "jump" : speed > .5 ? "run" : "idle");
+    if (next && next !== this.currentAction) {
+      next.reset().fadeIn(.18).play();
+      this.currentAction?.fadeOut(.18);
+      this.currentAction = next;
+    }
+    this.mixer?.update(dt);
     // Track the stance. The simulation already shrinks the collision capsule
     // and drops the eye; without this the model stayed bolt upright, so
     // crouching looked like it did nothing at all.
@@ -233,39 +327,48 @@ export class Character {
     }
 
     const swing = moving && grounded ? Math.sin(this.phase) * Math.min(0.85, speed * 0.13) : 0;
-    this.legL.rotation.x = swing;
-    this.legR.rotation.x = -swing;
     this.armL.rotation.x = -1.05-pitch*.8-swing*.1;
     this.armR.rotation.x = -.8-pitch*.8+swing*.1;
-
-    if (!grounded) {
-      // Tuck in the air so a jump is legible from across the map.
-      this.legL.rotation.x = -0.5;
-      this.legR.rotation.x = -0.25;
-      this.armL.rotation.x = -0.9;
-    }
 
     // Idle breathing, and a slight bob while running.
     const bob = moving && grounded ? Math.abs(Math.sin(this.phase)) * 0.035 : Math.sin(this.phase * 0.5) * 0.012;
 
     // --- crouch pose ---------------------------------------------------------
     //
-    // Fold the legs and drop the hip, then lean the torso over it. Legs alone
-    // would leave a standing torso hovering lower; the lean is what makes the
+    // Drop the hip and let the knee take up the slack, then lean the torso
+    // over it. The legs fold; they do not shrink. The lean is what makes the
     // silhouette read as a crouch from across the map, which is the whole
     // point of a stance that also shrinks your hitbox.
-    const hipDrop = crouch * LEG_DROP;
-    const hipY = LEG_H - hipDrop;
-    const legScale = hipY / LEG_H;
+    const hipY = LEG_H + (CROUCH_HIP_Y - LEG_H) * crouch;
     const lean = crouch * CROUCH_LEAN;
 
-    this.legL.position.y = hipY;
-    this.legR.position.y = hipY;
-    this.legL.scale.y = legScale;
-    this.legR.scale.y = legScale;
-    // Knees splay forward as they fold, so the legs do not simply shrink.
-    this.legL.rotation.x += crouch * 0.55;
-    this.legR.rotation.x += crouch * 0.55;
+    // Where the foot has to end up, measured from the hip. Straight down while
+    // standing; as the hip falls the same foot is closer, and the knee bends by
+    // however much that costs.
+    const { hipBend, kneeBend } = legPose(hipY);
+    const left = walkingLegPose(hipY, swing);
+    const right = walkingLegPose(hipY, -swing);
+
+    this.hipL.position.y = hipY;
+    this.hipR.position.y = hipY;
+    // A positive rotation about X swings the limb BACKWARD (the model faces
+    // +Z), so the forward reach of the knee is negative.
+    this.hipL.rotation.x = left.hip;
+    this.hipR.rotation.x = right.hip;
+    // The trailing leg lifts its heel, which is most of what sells a walk.
+    this.kneeL.rotation.x = left.knee;
+    this.kneeR.rotation.x = right.knee;
+    this.levelFeet();
+
+    if (!grounded) {
+      // Tuck in the air so a jump is legible from across the map.
+      this.hipL.rotation.x = -0.5 - hipBend * 0.4;
+      this.hipR.rotation.x = -0.25 - hipBend * 0.4;
+      this.kneeL.rotation.x = Math.max(kneeBend, 0.95);
+      this.kneeR.rotation.x = Math.max(kneeBend, 0.55);
+      this.armL.rotation.x = -0.9;
+      this.levelFeet();
+    }
 
     this.torso.rotation.x = lean;
     this.torso.position.y = hipY + Math.cos(lean) * TORSO_H / 2 + bob;
@@ -278,7 +381,7 @@ export class Character {
     const shoulderY = hipY + Math.cos(lean) * TORSO_H + bob;
     const shoulderZ = Math.sin(lean) * TORSO_H;
 
-    this.head.rotation.x = -pitch * 0.55 - lean * 0.6;
+    this.head.rotation.x = -pitch * 0.55;
     this.head.position.y = shoulderY;
     this.head.position.z = shoulderZ;
 
@@ -291,7 +394,15 @@ export class Character {
     this.nameplate.position.y = shoulderY + HEAD_H + 0.45;
   }
 
+  /** Cancel the leg's accumulated pitch at the ankle, so the sole stays
+   *  parallel to the ground however far the knee has folded. */
+  private levelFeet(): void {
+    this.footL.rotation.x = -(this.hipL.rotation.x + this.kneeL.rotation.x);
+    this.footR.rotation.x = -(this.hipR.rotation.x + this.kneeR.rotation.x);
+  }
+
   dispose(scene: THREE.Scene): void {
+    this.mixer?.stopAllAction();
     scene.remove(this.root);
     this.root.traverse((o) => {
       if (o instanceof THREE.Mesh) o.geometry.dispose();
@@ -306,6 +417,40 @@ export class Character {
  * Under the sky environment map that difference is visible, which is most of
  * what stops a character looking like flat painted cardboard.
  */
+/**
+ * Fold a leg so its foot lands on the ground with the hip at `hipY`.
+ *
+ * A plain two-link solve. `hipBend` is how far the thigh swings forward off
+ * the straight hip-to-foot line, `kneeBend` how far the shin folds back under
+ * it; applying one at the hip and the other at the knee puts the ankle
+ * directly below the hip at y = 0 for any reachable hip height.
+ *
+ * Exported because it is the only real maths in this file and it is what
+ * decides whether a crouching player's feet end up through the floor. See
+ * tests/crouch.test.ts.
+ */
+export function legPose(hipY: number): { hipBend: number; kneeBend: number } {
+  // clamp() absorbs the floating-point overshoot at full extension, so reach
+  // needs no epsilon of its own at the top -- and must not have one, or a
+  // standing leg carries a permanent degree and a half of knee bend.
+  const reach = Math.max(Math.abs(THIGH_H - SHIN_H) + 1e-3, Math.min(LEG_H, hipY));
+  return {
+    hipBend: Math.acos(clamp(
+      (THIGH_H * THIGH_H + reach * reach - SHIN_H * SHIN_H) / (2 * THIGH_H * reach))),
+    kneeBend: Math.PI - Math.acos(clamp(
+      (THIGH_H * THIGH_H + SHIN_H * SHIN_H - reach * reach) / (2 * THIGH_H * SHIN_H))),
+  };
+}
+
+export function walkingLegPose(hipY: number, swing: number): { hip: number; knee: number } {
+  const { hipBend, kneeBend } = legPose(hipY);
+  return { hip: swing - hipBend, knee: kneeBend + Math.max(0, swing) * 0.9 };
+}
+
+function clamp(v: number): number {
+  return v < -1 ? -1 : v > 1 ? 1 : v;
+}
+
 function physical(color: number, roughness = 0.72, metalness = 0): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     color, roughness, metalness, envMapIntensity: 0.9,

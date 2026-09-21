@@ -76,7 +76,7 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  // A real tree model replaces the box-and-cones version. Same placement data
  // either way, so the fallback and the upgrade always agree on where trees are.
  const treeModel=models?.get('tree');
- const treeInstances=treeModel?new InstancedModel(treeModel,treeList.length):null;
+ const treeInstances=treeModel?new InstancedModel(treeModel,treeList.length,true):null;
  if(treeInstances?.valid) {
   treeList.forEach((p,i)=>{
    matrix.position.set(p.x,p.y,p.z);
@@ -90,7 +90,10 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  }
 
  const useProceduralTrees=!treeInstances?.valid;
- if(useProceduralTrees) treeList.forEach((p,i)=>{
+ const rockModel=models?.get("rock"),crateModel=models?.get("crate");
+ const rockInstances=rockModel?new InstancedModel(rockModel,rockList.length):null;
+ const crateInstances=crateModel?new InstancedModel(crateModel,PROPS.length):null;
+ treeList.forEach((p,i)=>{
    matrix.position.set(p.x,p.y+p.size/2,p.z);matrix.scale.set(1,p.size,1);matrix.updateMatrix();trunks.setMatrixAt(i,matrix.matrix);trunks.setColorAt(i,new THREE.Color(0x806445));
    matrix.position.set(p.x,p.y+treePerchHeight(p.size)+TREE_PERCH_THICKNESS/2,p.z);matrix.scale.set(1,1,1);matrix.updateMatrix();
    branches.setMatrixAt(i,matrix.matrix);branches.setColorAt(i,new THREE.Color(0x6a5238));
@@ -109,11 +112,18 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
    }
    matrix.rotation.set(0,0,0);
  });
- rockList.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.size*.2,p.z);matrix.scale.set(p.size*.62,p.size*.5,p.size*.62);matrix.rotation.set(i*.7%1.2,i*2.1%(Math.PI*2),i*.4%.9);matrix.updateMatrix();rocks.setMatrixAt(i,matrix.matrix);rocks.setColorAt(i,new THREE.Color(i%2?0x8d9aa0:0x9aa49c));});matrix.rotation.set(0,0,0);
- PROPS.forEach((p,i)=>{matrix.position.set(p.x,p.y+p.h/2,p.z);matrix.scale.set(p.w,p.h,p.d);matrix.updateMatrix();props.setMatrixAt(i,matrix.matrix);props.setColorAt(i,new THREE.Color(p.color));});
- // Rocks always use the procedural boxes; trunks and leaves only when no
- // tree model was supplied, or they would be drawn on top of the real trees.
- for(const batch of (useProceduralTrees?[trunks,leaves,branches,rocks,props]:[rocks,props])){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
+ rockList.forEach((p,i)=>{
+  matrix.position.set(p.x,p.y,p.z);matrix.scale.set(p.size*.6,p.size*.5,p.size*.6);matrix.rotation.set(0,0,0);matrix.updateMatrix();
+  if(rockInstances?.valid) rockInstances.setMatrixAt(i,matrix.matrix);
+  else { matrix.position.y+=p.size*.2;matrix.updateMatrix();rocks.setMatrixAt(i,matrix.matrix);rocks.setColorAt(i,new THREE.Color(0x8d9aa0)); }
+ });
+ PROPS.forEach((p,i)=>{
+  matrix.position.set(p.x,p.y,p.z);matrix.scale.set(p.w,p.h,p.d);matrix.updateMatrix();
+  if(crateInstances?.valid)crateInstances.setMatrixAt(i,matrix.matrix);
+  else {matrix.position.y+=p.h/2;matrix.updateMatrix();props.setMatrixAt(i,matrix.matrix);props.setColorAt(i,new THREE.Color(p.color));}
+ });
+ rockInstances?.addTo(scene);crateInstances?.addTo(scene);
+ for(const batch of [branches,...(useProceduralTrees?[trunks,leaves]:[]),...(!rockInstances?.valid?[rocks]:[]),...(!crateInstances?.valid?[props]:[])]){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
  const size=MAP_HALF*2;
  const ground=new THREE.PlaneGeometry(size,size,240,240);ground.rotateX(-Math.PI/2);
  const positions=ground.getAttribute('position');const colors=[];
@@ -129,6 +139,18 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  const terrain=new THREE.Mesh(ground,new THREE.MeshStandardMaterial({vertexColors:true,map:detail,roughness:0.95,metalness:0,envMapIntensity:0.9}));terrain.receiveShadow=true;scene.add(terrain);
  const water=new THREE.Mesh(new THREE.CircleGeometry(1,64),new THREE.MeshStandardMaterial({color:0x53b6c8,transparent:true,opacity:.78,roughness:0.08,metalness:0.25,envMapIntensity:1.4}));
  water.rotation.x=-Math.PI/2;water.scale.set(LAKE_SHAPE.rx,LAKE_SHAPE.rz,1);water.position.set(LAKE_SHAPE.x,LAKE_SURFACE,LAKE_SHAPE.z);scene.add(water);
+ // Concentric, translucent ripples break up the single-color lake surface and
+ // catch the sun as the player approaches the shoreline.
+ for (let i = 0; i < 7; i++) {
+  const ripple = new THREE.Mesh(
+   new THREE.RingGeometry(.72 + i * .08, .735 + i * .08, 64),
+   new THREE.MeshBasicMaterial({ color: i % 2 ? 0x9de4dc : 0x3b9eb2, transparent: true, opacity: .12, side: THREE.DoubleSide, depthWrite: false }),
+  );
+  ripple.rotation.x = -Math.PI / 2;
+  ripple.position.set(LAKE_SHAPE.x + (i - 3) * 4.5, LAKE_SURFACE + .012, LAKE_SHAPE.z + Math.sin(i * 2.3) * 7);
+  ripple.scale.set(6 + i * 1.8, 3.2 + i * 1.1, 1);
+  scene.add(ripple);
+ }
  // Roads are tessellated to follow the actual shared terrain, including the ridge ascent.
  function road(x1:number,z1:number,x2:number,z2:number,width:number,color:number):void {
   const length=Math.hypot(x2-x1,z2-z1),nx=-(z2-z1)/length*width/2,nz=(x2-x1)/length*width/2;
@@ -183,14 +205,15 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  return {
   setTreeAlpha(sceneryIndex,alpha) {
    const slot=treeSlotBySceneryIndex.get(sceneryIndex);
-   if(slot===undefined||!useProceduralTrees)return;
+   if(slot===undefined)return;
+   treeInstances?.setAlphaAt(slot, Math.max(.08, Math.min(1, alpha)));
    const clamped=Math.max(0.12,Math.min(1,alpha));
    if(trunkAlpha.getX(slot)===clamped)return;
    trunkAlpha.setX(slot,clamped);trunkAlpha.needsUpdate=true;
    branchAlpha.setX(slot,clamped);branchAlpha.needsUpdate=true;
    // Leaves fade harder than the trunk: the canopy is what blocks the view,
    // and a trunk you can see straight through reads as a bug rather than cover.
-   for(let tier=0;tier<3;tier++)leafAlpha.setX(slot*3+tier,Math.max(0.08,clamped*0.72));
+   for(let tier=0;tier<3;tier++)leafAlpha.setX(slot*3+tier,clamped === 1 ? 1 : Math.max(0.08,clamped*0.72));
    leafAlpha.needsUpdate=true;
   },
  };

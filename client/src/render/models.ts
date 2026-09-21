@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 
 /**
  * Optional 3D models, loaded from `client/public/models/`.
@@ -23,7 +25,7 @@ import * as THREE from "three";
 
 /** Logical slots the game knows how to use. Anything else is ignored. */
 export type ModelId =
-  | "tree" | "rock" | "house" | "crate" | "barrel"
+  | "tree" | "rock" | "house" | "crate" | "barrel" | "grass" | "character"
   | "weapon_ar" | "weapon_shotgun" | "weapon_sniper" | "weapon_smg" | "weapon_pistol";
 
 interface Manifest {
@@ -43,6 +45,8 @@ const MODELS_PATH = "/models";
 
 export class ModelLibrary {
   private items = new Map<ModelId, THREE.Object3D>();
+  private clips = new Map<ModelId, THREE.AnimationClip[]>();
+  animations(id: ModelId): THREE.AnimationClip[] { return this.clips.get(id) ?? []; }
 
   constructor(private manifest: Manifest = {}) {}
 
@@ -53,6 +57,12 @@ export class ModelLibrary {
     const source = this.items.get(id);
     if (!source) return null;
     const clone = source.clone(true);
+    if (id === "character" || id.startsWith("weapon_")) clone.traverse(node => {
+      if (node instanceof THREE.Mesh) {
+        node.geometry = node.geometry.clone();
+        node.material = Array.isArray(node.material) ? node.material.map(m => m.clone()) : node.material.clone();
+      }
+    });
     // Clone shares geometry and materials, which is what we want -- the cost
     // of an extra instance is a transform, not another copy of the mesh.
     return clone;
@@ -61,14 +71,36 @@ export class ModelLibrary {
   /** Count of slots actually filled, for logging and the loading indicator. */
   get size(): number { return this.items.size; }
 
-  set(id: ModelId, object: THREE.Object3D): void {
+  set(id: ModelId, object: THREE.Object3D, animations: THREE.AnimationClip[] = []): void {
+    this.clips.set(id, animations);
     const scale = this.manifest.scale?.[id] ?? 1;
     const offsetY = this.manifest.offsetY?.[id] ?? 0;
 
     // Normalise into a wrapper so callers can scale and position the wrapper
     // without fighting whatever transform the artist baked into the file.
     const wrapper = new THREE.Group();
-    object.scale.setScalar(scale);
+    // Normalize art once to the dimensions expected by collision and placement.
+    if (id !== "character") {
+      object.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(object);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      if (id.startsWith("weapon_")) {
+        const length = id === "weapon_sniper" ? 1.1 : id === "weapon_ar" ? .86 : id === "weapon_shotgun" ? .72 : .55;
+        const factor = length / Math.max(.001, size.z);
+        object.scale.multiplyScalar(factor);
+        object.position.set(-center.x * factor, -center.y * factor, -box.min.z * factor - length * .3);
+      } else if (id === "rock" || id === "crate") {
+        object.scale.set(1 / Math.max(.001,size.x), 1 / Math.max(.001,size.y), 1 / Math.max(.001,size.z));
+        object.position.set(-center.x / size.x, -box.min.y / size.y, -center.z / size.z);
+      } else {
+        const height = id === "tree" ? 3.6 : .35;
+        const factor = height / Math.max(.001,size.y);
+        object.scale.multiplyScalar(factor);
+        object.position.set(-center.x * factor, -box.min.y * factor, -center.z * factor);
+      }
+    }
+    object.scale.multiplyScalar(scale);
     object.position.y += offsetY;
     wrapper.add(object);
 
@@ -112,10 +144,10 @@ function toPhysical(material: THREE.Material): THREE.Material {
  * missing manifest, a missing file or a corrupt file all resolve to "that slot
  * keeps its procedural fallback".
  */
-export async function loadModels(): Promise<ModelLibrary> {
+export async function loadModels(progress?: (loaded: number, total: number) => void): Promise<ModelLibrary> {
   let manifest: Manifest;
   try {
-    const res = await fetch(`${MODELS_PATH}/manifest.json`, { cache: "no-cache" });
+    const res = await fetch(`${MODELS_PATH}/manifest.json`, { cache: "no-cache", signal: AbortSignal.timeout(8000) });
     if (!res.ok) return new ModelLibrary();
     manifest = (await res.json()) as Manifest;
   } catch {
@@ -132,16 +164,24 @@ export async function loadModels(): Promise<ModelLibrary> {
   // bundle size and nobody pays for a feature they are not using.
   const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
   const loader = new GLTFLoader();
+  const draco = new DRACOLoader().setDecoderPath("/decoders/draco/");
+  loader.setDRACOLoader(draco);
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  let completed = 0;
+  progress?.(0, entries.length);
   await Promise.all(entries.map(async ([id, file]) => {
     try {
-      const gltf = await loader.loadAsync(`${MODELS_PATH}/${file}`);
-      library.set(id, gltf.scene);
+      const response = await fetch(`${MODELS_PATH}/${file}`, { signal: AbortSignal.timeout(12000) });
+      if (!response.ok) throw new Error(`Model HTTP ${response.status}`);
+      const gltf = await loader.parseAsync(await response.arrayBuffer(), `${MODELS_PATH}/`);
+      library.set(id, gltf.scene, gltf.animations);
     } catch {
       // One bad file must not take the rest of the art down with it.
       console.warn(`[models] could not load "${file}" for "${id}"; using the built-in shape`);
-    }
+    } finally { progress?.(++completed, entries.length); }
   }));
 
+  draco.dispose();
   return library;
 }
 
@@ -160,14 +200,25 @@ export async function loadModels(): Promise<ModelLibrary> {
 export class InstancedModel {
   private parts: THREE.InstancedMesh[] = [];
 
-  constructor(model: THREE.Object3D, count: number) {
+  constructor(model: THREE.Object3D, count: number, fade = false) {
     model.updateWorldMatrix(true, true);
     model.traverse((node) => {
       if (!(node instanceof THREE.Mesh)) return;
       const geometry = node.geometry.clone();
       // Bake the sub-mesh's position within the model into its vertices.
       geometry.applyMatrix4(node.matrixWorld);
-      const material = Array.isArray(node.material) ? node.material[0] : node.material;
+      const material = Array.isArray(node.material) ? node.material.map(m => m.clone()) : node.material.clone();
+      if (fade) {
+        geometry.setAttribute("instanceAlpha", new THREE.InstancedBufferAttribute(new Float32Array(count).fill(1), 1));
+        for (const m of Array.isArray(material) ? material : [material]) {
+          m.transparent = true;
+          m.onBeforeCompile = (shader: THREE.WebGLProgramParametersWithUniforms) => {
+            shader.vertexShader = "attribute float instanceAlpha; varying float vInstanceAlpha;\n" + shader.vertexShader.replace("void main() {", "void main() { vInstanceAlpha = instanceAlpha;");
+            shader.fragmentShader = "varying float vInstanceAlpha;\n" + shader.fragmentShader.replace("#include <dithering_fragment>", "#include <dithering_fragment>\ngl_FragColor.a *= vInstanceAlpha;");
+          };
+          m.customProgramCacheKey = () => "instance-fade-v1";
+        }
+      }
       const inst = new THREE.InstancedMesh(geometry, material, count);
       inst.castShadow = true;
       inst.receiveShadow = true;
@@ -184,6 +235,13 @@ export class InstancedModel {
   /** Per-instance tint, for colour variation across a forest. */
   setColorAt(index: number, color: THREE.Color): void {
     for (const part of this.parts) part.setColorAt(index, color);
+  }
+
+  setAlphaAt(index: number, alpha: number): void {
+    for (const part of this.parts) {
+      const a = part.geometry.getAttribute("instanceAlpha");
+      if (a && a.getX(index) !== alpha) { a.setX(index, alpha); a.needsUpdate = true; }
+    }
   }
 
   addTo(scene: THREE.Scene): void {

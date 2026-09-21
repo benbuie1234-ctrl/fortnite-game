@@ -488,6 +488,8 @@ export class MatchRoom implements DurableObject {
           stance: Math.round(me.crouch * 255),
           stamina: Math.round((me.stamina / SPRINT_STAMINA_MAX) * 255),
           bloom: Math.round(me.bloom * 255),
+          slideLockout: me.slideLockout, crouchHeld: me.crouchHeld,
+          fallPeakY: me.fallPeakY, staminaIdle: me.staminaIdle,
         },
         others,
         events: this.events,

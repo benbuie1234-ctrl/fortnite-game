@@ -274,6 +274,18 @@ export class Controls {
 
   selectMaterialPublic(material: number): void { this.selectMaterial(material); }
 
+  reset(): void {
+    this.keys.clear();
+    this.mouseDown = this.rightDown = false;
+    this.touchFire = this.touchAim = this.touchJump = false;
+    this.touchFireEdge = this.touchJumpEdge = false;
+    this.touchCrouch = this.touchSprint = false;
+    this.touchMoveX = this.touchMoveZ = 0;
+    this.edgeReload = this.edgeReset = false;
+    this.slotOverrides.length = 0;
+    this.setScoreboard(false);
+  }
+
   requestLock(): void {
     // Returns a promise in current browsers, and rejects when the document is
     // not eligible (embedded frames, or a second request too soon after exit).
@@ -286,10 +298,7 @@ export class Controls {
       this.locked = document.pointerLockElement === this.canvas;
       if (!this.locked) {
         // Never leave a key stuck down when focus is lost mid-strafe.
-        this.keys.clear();
-        this.mouseDown = false;
-        this.rightDown = false;
-        this.setScoreboard(false);
+        this.reset();
       }
       this.opts.onPointerLockChange(this.locked);
     });
@@ -307,7 +316,7 @@ export class Controls {
     document.addEventListener("mousedown", (e) => {
       if (!this.locked) return;
       e.preventDefault();
-      if (e.button === 0) this.mouseDown = true;
+      if (e.button === 0) { this.mouseDown = true; this.touchFireEdge = true; }
       if (e.button === 2) this.rightDown = true;
     });
     document.addEventListener("mouseup", (e) => {
@@ -340,6 +349,7 @@ export class Controls {
       // Stop the browser scrolling or quick-finding under the game.
       if (["Space", "Tab", "Slash", "Quote"].includes(e.code)) e.preventDefault();
       if (e.code === "Tab") { this.setScoreboard(true); return; }
+      if (e.code === this.binds.jump && !e.repeat) this.touchJumpEdge = true;
       this.keys.add(e.code);
       this.handleSelection(e.code);
     });
@@ -349,10 +359,7 @@ export class Controls {
     });
 
     window.addEventListener("blur", () => {
-      this.keys.clear();
-      this.mouseDown = false;
-      this.rightDown = false;
-      this.setScoreboard(false);
+      this.reset();
     });
   }
 

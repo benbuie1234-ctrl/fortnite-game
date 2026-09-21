@@ -34,7 +34,6 @@ export class Hud {
   private ammoEl = el("ammo");
   private slotsEl = el("slots");
   private killfeedEl = el("killfeed");
-  private scoreEl = el("score");
   private centerMsg = el("centerMsg");
   private damageFlash = el("damageFlash");
   private hitmarker = el("hitmarker");
@@ -54,13 +53,14 @@ export class Hud {
   onSlotTapped: ((slot: number) => void) | null = null;
   onMaterialTapped: ((material: number) => void) | null = null;
   private compass = el("compass");
-  private scoreboard = el("scoreboard");
   private compassTicks: HTMLElement[] = [];
   private compassPips: HTMLElement[] = [];
   /** World-space gunshots still worth showing, with their expiry. Stored as
    *  positions, not bearings: a bearing goes stale the moment you turn. */
   private gunshots: Array<{ x: number; z: number; until: number }> = [];
   private slotNodes: HTMLElement[] = [];
+  /** Kills needed to take a round, for the standings footer. */
+  scoreTarget = 0;
   private buildReason='';
   setBuildReason(reason:string):void {this.buildReason=reason;}
   private flashUntil = 0;
@@ -174,28 +174,6 @@ export class Hud {
   // -------------------------------------------------------------------------
   // Scoreboard
   // -------------------------------------------------------------------------
-
-  setScoreboardOpen(open: boolean): void {
-    this.scoreboard.classList.toggle("open", open);
-  }
-
-  setScoreboard(players: MatchPlayerInfo[], selfId: number): void {
-    if (!this.scoreboard.classList.contains("open")) return;
-    const sorted = [...players].sort(
-      (a, b) => (b.wins ?? 0) - (a.wins ?? 0) || b.kills - a.kills || a.deaths - b.deaths,
-    );
-    const rows = sorted.map((p) => {
-      const me = p.id === selfId ? ' class="me"' : "";
-      return `<tr${me}><td>${escapeHtml(p.name)}</td>` +
-        `<td class="num">${p.wins ?? 0}</td>` +
-        `<td class="num">${p.kills}</td>` +
-        `<td class="num">${p.deaths}</td>` +
-        `<td class="num">${p.ping ?? 0} ms</td></tr>`;
-    }).join("");
-    el("scoreTable").innerHTML =
-      `<tr><th>PLAYER (${players.length} ONLINE)</th><th class="num">WINS</th>` +
-      `<th class="num">KILLS</th><th class="num">DEATHS</th><th class="num">PING</th></tr>${rows}`;
-  }
 
   setStructure(piece:Piece|null,now:number):void {
     const box=el("structureHealth");
@@ -356,17 +334,6 @@ export class Hud {
     this.ammoEl.innerHTML = `${Math.max(0, ammo)}<small> / ${weapon.magSize}</small>`;
   }
 
-  setScore(players: MatchPlayerInfo[], selfId: number, target: number): void {
-    if (players.length === 0) { this.scoreEl.innerHTML = ""; return; }
-    const sorted = [...players].sort((a, b) => b.kills - a.kills);
-    this.scoreEl.innerHTML = sorted
-      .map((p) => {
-        const me = p.id === selfId ? ' style="color:var(--accent)"' : "";
-        return `<div class="p"${me}><span>${escapeHtml(p.name)}</span><b>${p.kills}</b></div>`;
-      })
-      .join('<span class="sep">·</span>') + `<span class="sep">first to ${target}</span>`;
-  }
-
   addKillFeed(text: string, involvesMe: boolean): void {
     const node = document.createElement("div");
     node.className = "kf";
@@ -429,6 +396,40 @@ export class Hud {
       this.hitUntil = 0;
     }
   }
+}
+
+/**
+ * The standings, as one table.
+ *
+ * Shared between the in-game overlay and the panel on the menu so the two
+ * cannot drift into showing different things. Sorted by wins, then kills, then
+ * fewest deaths -- the order that answers "who is winning" rather than "who
+ * shot most recently".
+ */
+export function standingsTable(
+  players: MatchPlayerInfo[], selfId: number, target = 0,
+): string {
+  if (players.length === 0) {
+    return '<tr><th>PLAYER</th></tr><tr><td class="empty">Nobody here yet</td></tr>';
+  }
+  // The win condition used to live in the score strip across the top of the
+  // playfield. With that gone it has to be somewhere, and the table that says
+  // how many kills everyone has is the obvious place to say how many win.
+  const goal = target > 0 ? `<td class="num goal" colspan="5">First to ${target} kills wins the round</td>` : "";
+  const sorted = [...players].sort(
+    (a, b) => (b.wins ?? 0) - (a.wins ?? 0) || b.kills - a.kills || a.deaths - b.deaths,
+  );
+  const rows = sorted.map((p) => {
+    const me = p.id === selfId ? ' class="me"' : "";
+    return `<tr${me}><td>${escapeHtml(p.name)}</td>` +
+      `<td class="num">${p.wins ?? 0}</td>` +
+      `<td class="num">${p.kills}</td>` +
+      `<td class="num">${p.deaths}</td>` +
+      `<td class="num">${p.ping ?? 0} ms</td></tr>`;
+  }).join("");
+  return `<tr><th>PLAYER (${players.length} ONLINE)</th><th class="num">WINS</th>` +
+    `<th class="num">KILLS</th><th class="num">DEATHS</th><th class="num">PING</th></tr>` +
+    `${rows}${goal ? `<tr class="goal">${goal}</tr>` : ""}`;
 }
 
 function escapeHtml(s: string): string {

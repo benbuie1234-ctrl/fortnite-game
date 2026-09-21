@@ -25,6 +25,10 @@ export interface SelfState {
    *  the server builds the cone from it, so a drifting local copy would mean
    *  the crosshair size and the actual spread disagreed. */
   bloom: number;
+  slideLockout?: number;
+  crouchHeld?: boolean;
+  fallPeakY?: number;
+  staminaIdle?: number;
 }
 
 /** Everyone else, quantised. They are interpolated, so 3 cm is invisible. */
@@ -79,6 +83,11 @@ export function writeSnapshot(w: Writer, s: Snapshot): void {
   w.u8(Math.max(0, Math.min(255, Math.round(self.stance))));
   w.u8(Math.max(0, Math.min(255, Math.round(self.stamina))));
   w.u8(Math.max(0, Math.min(255, Math.round(self.bloom))));
+
+  w.f32(self.slideLockout ?? 0);
+  w.u8(self.crouchHeld ? 1 : 0);
+  w.f32(self.fallPeakY ?? self.y);
+  w.f32(self.staminaIdle ?? 0);
 
   w.u8(s.others.length);
   for (const o of s.others) {
@@ -149,6 +158,8 @@ export function readSnapshot(r: Reader): Snapshot {
     stance: r.u8(),
     stamina: r.u8(),
     bloom: r.u8(),
+    slideLockout: r.f32(), crouchHeld: r.u8() !== 0,
+    fallPeakY: r.f32(), staminaIdle: r.f32(),
   };
   if (self.ammo === 0xffff) self.ammo = Infinity;
 

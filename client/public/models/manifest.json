@@ -1,0 +1,13 @@
+{
+  "models": {
+    "tree": "tree.glb",
+    "rock": "rock.glb",
+    "grass": "grass.glb",
+    "weapon_ar": "weapon_ar.glb",
+    "weapon_shotgun": "weapon_shotgun.glb",
+    "weapon_smg": "weapon_smg.glb",
+    "weapon_sniper": "weapon_sniper.glb",
+    "crate": "crate.glb",
+    "character": "ranger.glb"
+  }
+}

@@ -3,7 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Clutch</title>
+<title>Clutch · Build. Battle. Repeat.</title>
+<link rel="icon" type="image/svg+xml" href="/icon.svg">
+
 <style>
   :root {
     --bg: #0d1017;
@@ -182,16 +184,6 @@
   @keyframes kfin { from { opacity: 0; transform: translateX(14px); } }
   .kf .me { color: var(--accent); font-weight: 700; }
 
-  #score {
-    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
-    display: flex; gap: 10px; align-items: center;
-    background: rgba(12,16,24,.82); border: 1px solid var(--line);
-    border-radius: 9px; padding: 8px 16px; font-size: 13px;
-  }
-  #score .p { display: flex; gap: 7px; align-items: center; }
-  #score .p b { font-size: 17px; }
-  #score .sep { color: var(--muted); }
-
   #centerMsg {
     position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%);
     text-align: center; font-size: 34px; font-weight: 800;
@@ -242,10 +234,9 @@ summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#1
 #buildSlots {position:absolute;right:24px;bottom:99px;display:flex;gap:5px;} #buildSlots .slot {width:43px;height:47px;font-size:9px;} #buildSlots .ico {font-size:20px;height:20px;margin-top:3px;} #buildSlots .k {font-size:8px;}
 .mats {right:24px;bottom:152px;gap:4px;} .mat {min-width:35px;padding:5px;font-size:12px;border-radius:4px;} .mat small {font-size:8px;}
 #ammo {bottom:206px;font-size:32px;} #ammo small {color:#dfebf7;}
-#score {max-width:70%;flex-wrap:wrap;justify-content:center;border:0;border-radius:4px;font-size:11px;background:#10243de0;} #score .p b {font-size:18px;}
-#killfeed {top:82px;font-size:11px;max-width:45%;} #netstat {top:65px;} #roomBadge {position:absolute;top:24px;left:24px;font-size:11px;letter-spacing:1px;color:#def3ff;} #helpBadge {position:absolute;left:24px;bottom:132px;font-size:10px;color:#d4e5ef;text-shadow:0 1px 4px black;}
+#killfeed {top:82px;font-size:11px;max-width:45%;} #netstat {top:65px;} #roomBadge {position:absolute;top:24px;left:24px;font-size:11px;letter-spacing:1px;color:#def3ff;} #helpBadge {position:absolute;left:24px;bottom:132px;font-size:10px;color:#d4e5ef;text-shadow:0 1px 4px black;transition:opacity 1.2s ease;}
 #buildPreview {bottom:244px;background:#10243dbb;padding:5px 10px;border-radius:4px;} #centerMsg .sub {color:#eef5ff;}
-@media(max-width:700px) {.vitals {bottom:185px;width:170px;left:16px;} #helpBadge{display:none;} #score{top:52px;max-width:94%;width:max-content;} #roomBadge{left:16px;top:16px;} #killfeed{top:110px;} .slots,#buildSlots,.mats,#ammo{right:16px;} .card{padding:24px;} #menu::before{display:none;} }
+@media(max-width:700px) {.vitals {bottom:185px;width:170px;left:16px;} #helpBadge{display:none;} #roomBadge{left:16px;top:16px;} #killfeed{top:110px;} .slots,#buildSlots,.mats,#ammo{right:16px;} .card{padding:24px;} #menu::before{display:none;} }
 @media(max-height:650px) {#menu{align-items:flex-start;} .logo{font-size:44px;} .card{padding:20px;} .tagline{margin:6px 0 14px;} }
 
 
@@ -263,7 +254,7 @@ summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#1
    damage taken. */
 .bar.pool {display:flex;}
 .bar.pool > i {transition:width .12s linear;}
-#locationBadge {position:absolute;left:50%;top:72px;transform:translateX(-50%);padding:5px 12px;border-radius:4px;background:#10243dcc;color:#eaf6ff;font-size:11px;font-weight:800;letter-spacing:1.5px;text-shadow:0 1px 3px #000;}
+#locationBadge {position:absolute;left:50%;top:20px;transform:translateX(-50%);padding:5px 12px;border-radius:4px;background:#10243dcc;color:#eaf6ff;font-size:11px;font-weight:800;letter-spacing:1.5px;text-shadow:0 1px 3px #000;}
 
 /* ------------------------------------------------ directional damage */
 /* A red wedge at the screen edge pointing at whoever shot you. The flat
@@ -280,7 +271,7 @@ summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#1
 
 /* -------------------------------------------------------- compass */
 #compass {
-  position:absolute; left:50%; top:112px; transform:translateX(-50%);
+  position:absolute; left:50%; top:56px; transform:translateX(-50%);
   width:360px; height:26px; overflow:hidden;
   -webkit-mask-image:linear-gradient(90deg,transparent,#000 14%,#000 86%,transparent);
   mask-image:linear-gradient(90deg,transparent,#000 14%,#000 86%,transparent);
@@ -407,8 +398,7 @@ body.touch #scoreboard  { min-width:0; width:min(92vw,460px); }
   body.touch .mat        { min-width:32px; padding:4px; font-size:11px; }
   body.touch .vitals     { left:16px; bottom:146px; width:152px; }
   body.touch #killfeed   { top:62px; max-width:34%; }
-  body.touch #compass    { top:88px; }
-  body.touch #score      { top:8px; font-size:10px; max-width:34%; }
+  body.touch #compass    { top:56px; }
   body.touch #locationBadge { top:48px; }
   #mobileStick           { width:112px; height:112px; left:16px; bottom:16px; }
   #mobileControls [data-touch="fire"]   { width:84px; height:84px; }
@@ -472,6 +462,25 @@ body.touch #scoreboard  { min-width:0; width:min(92vw,460px); }
 #staminaFill { background:linear-gradient(90deg,#d9ff55,#a8dd3a); }
 .bar.stamina.spent #staminaFill { background:linear-gradient(90deg,#ff8a4a,#ff5a5a); }
 
+/* ------------------------------------------------- menu standings */
+/* The leaderboard lives here rather than on the playfield. A permanent score
+   strip across the top of the screen is information you are not usually
+   acting on, in the one place you are always looking; on the menu it is there
+   before a match, between rounds and after one, which is when anybody
+   actually reads it. Tab (or the SCORES button) still opens it mid-match. */
+#standings { margin-top:16px; border-top:1px solid #527aa855; padding-top:14px; }
+#standings h5 { font-size:10px; letter-spacing:2px; color:#9fc2dd; font-weight:800; margin-bottom:8px; }
+#standings table { border-collapse:collapse; width:100%; font-size:12px; }
+#standings th { text-align:left; font-size:9px; letter-spacing:1.2px; color:var(--muted); padding:0 6px 6px; font-weight:700; }
+#standings td { padding:5px 6px; border-top:1px solid #ffffff14; }
+#standings td.empty { color:var(--muted); font-style:italic; }
+#standings tr.me td { color:var(--accent); font-weight:700; }
+#standings .num { text-align:right; font-variant-numeric:tabular-nums; }
+#standings tr.goal td, #scoreboard tr.goal td {
+  text-align:center; color:var(--muted); font-size:10px; letter-spacing:1px;
+  font-weight:700; border-top:1px solid #ffffff22;
+}
+
 /* Tappable HUD. Only on touch: with the pointer locked on desktop the DOM
    never sees a click anyway, and opting in would risk stealing the lock. */
 .touchonly { display:none; }
@@ -480,13 +489,13 @@ body.touch .touchonly { display:inline; }
 body.touch .slot, body.touch .mat { pointer-events:auto; cursor:pointer; }
 body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
 </style>
+<link rel="stylesheet" href="/src/ui/menu.css">
 </head>
 <body>
   <div id="app"></div>
 
   <div id="hud" class="hidden">
     <div id="netstat"></div>
-    <div id="score"></div>
     <div id="locationBadge"></div>
     <div id="killfeed"></div>
     <div id="crosshair"></div><div id="structureHealth"><div id="structureLabel"></div><div class="bar"><i id="structureFill"></i></div></div>
@@ -516,7 +525,7 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
     <div id="scope"><div class="vig"></div><div class="ring"></div><i class="h"></i><i class="v"></i><div class="hub"></div><div class="mil"><b></b><b></b><b></b></div></div>
     <div id="hitDirs"></div>
     <div id="compass"><div id="compassLine"></div></div>
-    <div id="scoreboard"><div class="wrap"><h4>SCOREBOARD</h4><table id="scoreTable"></table><div class="hint2"><span class="deskonly">Hold Tab</span><span class="touchonly">Tap SCORES again to close</span></div></div></div>
+    <button id="menuBtn" aria-label="Open match menu">☰ <span>MENU</span></button>
     <div id="mobileControls">
       <div id="mobileLook"></div>
       <div id="mobileStick"><i></i></div>
@@ -526,39 +535,44 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
       <button data-touch="crouch">CROUCH</button>
       <button data-touch="sprint">SPRINT</button>
       <button data-touch="build">BUILD</button>
-      <button data-touch="scores">SCORES</button>
+
       <button data-touch="reload">RELOAD</button>
     </div>
-    <div class="slots" id="slots"></div><div id="buildSlots"></div><div id="roomBadge"></div><div id="helpBadge">G Reload · Ctrl Crouch · Tab Scores · M Sound · Esc Release mouse</div>
+    <div class="slots" id="slots"></div><div id="buildSlots"></div><div id="roomBadge"></div><div id="helpBadge">G Reload · Ctrl Crouch · Tab Menu · M Sound · Esc Menu</div>
   </div>
 
-  <div id="menu">
-    <div class="card">
-      <div class="logo">CL<span>U</span>TCH</div>
-      <div class="tagline">YOUR FRIENDS. YOUR ARENA.</div>
-
-      <label for="nameInput">Your name</label>
-      <input id="nameInput" type="text" maxlength="16" placeholder="Player" autocomplete="off" />
-
-      <button class="primary" id="playBtn">PLAY NOW →</button><button class="secondary" id="createBtn">Create a room for friends</button>
-
-      <label for="codeInput" style="margin-top:6px">Have a code? Join your friends</label>
-      <div class="row">
-        <input id="codeInput" type="text" maxlength="12" placeholder="ROOM CODE" autocomplete="off" />
-        <button class="secondary" id="joinBtn">Join</button>
-      </div>
-
-      <label for="fpsSelect" style="margin-top:6px">Frame rate limit</label>
-      <select id="fpsSelect">
-        <option value="30">30 fps — save battery</option>
-        <option value="60">60 fps — recommended</option>
-        <option value="120">120 fps — high refresh displays</option>
-        <option value="0">Uncapped</option>
-      </select>
-
-      <div class="status" id="status"></div>
-
-      <details class="hint"><summary>Controls & settings</summary><label for="sensitivity">Mouse sensitivity</label><input id="sensitivity" type="range" min="0.0005" max="0.005" step="0.0001" value="0.0022"><label for="volume">Sound volume</label><input id="volume" type="range" min="0" max="1" step="0.05" value="0.6"><label for="quality">Graphics</label><select id="quality"><option value="balanced">Balanced</option><option value="low">Low — faster</option><option value="high">High</option></select><label><input id="statsToggle" type="checkbox" checked> Show performance stats</label>
+  <div id="loading" role="status"><span class="loading-mark">C</span><span id="loadingText">Preparing the arena…</span><div class="loading-track"><i id="loadingProgress"></i></div></div>
+  <main id="menu">
+    <header class="menu-header"><a class="wordmark" href="/" aria-label="Clutch home">CLUTCH<span>®</span></a><span class="edition">OPEN ARENA <i></i> VOL. 01</span></header>
+    <div class="menu-layout">
+      <section class="menu-hero" aria-label="Welcome to Clutch">
+        <div class="eyebrow"><span></span> YOUR FRIENDS. YOUR ARENA.</div>
+        <h1>BUILD.<br>BATTLE.<br><em>REPEAT.</em></h1>
+        <p>Make your own cover. Find your angle.<br>One more round is never just one more.</p>
+        <div class="hero-caption"><span>01 / THE ARENA</span><span>DROP IN. MAKE IT YOURS. ↗</span></div>
+      </section>
+      <section class="card" aria-label="Game menu">
+        <nav class="menu-tabs" aria-label="Menu sections" role="tablist">
+          <button role="tab" aria-selected="true" data-menu-tab="play" aria-controls="playPanel">PLAY</button>
+          <button role="tab" aria-selected="false" data-menu-tab="standings" aria-controls="standings">STANDINGS</button>
+          <button role="tab" aria-selected="false" data-menu-tab="settings" aria-controls="settingsPanel">SETTINGS</button>
+        </nav>
+        <div id="playPanel" role="tabpanel" data-panel="play">
+          <div class="panel-kicker">READY WHEN YOU ARE</div><h2>Your next round.</h2>
+          <p id="sessionNote">Free-for-all · First to 5 eliminations</p>
+          <div class="match-actions"><button class="primary" id="resumeBtn">RESUME MATCH <span>↗</span></button><button class="secondary" id="leaveBtn">Leave match</button></div>
+          <div class="join-actions">
+            <label for="nameInput">PLAYER NAME</label><input id="nameInput" type="text" maxlength="16" placeholder="Your callsign" autocomplete="off" />
+            <button class="primary" id="playBtn">QUICK PLAY <span>↗</span></button>
+            <div class="divider"><span>OR BRING YOUR FRIENDS</span></div>
+            <button class="secondary" id="createBtn">＋ Create private room</button>
+            <label for="codeInput">ROOM CODE</label><div class="row"><input id="codeInput" type="text" maxlength="12" placeholder="Enter code" autocomplete="off" autocapitalize="characters" /><button class="secondary" id="joinBtn">Join →</button></div>
+          </div>
+          <div class="status" id="status" role="status" aria-live="polite"></div>
+          <div class="quick-guide"><span><b>MOVE</b> WASD</span><span><b>BUILD</b> Q E R F</span><span><b>AIM</b> RIGHT CLICK</span></div>
+        </div>
+        <div id="standings" role="tabpanel" data-panel="standings" hidden><div class="panel-kicker">THE PEOPLE IN YOUR ARENA</div><h2>Standings.</h2><p id="lastResult">Join a match to see the room’s standings.</p><div class="table-scroll"><table id="standingsTable"></table></div><p class="panel-note">Standings are for this room. Wins last for your session.</p></div>
+        <div id="settingsPanel" role="tabpanel" data-panel="settings" hidden><div class="panel-kicker">MAKE IT FEEL RIGHT</div><h2>Your setup.</h2><label for="fpsSelect">Frame rate limit</label><select id="fpsSelect"><option value="30">30 fps · Battery saver</option><option value="60">60 fps · Recommended</option><option value="120">120 fps · High refresh</option><option value="0">Uncapped</option></select><div class="settings-content"><label for="sensitivity">Mouse sensitivity</label><input id="sensitivity" type="range" min="0.0005" max="0.005" step="0.0001" value="0.0022"><label for="volume">Sound volume</label><input id="volume" type="range" min="0" max="1" step="0.05" value="0.6"><label for="quality">Graphics quality</label><select id="quality"><option value="balanced">Balanced</option><option value="low">Low — faster</option><option value="high">High</option></select><label><input id="statsToggle" type="checkbox"> Show performance stats</label>
         <label style="margin-top:10px">Key bindings — click one, then press a key</label>
         <div id="keybinds"></div>
         <button class="secondary" id="resetBinds" style="margin-bottom:12px">Reset to defaults</button>
@@ -567,10 +581,13 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
         <b>1-5</b> weapons &nbsp;·&nbsp; <b>Q E R F</b> wall, floor, ramp, cone<br/>
         <b>V</b> shield block (one per match, reflects bullets) &nbsp;·&nbsp; <b>Z X C</b> wood, brick, metal &nbsp;·&nbsp; <b>G</b> reload<br/>
         <b>Ctrl</b> crouch &nbsp;·&nbsp; <b>Shift + Ctrl</b> at speed to slide<br/>
-        <b>Tab</b> scoreboard &nbsp;·&nbsp; <b>M</b> mute &nbsp;·&nbsp; <b>Esc</b> release mouse
-      </details>
+        <b>Tab / Esc</b> menu &nbsp;·&nbsp; <b>M</b> mute
+      </div><p class="panel-note">Art by Kenney · CC0. <a href="/models/CREDITS.txt" target="_blank" rel="noopener">Asset credits ↗</a></p></div>
+        <div class="match-actions panel-resume"><button class="secondary" id="resumeFooter">← Back to match</button></div>
+      </section>
     </div>
-  </div>
+    <footer class="menu-footer"><span>BUILT FOR THE NEXT ROUND.</span><span>KEYBOARD + MOUSE / TOUCH</span></footer>
+  </main>
 
   <script type="module" src="/src/main.ts"></script>
 </body>

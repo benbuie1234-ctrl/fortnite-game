@@ -1,3 +1,4 @@
+import { unwrapTime } from "@shared/clock";
 import {
   TICK_DT, INTERP_DELAY_MS, INPUTS_PER_MESSAGE, SPRINT_STAMINA_MAX,
 } from "@shared/constants";
@@ -132,7 +133,8 @@ export class Connection {
     this.pending.length=0; this.unsent.length=0; this.others.clear();
     this.world.clear(); buildArena(this.world);
     this.clockInitialised=false; this.snapshotCount=0;
-    this.self.vx=0;this.self.vy=0;this.self.vz=0;
+    Object.assign(this.self, newMovementState(), { hp:100, shield:0, mats:0, weapon:0, ammo:0, buildSlot:-1, material:0, reloadMs:0, alive:true, shieldUsed:false });
+    this.selfId = -1; this.clockOffset = 0;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
@@ -147,7 +149,7 @@ export class Connection {
       if(this.ws!==ws)return;
       this.handlers.onClose("could not reach the server");
     });
-    ws.addEventListener("open", () => this.startPing());
+    ws.addEventListener("open", () => { if (this.ws === ws) this.startPing(); });
   }
 
   disconnect(): void {
@@ -243,10 +245,10 @@ export class Connection {
       case S_PONG: {
         const sent = r.u32();
         const serverTime = r.u32();
-        const rtt = (Date.now() >>> 0) - sent;
+        const rtt = ((Date.now() >>> 0) - sent) >>> 0;
         if (rtt >= 0 && rtt < 2000) {
           this.rttMs = this.rttMs * 0.75 + rtt * 0.25;
-          this.syncClock(serverTime + this.rttMs / 2);
+          this.syncClock(unwrapTime(serverTime) + this.rttMs / 2);
         }
         break;
       }
@@ -305,6 +307,7 @@ export class Connection {
 
   private onSnapshot(r: Reader): void {
     const snap = readSnapshot(r);
+    snap.serverTimeMs = unwrapTime(snap.serverTimeMs, this.serverNow());
     this.snapshotCount++;
     this.selfId = snap.selfId;
 
@@ -335,6 +338,10 @@ export class Connection {
     s.stamina = (snap.self.stamina / 255) * SPRINT_STAMINA_MAX;
     s.bloom = snap.self.bloom / 255;
     s.sliding = (snap.self.flags & PF_SLIDING) !== 0;
+    s.slideLockout = snap.self.slideLockout ?? 0;
+    s.crouchHeld = snap.self.crouchHeld ?? false;
+    s.fallPeakY = snap.self.fallPeakY ?? s.y;
+    s.staminaIdle = snap.self.staminaIdle ?? 0;
 
     dropAcknowledged(this.pending, snap.ackSeq);
     if (s.alive) {
