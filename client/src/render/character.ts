@@ -180,8 +180,11 @@ export class Character {
     ctx.fillStyle = "#ffffff";
     ctx.fillText(name, 128, 28);
 
-    // Opponents reveal names, not their remaining health. Hit feedback is
-    // provided by the local damage numbers instead.
+    const frac = Math.max(0, Math.min(1, hpPct / 255));
+    ctx.fillStyle = "rgba(0,0,0,.72)";
+    ctx.fillRect(40, 40, 176, 12);
+    ctx.fillStyle = frac > 0.5 ? "#4ade80" : frac > 0.22 ? "#ffc53d" : "#ff5a5a";
+    ctx.fillRect(42, 42, 172 * frac, 8);
 
     this.nameTexture.needsUpdate = true;
   }

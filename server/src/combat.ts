@@ -104,9 +104,10 @@ export function resolveFire(
         damage: Math.round(dmg), headshot: hitHead ? 1 : 0,
       });
     } else if (pieceHit && bestT === pieceHit.t) {
-      const dmg = weapon.id === W_SNIPER
-        ? MATERIALS[pieceHit.piece.mat].maxHp * [1, .99, .5][pieceHit.piece.mat]
-        : damageAtRange(weapon, bestT) * weapon.buildDamage;
+      const materialScale = weapon.id === W_SNIPER
+        ? (pieceHit.piece.mat === 0 ? 2.0 : pieceHit.piece.mat === 1 ? 3.7 : 1.9)
+        : weapon.buildDamage;
+      const dmg = damageAtRange(weapon, bestT) * materialScale;
       damagePiece(world, pieceHit.piece.key, dmg, nowSec, events, shooter);
     }
 
