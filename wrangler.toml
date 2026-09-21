@@ -1,0 +1,21 @@
+name = "clutch"
+main = "server/src/index.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# The built client. Served straight from Cloudflare's CDN, which is the part
+# of this stack that is genuinely free and unmetered.
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[[durable_objects.bindings]]
+name = "MATCH"
+class_name = "MatchRoom"
+
+# SQLite-backed Durable Objects are the variant available on the Workers Free
+# plan. The match itself is in-memory and ephemeral; we never write storage.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MatchRoom"]

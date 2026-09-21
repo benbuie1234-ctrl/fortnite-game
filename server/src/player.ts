@@ -1,0 +1,134 @@
+import {
+  PLAYER_MAX_HP, PLAYER_MAX_SHIELD, START_MATS, MAX_MATS, PLAYER_HEIGHT, PLAYER_RADIUS,
+} from "@shared/constants";
+import type { MovementState, InputCommand } from "@shared/sim";
+import { ARENA_LOADOUT, weaponById } from "@shared/weapons";
+import type { Box } from "@shared/build";
+
+/** One position sample, kept so the server can rewind for lag compensation. */
+export interface HistorySample {
+  t: number;
+  x: number; y: number; z: number;
+}
+
+const HISTORY_LEN = 32; // ~1s at 30Hz
+
+export class ServerPlayer implements MovementState {
+  x = 0; y = 0; z = 0;
+  vx = 0; vy = 0; vz = 0;
+  yaw = 0; pitch = 0;
+  grounded = false;
+  lastLandingSpeed = 0;
+
+  hp = PLAYER_MAX_HP;
+  shield = 0;
+  mats = START_MATS;
+  alive = true;
+  respawnAt = 0;
+
+  /** 0-4 selects a weapon from the loadout; 5-8 selects a build piece. */
+  weaponIdx = 2;
+  buildSlot = -1;
+  material = 0;
+
+  readonly ammo: number[] = ARENA_LOADOUT.map((w) => weaponById(w).magSize);
+  reloadEndAt = 0;
+  nextFireAt = 0;
+  lastBuildAt = 0;
+  wasFiring = false;
+  aiming = false;
+
+  kills = 0;
+  deaths = 0;
+  /** Attribution for the kill feed, and for who gets credit on a bleed-out. */
+  lastDamagedBy = -1;
+  lastDamagedAt = 0;
+
+  inputQueue: InputCommand[] = [];
+  lastSeq = 0;
+  lastInputAtMs = 0;
+  rttMs = 60;
+
+  private history: HistorySample[] = [];
+  private historyHead = 0;
+
+  constructor(
+    readonly id: number,
+    readonly name: string,
+    readonly socket: WebSocket,
+  ) {}
+
+  get weaponId(): number {
+    return ARENA_LOADOUT[this.weaponIdx] ?? ARENA_LOADOUT[0];
+  }
+
+  get inBuildMode(): boolean {
+    return this.buildSlot >= 0;
+  }
+
+  recordHistory(t: number): void {
+    const sample = { t, x: this.x, y: this.y, z: this.z };
+    if (this.history.length < HISTORY_LEN) {
+      this.history.push(sample);
+    } else {
+      this.history[this.historyHead] = sample;
+    }
+    this.historyHead = (this.historyHead + 1) % HISTORY_LEN;
+  }
+
+  /** Interpolated position at a past time, for lag-compensated hit checks. */
+  positionAt(t: number): { x: number; y: number; z: number } {
+    if (this.history.length === 0) return { x: this.x, y: this.y, z: this.z };
+
+    let before: HistorySample | null = null;
+    let after: HistorySample | null = null;
+    for (const s of this.history) {
+      if (s.t <= t && (!before || s.t > before.t)) before = s;
+      if (s.t >= t && (!after || s.t < after.t)) after = s;
+    }
+    if (before && after && after.t > before.t) {
+      const f = (t - before.t) / (after.t - before.t);
+      return {
+        x: before.x + (after.x - before.x) * f,
+        y: before.y + (after.y - before.y) * f,
+        z: before.z + (after.z - before.z) * f,
+      };
+    }
+    const s = before ?? after;
+    return s ? { x: s.x, y: s.y, z: s.z } : { x: this.x, y: this.y, z: this.z };
+  }
+
+  resetForSpawn(x: number, y: number, z: number, yaw: number): void {
+    this.x = x; this.y = y; this.z = z;
+    this.vx = 0; this.vy = 0; this.vz = 0;
+    this.yaw = yaw; this.pitch = 0;
+    this.grounded = true;
+    this.hp = PLAYER_MAX_HP;
+    this.shield = PLAYER_MAX_SHIELD * 0.5;
+    this.mats = START_MATS;
+    this.alive = true;
+    this.weaponIdx = 2;
+    this.buildSlot = -1;
+    this.reloadEndAt = 0;
+    this.nextFireAt = 0;
+    for (let i = 0; i < this.ammo.length; i++) {
+      this.ammo[i] = weaponById(ARENA_LOADOUT[i]).magSize;
+    }
+    this.history.length = 0;
+    this.historyHead = 0;
+  }
+
+  addMats(n: number): void {
+    this.mats = Math.min(MAX_MATS, this.mats + n);
+  }
+}
+
+/** Body and head boxes at an arbitrary position, for hit registration. */
+export function hitBoxes(x: number, y: number, z: number): { body: Box; head: Box } {
+  const r = PLAYER_RADIUS;
+  const headBottom = y + PLAYER_HEIGHT - 0.28;
+  return {
+    body: [x - r, y, z - r, x + r, headBottom, z + r],
+    head: [x - 0.24, headBottom, z - 0.24, x + 0.24, y + PLAYER_HEIGHT, z + 0.24],
+  };
+}

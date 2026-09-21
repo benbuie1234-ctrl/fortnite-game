@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Clutch</title>
+<style>
+  :root {
+    --bg: #0d1017;
+    --panel: #161b26;
+    --line: #262e3d;
+    --text: #e8ecf4;
+    --muted: #8a94a8;
+    --accent: #ffc53d;
+    --accent-2: #4da3ff;
+    --danger: #ff5a5a;
+    --wood: #c08a4a;
+    --brick: #9a9a9a;
+    --metal: #6f7d8c;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  canvas { display: block; }
+
+  #app { position: fixed; inset: 0; }
+
+  /* ---------------------------------------------------------------- menu */
+
+  #menu {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(1200px 700px at 50% -10%, #1d2740 0%, transparent 60%),
+      var(--bg);
+    z-index: 30;
+  }
+  #menu.hidden { display: none; }
+
+  .card {
+    width: min(420px, calc(100vw - 32px));
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 28px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.55);
+  }
+
+  .logo {
+    font-size: 40px; font-weight: 800; letter-spacing: -1.5px;
+    margin-bottom: 4px;
+  }
+  .logo span { color: var(--accent); }
+  .tagline { color: var(--muted); font-size: 13px; margin-bottom: 22px; }
+
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+
+  input[type=text] {
+    width: 100%; padding: 11px 13px; margin-bottom: 16px;
+    background: #0f131c; color: var(--text);
+    border: 1px solid var(--line); border-radius: 9px;
+    font-size: 14px; font-family: inherit;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent-2); }
+
+  button {
+    width: 100%; padding: 12px; border: 0; border-radius: 9px;
+    font-size: 14px; font-weight: 650; font-family: inherit;
+    cursor: pointer; transition: filter .12s ease;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.12); }
+  button:disabled { opacity: .5; cursor: default; }
+
+  .primary { background: var(--accent); color: #241a00; margin-bottom: 9px; }
+  .secondary { background: #222b3a; color: var(--text); }
+
+  .row { display: flex; gap: 9px; }
+  .row input { margin-bottom: 0; }
+  .row button { width: auto; padding: 12px 18px; white-space: nowrap; }
+
+  .status { margin-top: 14px; font-size: 12.5px; color: var(--muted); min-height: 18px; }
+  .status.error { color: var(--danger); }
+
+  .hint {
+    margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line);
+    font-size: 11.5px; color: var(--muted); line-height: 1.7;
+  }
+  .hint b { color: #c3ccdd; font-weight: 600; }
+
+  /* ----------------------------------------------------------------- hud */
+
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+  #hud.hidden { display: none; }
+
+  #crosshair {
+    position: absolute; left: 50%; top: 50%;
+    width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: rgba(255,255,255,.85);
+    box-shadow: 0 0 2px rgba(0,0,0,.9);
+  }
+  #crosshair::before { left: 50%; top: 0; width: 1.5px; height: 100%; margin-left: -.75px; }
+  #crosshair::after { top: 50%; left: 0; height: 1.5px; width: 100%; margin-top: -.75px; }
+  #crosshair.build::before, #crosshair.build::after { background: var(--accent); }
+
+  .vitals {
+    position: absolute; left: 24px; bottom: 24px; width: 260px;
+  }
+  .bar {
+    height: 13px; background: rgba(0,0,0,.55); border-radius: 3px;
+    margin-bottom: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,.12);
+  }
+  .bar > i { display: block; height: 100%; transition: width .12s linear; }
+  #shieldFill { background: linear-gradient(90deg, #4da3ff, #7cc4ff); }
+  #hpFill { background: linear-gradient(90deg, #4ade80, #86efac); }
+
+  .mats {
+    position: absolute; right: 24px; bottom: 96px;
+    display: flex; gap: 8px;
+  }
+  .mat {
+    min-width: 58px; padding: 6px 10px; text-align: center;
+    background: rgba(12,16,24,.8); border: 1px solid var(--line);
+    border-radius: 7px; font-size: 14px; font-weight: 700;
+  }
+  .mat small { display: block; font-size: 9px; font-weight: 500; color: var(--muted); letter-spacing: .5px; }
+  .mat.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  #matWood { color: var(--wood); }
+  #matBrick { color: var(--brick); }
+  #matMetal { color: var(--metal); }
+
+  .slots {
+    position: absolute; right: 24px; bottom: 24px;
+    display: flex; gap: 7px;
+  }
+  .slot {
+    width: 54px; height: 54px; border-radius: 8px;
+    background: rgba(12,16,24,.8); border: 1px solid var(--line);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 10px; color: var(--muted); gap: 2px;
+  }
+  .slot .k { font-size: 10px; font-weight: 700; color: #5d6577; }
+  .slot.active { border-color: var(--accent); background: rgba(255,197,61,.14); color: var(--text); }
+  .slot .ico { font-size: 17px; line-height: 1; }
+
+  #ammo {
+    position: absolute; right: 24px; bottom: 156px;
+    font-size: 30px; font-weight: 800; text-align: right;
+    text-shadow: 0 2px 8px rgba(0,0,0,.9);
+  }
+  #ammo small { font-size: 15px; color: var(--muted); font-weight: 600; }
+  #ammo.reloading { color: var(--accent); font-size: 19px; }
+
+  #killfeed {
+    position: absolute; right: 24px; top: 24px;
+    display: flex; flex-direction: column; gap: 5px; align-items: flex-end;
+  }
+  .kf {
+    background: rgba(12,16,24,.82); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 10px; font-size: 12.5px;
+    animation: kfin .18s ease;
+  }
+  @keyframes kfin { from { opacity: 0; transform: translateX(14px); } }
+  .kf .me { color: var(--accent); font-weight: 700; }
+
+  #score {
+    position: absolute; left: 50%; top: 18px; transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center;
+    background: rgba(12,16,24,.82); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 16px; font-size: 13px;
+  }
+  #score .p { display: flex; gap: 7px; align-items: center; }
+  #score .p b { font-size: 17px; }
+  #score .sep { color: var(--muted); }
+
+  #centerMsg {
+    position: absolute; left: 50%; top: 42%; transform: translate(-50%,-50%);
+    text-align: center; font-size: 34px; font-weight: 800;
+    text-shadow: 0 3px 14px rgba(0,0,0,.9);
+  }
+  #centerMsg .sub { font-size: 15px; font-weight: 500; color: var(--muted); margin-top: 6px; }
+
+  #damageFlash {
+    position: absolute; inset: 0; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 42%, rgba(255,0,0,.5) 100%);
+    opacity: 0; transition: opacity .18s ease;
+  }
+
+  #hitmarker {
+    position: absolute; left: 50%; top: 50%; width: 26px; height: 26px;
+    margin: -13px 0 0 -13px; opacity: 0;
+  }
+  #hitmarker svg { width: 100%; height: 100%; }
+
+  #netstat {
+    position: absolute; left: 24px; top: 24px;
+    font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+    background: rgba(12,16,24,.7); padding: 5px 9px; border-radius: 6px;
+    border: 1px solid var(--line); line-height: 1.6;
+  }
+  #netstat b { color: var(--text); font-weight: 600; }
+
+  #buildPreview { position: absolute; left: 50%; bottom: 96px; transform: translateX(-50%);
+    font-size: 12px; color: var(--accent); font-weight: 600; }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div id="hud" class="hidden">
+    <div id="netstat"></div>
+    <div id="score"></div>
+    <div id="killfeed"></div>
+    <div id="crosshair"></div>
+    <div id="hitmarker">
+      <svg viewBox="0 0 26 26" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round">
+        <path d="M6 6 L10 10 M20 6 L16 10 M6 20 L10 16 M20 20 L16 16"/>
+      </svg>
+    </div>
+    <div id="centerMsg"></div>
+    <div id="damageFlash"></div>
+    <div id="buildPreview"></div>
+
+    <div class="vitals">
+      <div class="bar"><i id="shieldFill" style="width:0%"></i></div>
+      <div class="bar"><i id="hpFill" style="width:100%"></i></div>
+    </div>
+
+    <div id="ammo"></div>
+
+    <div class="mats">
+      <div class="mat" id="matWoodBox"><span id="matWood">0</span><small>WOOD</small></div>
+      <div class="mat" id="matBrickBox"><span id="matBrick">0</span><small>BRICK</small></div>
+      <div class="mat" id="matMetalBox"><span id="matMetal">0</span><small>METAL</small></div>
+    </div>
+
+    <div class="slots" id="slots"></div>
+  </div>
+
+  <div id="menu">
+    <div class="card">
+      <div class="logo">CL<span>U</span>TCH</div>
+      <div class="tagline">Build. Fight. Clutch up.</div>
+
+      <label for="nameInput">Your name</label>
+      <input id="nameInput" type="text" maxlength="16" placeholder="Player" autocomplete="off" />
+
+      <button class="primary" id="playBtn">Quick Play</button>
+
+      <label for="codeInput" style="margin-top:6px">Or join a private room</label>
+      <div class="row">
+        <input id="codeInput" type="text" maxlength="12" placeholder="ROOM CODE" autocomplete="off" />
+        <button class="secondary" id="joinBtn">Join</button>
+      </div>
+
+      <div class="status" id="status"></div>
+
+      <div class="hint">
+        <b>WASD</b> move &nbsp;·&nbsp; <b>Space</b> jump<br/>
+        <b>Left click</b> shoot / place &nbsp;·&nbsp; <b>Right click</b> aim<br/>
+        <b>1-5</b> weapons &nbsp;·&nbsp; <b>Q E R F</b> wall, floor, ramp, cone<br/>
+        <b>Z X C</b> wood, brick, metal &nbsp;·&nbsp; <b>G</b> reload &nbsp;·&nbsp; <b>Esc</b> release mouse
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
