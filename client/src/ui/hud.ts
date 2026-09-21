@@ -172,9 +172,24 @@ export class Hud {
       ?.setAttribute("stroke", headshot ? "#ff5a5a" : "#ffffff");
   }
 
-  setNetStat(ping: number, fps: number, pending: number): void {
+  setNetStat(ping: number, fps: number, pending: number, fpsCap = 0): void {
+    const rounded = Math.round(fps);
+    // Colour the frame rate so a problem is obvious at a glance rather than
+    // needing to be read. Judged against the cap when there is one, because a
+    // capped 60 is perfect, not a shortfall.
+    const target = fpsCap > 0 ? fpsCap : 60;
+    const colour = rounded >= target - 5 ? "#8ee87a"
+      : rounded >= target * 0.6 ? "#ffc53d"
+      : "#ff6b6b";
+    // Frame time matters more than frame rate for judging stutter: 16.7ms is
+    // smooth, and a spike shows up there before the averaged fps moves.
+    const frameMs = fps > 0 ? (1000 / fps).toFixed(1) : "--";
+    const capNote = fpsCap > 0 ? ` <span style="opacity:.55">cap ${fpsCap}</span>` : "";
+
     this.netstat.innerHTML =
-      `<b>${Math.round(ping)}</b> ms &nbsp; <b>${Math.round(fps)}</b> fps &nbsp; <b>${pending}</b> queued`;
+      `<b style="color:${colour};font-size:14px">${rounded}</b> fps${capNote}` +
+      ` &nbsp;·&nbsp; <b>${frameMs}</b> ms/frame` +
+      `<br/><b>${Math.round(ping)}</b> ms ping &nbsp;·&nbsp; <b>${pending}</b> queued`;
   }
 
   /** Call once per frame to expire the transient overlays. */

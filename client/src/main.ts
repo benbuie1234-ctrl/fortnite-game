@@ -158,9 +158,19 @@ sensitivity.addEventListener("input", () => {
   controls.sensitivity = Number(sensitivity.value);
   localStorage.setItem("clutch.sensitivity", sensitivity.value);
 });
-document.getElementById("statsToggle")!.addEventListener("change", e => {
-  document.getElementById("netstat")!.style.display = (e.target as HTMLInputElement).checked ? "block" : "none";
-});
+{
+  const toggle = document.getElementById("statsToggle") as unknown as HTMLInputElement;
+  const netstat = document.getElementById("netstat")!;
+  const apply = (on: boolean) => {
+    netstat.style.display = on ? "block" : "none";
+    toggle.checked = on;
+    try { localStorage.setItem("clutch.stats", on ? "1" : "0"); } catch { /* ignore */ }
+  };
+  let initial = true;
+  try { initial = localStorage.getItem("clutch.stats") !== "0"; } catch { /* default on */ }
+  apply(initial);
+  toggle.addEventListener("change", () => apply(toggle.checked));
+}
 document.getElementById("quality")!.addEventListener("change", e => {
   const quality = (e.target as HTMLSelectElement).value;
   view.renderer.setPixelRatio(Math.min(devicePixelRatio, quality === "low" ? 1 : quality === "high" ? 2 : 1.5));
@@ -511,7 +521,7 @@ function frame(now: number): void {
   const weaponIdx = controls.inBuildMode ? 0 : controls.slot;
   hud.setAmmo(weaponIdx, self.ammo, self.reloadMs > 0);
   hud.setScore(matchPlayers, conn.selfId, scoreTarget);
-  hud.setNetStat(conn.rttMs, fps, conn.pendingInputCount);
+  hud.setNetStat(conn.rttMs, fps, conn.pendingInputCount, limiter.fpsTarget);
   if (!self.alive && respawnAtMs > 0) {
     const left = Math.max(0, (respawnAtMs - performance.now()) / 1000);
     hud.setCenterMessage("Eliminated", `Respawning in ${left.toFixed(1)}s`);

@@ -241,7 +241,7 @@ summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#1
 .mats {right:219px;bottom:99px;gap:4px;} .mat {min-width:35px;padding:5px;font-size:12px;border-radius:4px;} .mat small {font-size:8px;}
 #ammo {bottom:160px;font-size:32px;} #ammo small {color:#dfebf7;}
 #score {max-width:70%;flex-wrap:wrap;justify-content:center;border:0;border-radius:4px;font-size:11px;background:#10243de0;} #score .p b {font-size:18px;}
-#killfeed {top:82px;font-size:11px;max-width:45%;} #netstat {display:none;top:65px;} #roomBadge {position:absolute;top:24px;left:24px;font-size:11px;letter-spacing:1px;color:#def3ff;} #helpBadge {position:absolute;left:24px;bottom:155px;font-size:10px;color:#d4e5ef;text-shadow:0 1px 4px black;}
+#killfeed {top:82px;font-size:11px;max-width:45%;} #netstat {top:65px;} #roomBadge {position:absolute;top:24px;left:24px;font-size:11px;letter-spacing:1px;color:#def3ff;} #helpBadge {position:absolute;left:24px;bottom:155px;font-size:10px;color:#d4e5ef;text-shadow:0 1px 4px black;}
 #buildPreview {bottom:190px;background:#10243dbb;padding:5px 10px;border-radius:4px;} #centerMsg .sub {color:#eef5ff;}
 @media(max-width:700px) {.vitals {bottom:185px;width:170px;left:16px;} #helpBadge{display:none;} #score{top:52px;max-width:94%;width:max-content;} #roomBadge{left:16px;top:16px;} #killfeed{top:110px;} .slots,#buildSlots,.mats,#ammo{right:16px;} .mats{right:211px;} .card{padding:24px;} #menu::before{display:none;} }
 @media(max-height:650px) {#menu{align-items:flex-start;} .logo{font-size:44px;} .card{padding:20px;} .tagline{margin:6px 0 14px;} }
@@ -315,7 +315,7 @@ summary {cursor:pointer;margin-bottom:10px;color:#d1e7fa;} select {background:#1
 
       <div class="status" id="status"></div>
 
-      <details class="hint"><summary>Controls & settings</summary><label for="sensitivity">Mouse sensitivity</label><input id="sensitivity" type="range" min="0.0005" max="0.005" step="0.0001" value="0.0022"><label for="volume">Sound volume</label><input id="volume" type="range" min="0" max="1" step="0.05" value="0.6"><label for="quality">Graphics</label><select id="quality"><option value="balanced">Balanced</option><option value="low">Low — faster</option><option value="high">High</option></select><label><input id="statsToggle" type="checkbox"> Show performance stats</label>
+      <details class="hint"><summary>Controls & settings</summary><label for="sensitivity">Mouse sensitivity</label><input id="sensitivity" type="range" min="0.0005" max="0.005" step="0.0001" value="0.0022"><label for="volume">Sound volume</label><input id="volume" type="range" min="0" max="1" step="0.05" value="0.6"><label for="quality">Graphics</label><select id="quality"><option value="balanced">Balanced</option><option value="low">Low — faster</option><option value="high">High</option></select><label><input id="statsToggle" type="checkbox" checked> Show performance stats</label>
         <b>WASD</b> move &nbsp;·&nbsp; <b>Space</b> jump / hold near a ledge to climb<br/>
         <b>Left click</b> shoot / place &nbsp;·&nbsp; <b>Right click</b> aim<br/>
         <b>1-5</b> weapons &nbsp;·&nbsp; <b>Q E R F</b> wall, floor, ramp, cone<br/>
