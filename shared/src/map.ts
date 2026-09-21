@@ -1,4 +1,3 @@
-import { TILE } from './constants';
 /** Shared layout used by collision, scenery, navigation and spawn selection. */
 export const MAP_HALF = 360;
 export const LOCATIONS = [
@@ -22,15 +21,6 @@ for(const [x,z] of [[-27,-8],[22,-8],[-8,-28],[-8,23],[-29,-48],[22,-48],[-48,22
   BUILDINGS.push({x,z,w:4,d:4,floors:1,base:0,style:'cabin',color:0xb7bd9b});
 }
 const smooth=(t:number)=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
-// Keep district distances while enlarging each room. Remove footprints that
-// would overlap their neighbours after doubling the grid spacing.
-const spacious:Building[]=[];
-for(const source of BUILDINGS) {
- const b={...source,x:Math.round(source.x/2),z:Math.round(source.z/2),base:source.base/2};
- if(spacious.some(a=>b.x<a.x+a.w+1&&b.x+b.w+1>a.x&&b.z<a.z+a.d+1&&b.z+b.d+1>a.z))continue;
- spacious.push(b);
-}
-BUILDINGS.splice(0,BUILDINGS.length,...spacious);
 export function terrainHeight(x:number,z:number):number {
   // Broad walkable ascent, flat hilltop keeps all cabin foundations exact.
   const ridge=18*(1-smooth((Math.hypot(x-156,z-156)-62)/65));
@@ -56,15 +46,15 @@ for(let i=0;i<800;i++) {
   if(Math.abs(x)<12||Math.abs(z)<12||Math.abs(Math.abs(x)-156)<10||Math.abs(Math.abs(z)-156)<10)continue;
   if(x< -80&&x> -224&&z< -80&&z> -224)continue;
   if(x>96&&x<225&&z< -80&&z> -214)continue;
-  if(BUILDINGS.some(b=>x>b.x*TILE-7&&x<(b.x+b.w)*TILE+7&&z>b.z*TILE-7&&z<(b.z+b.d)*TILE+7))continue;
+  if(BUILDINGS.some(b=>x>b.x*3-7&&x<(b.x+b.w)*3+7&&z>b.z*3-7&&z<(b.z+b.d)*3+7))continue;
   const y=terrainHeight(x,z);if(y<-.05)continue;
-  SCENERY.push({x,z,y,size:6+random()*6,kind:i%5===0?'rock':'tree'});
+  SCENERY.push({x,z,y,size:3+random()*3,kind:i%5===0?'rock':'tree'});
 }
 
 export interface Prop {x:number;y:number;z:number;w:number;h:number;d:number;color:number;}
 export const PROPS:Prop[]=[];
 for(const b of BUILDINGS.filter(b=>b.style==='house')) {
-  const x=b.x*TILE,z=b.z*TILE;
+  const x=b.x*3,z=b.z*3;
   // Low garden borders, a bench and a table; front doors remain clear.
   PROPS.push({x:x-2,y:0,z:z+7,w:.3,h:.65,d:12,color:0xf0e6cc});
   PROPS.push({x:x+2,y:.25,z:z+10,w:2.2,h:.5,d:.6,color:0x927550});

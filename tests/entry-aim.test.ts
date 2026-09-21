@@ -18,7 +18,7 @@ for(const yaw of [0,Math.PI/2,Math.PI,-Math.PI/2]) {
 const wall=new World();wall.set(makePiece(0,0,1,SLOT_WALL_Z,2,0,255,0));
 const walker={x:1.5,y:0,z:1,vx:0,vy:0,vz:0,yaw:0,pitch:0,grounded:true,lastLandingSpeed:0};
 for(let i=0;i<60;i++)stepPlayer(walker,{seq:i,moveX:0,moveZ:1,yaw:0,pitch:0,buttons:0,slot:2},wall);
-assert.ok(walker.z<6,'ordinary walls still stop movement');
+assert.ok(walker.z<3,'ordinary walls still stop movement');
 for(const distance of [5,50,200,350])for(const yaw of [0,.7,Math.PI/2]) {
  const w=new World();const shooter=new ServerPlayer(0,'test',{} as WebSocket);
  Object.assign(shooter,{x:0,y:0,z:0,yaw,pitch:0,aiming:true,weaponIdx:4});

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { TILE } from '@shared/constants';
 import { MAP_HALF,terrainHeight,BUILDINGS,LOCATIONS,SCENERY,PROPS } from '@shared/map';
 import { getTextures, planarUVs } from './textures';
 import { InstancedModel, type ModelLibrary } from './models';
@@ -68,7 +67,7 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
  for(let i=0;i<positions.count;i++) {
   const x=positions.getX(i),z=positions.getZ(i),h=terrainHeight(x,z);positions.setY(i,h);
   const noise=(Math.sin(x*.13)*Math.cos(z*.17)+1)*.035;
-  const color=new THREE.Color(h<-.1?0xe4c784:h>10?0x46935f:0x78bd55);color.multiplyScalar(.94+noise);colors.push(color.r,color.g,color.b);
+  const color=new THREE.Color(h<-.1?0xbfae7b:h>10?0x638957:0x80aa63);color.multiplyScalar(.94+noise);colors.push(color.r,color.g,color.b);
  }
  ground.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));ground.computeVertexNormals();
  // Project world-space UVs so the grain tiles at a fixed real-world size
@@ -101,21 +100,13 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
   for(let level=0;level<b.floors;level++)for(let x=0;x<b.w;x++) {
    if(x===Math.floor(b.w/2)&&level===0)continue;
    if(level>0&&x%3===1)continue;
-   for(const side of [0,b.d]) {
-    const wx=(b.x+x+.5)*TILE,wy=(b.base+level)*TILE+3.5,wz=(b.z+side)*TILE+(side===0?-.15:.15);
-    details.push({x:wx,y:wy,z:wz,sx:3.4,sy:2.4,sz:.08,color:0x338da7});
-    for(const dx of [-1.8,0,1.8])details.push({x:wx+dx,y:wy,z:wz+(side===0?-.06:.06),sx:.12,sy:2.7,sz:.12,color:0xffedc8});
-    for(const dy of [-1.3,1.3])details.push({x:wx,y:wy+dy,z:wz,sx:3.7,sy:.14,sz:.22,color:0xffedc8});
-   }
+   for(const side of [0,b.d])details.push({x:(b.x+x+.5)*3,y:(b.base+level)*3+1.8,z:(b.z+side)*3+(side===0?-.14:.14),sx:1.65,sy:1.1,sz:.03,color:0x4a7384});
   }
-  details.push({x:(b.x+Math.floor(b.w/2)+.5)*TILE,y:b.base*TILE+5.3,z:b.z*TILE-1.4,sx:7.2,sy:.32,sz:3.2,color:b.style==='house'?0xf5c75e:0x36a9b8});
-  // Painted bands and corner pilasters add readable architectural depth.
-  for(let level=1;level<=b.floors;level++)for(const side of [0,b.d])details.push({x:(b.x+b.w/2)*TILE,y:(b.base+level)*TILE+.4,z:(b.z+side)*TILE,sx:b.w*TILE,sy:.35,sz:.4,color:b.color});
-  for(const x of [b.x,b.x+b.w])for(const z of [b.z,b.z+b.d])details.push({x:x*TILE,y:(b.base+b.floors/2)*TILE,z:z*TILE,sx:.45,sy:b.floors*TILE,sz:.45,color:0xffe8bd});
+  details.push({x:(b.x+b.w/2)*3,y:b.base*3+2.65,z:b.z*3-.7,sx:3.6,sy:.16,sz:1.6,color:b.style==='house'?0xf3e4c6:0x4b6978});
   if(b.style==='house') {
    // Fascia, front steps and a contrasting door surround make each home legible.
-   details.push({x:(b.x+b.w/2)*TILE,y:(b.base+b.floors)*TILE-.1,z:b.z*TILE-.18,sx:b.w*TILE+.3,sy:.2,sz:.2,color:0xf2e6c9});
-   for(const dx of [-3.05,3.05])details.push({x:(b.x+Math.floor(b.w/2)+.5)*TILE+dx,y:b.base*TILE+2.8,z:b.z*TILE-.18,sx:.13,sy:5.6,sz:.13,color:0xf2e6c9});
+   details.push({x:(b.x+b.w/2)*3,y:b.floors*3-.1,z:b.z*3-.18,sx:b.w*3+.3,sy:.2,sz:.2,color:0xf2e6c9});
+   for(const dx of [-1.6,1.6])details.push({x:(b.x+Math.floor(b.w/2)+.5)*3+dx,y:1.4,z:b.z*3-.18,sx:.13,sy:2.8,sz:.13,color:0xf2e6c9});
   }
  }
  const facade=new THREE.InstancedMesh(box,mat,details.length),dummy=new THREE.Object3D();
@@ -125,7 +116,7 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):void {
    const canvas=document.createElement('canvas');canvas.width=128;canvas.height=64;
    const ctx=canvas.getContext('2d')!;ctx.fillStyle='#24454d';ctx.fillRect(0,0,128,64);ctx.fillStyle='#fff4d8';ctx.font='bold 34px system-ui';ctx.textAlign='center';ctx.fillText(String(101+i),64,45);
    const sign=new THREE.Mesh(new THREE.PlaneGeometry(.65,.325),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(canvas),side:THREE.DoubleSide}));
-   sign.position.set((b.x+Math.floor(b.w/2)+.5)*TILE,5,b.z*TILE-.19);sign.scale.setScalar(2);sign.rotation.y=Math.PI;scene.add(sign);
+   sign.position.set((b.x+Math.floor(b.w/2)+.5)*3,2.5,b.z*3-.19);sign.rotation.y=Math.PI;scene.add(sign);
  });
  // Names on the landscape are visible approach landmarks.
  for(const poi of LOCATIONS){

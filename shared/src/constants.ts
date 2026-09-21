@@ -27,7 +27,7 @@ export const MAX_LAG_COMP_MS = 250;
 // ---------------------------------------------------------------------------
 
 /** Edge length of one build cell, in metres. Walls are one tile tall. */
-export const TILE = 6.0;
+export const TILE = 3.0;
 export const PIECE_THICKNESS = 0.25;
 
 export const GRID_MIN_XZ = -512;
@@ -64,8 +64,8 @@ export const FALL_DAMAGE_PER_MPS = 4.0;
 // Building
 // ---------------------------------------------------------------------------
 
-export const BUILD_RANGE = 24.0;
-export const EDIT_RANGE = 16.0;
+export const BUILD_RANGE = 12.0;
+export const EDIT_RANGE = 8.0;
 /** Minimum seconds between placements, so holding the button is not a firehose. */
 export const BUILD_COOLDOWN = 0.115;
 /** A freshly placed piece starts at this fraction of max HP and grows in. */
