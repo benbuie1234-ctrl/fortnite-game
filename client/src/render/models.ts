@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 
@@ -159,10 +160,8 @@ export async function loadModels(progress?: (loaded: number, total: number) => v
   const entries = Object.entries(manifest.models ?? {}) as Array<[ModelId, string]>;
   if (entries.length === 0) return library;
 
-  // Imported dynamically so the glTF loader is only downloaded when there is
-  // actually art to load. With no manifest the game stays at its original
-  // bundle size and nobody pays for a feature they are not using.
-  const { GLTFLoader } = await import("three/examples/jsm/loaders/GLTFLoader.js");
+  // Keep this import static: a lazy loader chunk can import shared Three.js
+  // exports from the entry chunk, deadlocking its top-level await in production.
   const loader = new GLTFLoader();
   const draco = new DRACOLoader().setDecoderPath("/decoders/draco/");
   loader.setDRACOLoader(draco);
