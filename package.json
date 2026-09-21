@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "deploy": "npm run build && wrangler deploy",
     "check": "tsc --noEmit",
-    "test": "sh scripts/test.sh"
+    "test": "sh scripts/test.sh",
+    "postinstall": "npm run build"
   },
   "dependencies": {
     "three": "^0.169.0"
