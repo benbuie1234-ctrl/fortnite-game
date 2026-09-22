@@ -68,22 +68,39 @@ charGroup.traverse(node => {
   }
 });
 
-// Animation files to extract and their target clip names
+// Animation files to extract and their target clip names. Paths are relative
+// to the downloads directory, so the pack's own folder and the loose exports
+// alongside it are listed the same way.
+//
+// Everything is inPlace except the jump: the simulation owns the player's
+// position, so a clip that walks its own root away from the body's collision
+// capsule desyncs the model from the thing you can actually shoot. The jump is
+// the exception because its vertical travel is the animation.
 const animConfigs = [
-  { file: 'rifle aiming idle.fbx', name: 'idle', inPlace: true },
-  { file: 'rifle run.fbx', name: 'run', inPlace: true },
-  { file: 'rifle jump.fbx', name: 'jump', inPlace: false },
-  { file: 'walking.fbx', name: 'walk', inPlace: true },
-  { file: 'firing rifle.fbx', name: 'fire', inPlace: true },
-  { file: 'reloading.fbx', name: 'reload', inPlace: true },
-  { file: 'run backwards.fbx', name: 'run_back', inPlace: true },
-  { file: 'strafe left.fbx', name: 'strafe_left', inPlace: true },
-  { file: 'strafe right.fbx', name: 'strafe_right', inPlace: true },
-  { file: 'hit reaction.fbx', name: 'hit', inPlace: true },
+  { file: 'Basic Shooter Pack/rifle aiming idle.fbx', name: 'idle', inPlace: true },
+  { file: 'Basic Shooter Pack/rifle run.fbx', name: 'run', inPlace: true },
+  { file: 'Basic Shooter Pack/rifle jump.fbx', name: 'jump', inPlace: false },
+  { file: 'Basic Shooter Pack/walking.fbx', name: 'walk', inPlace: true },
+  { file: 'Basic Shooter Pack/firing rifle.fbx', name: 'fire', inPlace: true },
+  { file: 'Basic Shooter Pack/reloading.fbx', name: 'reload', inPlace: true },
+  { file: 'Basic Shooter Pack/run backwards.fbx', name: 'run_back', inPlace: true },
+  { file: 'Basic Shooter Pack/walking backwards.fbx', name: 'walk_back', inPlace: true },
+  { file: 'Basic Shooter Pack/strafe left.fbx', name: 'strafe_left', inPlace: true },
+  { file: 'Basic Shooter Pack/strafe right.fbx', name: 'strafe_right', inPlace: true },
+  { file: 'Basic Shooter Pack/hit reaction.fbx', name: 'hit', inPlace: true },
+  // Loose exports. These carry the whole character as well as the take, which
+  // is why they are 115 MB each; only the animation is read out of them.
+  { file: 'Running Slide.fbx', name: 'slide', inPlace: true },
+  { file: 'Falling To Landing.fbx', name: 'land', inPlace: true },
+  // lockY as well: a ladder climb raises its own root half a metre over its
+  // 0.77 s, and the solver already owns the player's height while mantling --
+  // played as authored the two rises compound and the body leaves the capsule.
+  { file: 'Climbing Ladder.fbx', name: 'climb', inPlace: true, lockY: true },
+  { file: 'Knocked Out.fbx', name: 'death', inPlace: true },
 ];
 
 const clips = [];
-const animDir = "mixamo downloads/Basic Shooter Pack";
+const animDir = "mixamo downloads";
 
 for (const config of animConfigs) {
   const filePath = path.join(animDir, config.file);
@@ -103,7 +120,10 @@ for (const config of animConfigs) {
         for (let i = 0; i < track.values.length; i += 3) {
           if (config.inPlace && track.name.includes('Hips')) {
             values[i] = 0; // zero out lateral translation drift
-            values[i + 1] = track.values[i + 1]; // keep original bone-space vertical bob
+            // Vertical is kept by default: for a slide, a landing or a
+            // collapse the drop IS the animation. lockY pins it to the take's
+            // own first frame for the clips where the game drives height.
+            values[i + 1] = config.lockY ? track.values[1] : track.values[i + 1];
             values[i + 2] = 0; // zero out forward/backward translation
           } else {
             values[i] = track.values[i];

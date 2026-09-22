@@ -836,18 +836,29 @@ function frame(now: number): void {
   if (selfCharacter) {
     // Hide only our local model when the camera enters its silhouette. Other
     // players still see the full character, including while we use the scope.
-    selfCharacter.root.visible = self.alive && view.camera.position.distanceTo(new THREE.Vector3(renderSelf.x,renderSelf.y+EYE_HEIGHT,renderSelf.z))>.85;
+    selfCharacter.root.visible = view.camera.position.distanceTo(new THREE.Vector3(renderSelf.x,renderSelf.y+EYE_HEIGHT,renderSelf.z))>.85;
     selfCharacter.setWeapon(controls.inBuildMode?255:ARENA_LOADOUT[controls.slot]);
     const aiming = controls.aiming && !controls.inBuildMode;
+    // Direction of travel in the player's own frame, so the animation picks
+    // the backwards and strafing takes when they apply. Read off the velocity
+    // rather than the keys: being shoved down a ramp or carried by a slide is
+    // travel too, and the legs should agree with where the body is going.
+    const localSpeed = Math.hypot(self.vx, self.vz);
+    const sinYaw = Math.sin(controls.yaw), cosYaw = Math.cos(controls.yaw);
+    const localForward = localSpeed > 0.1 ? (-self.vx * sinYaw + self.vz * cosYaw) / localSpeed : 1;
+    const localStrafe = localSpeed > 0.1 ? (-self.vx * cosYaw - self.vz * sinYaw) / localSpeed : 0;
     selfCharacter.update(
       renderSelf.x, renderSelf.y, renderSelf.z,
       controls.yaw, controls.pitch,
-      Math.hypot(self.vx, self.vz), self.grounded, dt,
+      localSpeed, self.grounded, dt,
       self.crouch,
       self.sliding,
       aiming,
       self.mantling,
       self.vaulting,
+      localForward,
+      localStrafe,
+      self.alive,
     );
     selfCharacter.aimAt(aimPoint);
     // No nameplate on your own body.
@@ -864,7 +875,9 @@ function frame(now: number): void {
       characters.set(pose.id, ch);
     }
     const alive = (pose.state.flags & PF_ALIVE) !== 0;
-    ch.root.visible = alive;
+    // A dead player stays on screen and plays the knocked-out clip until they
+    // respawn, rather than blinking out of existence the instant they drop.
+    ch.root.visible = true;
     ch.setWeapon(pose.state.weapon);
     ch.setNameplate(nameOf(pose.id));
     // Remote speed is not transmitted; derive it from the flag the server sets
@@ -880,6 +893,10 @@ function frame(now: number): void {
       sliding,
       aiming,
       false,
+      false,
+      1,
+      0,
+      alive,
     );
     if (alive) footsteps(pose.id, pose.x, pose.y, pose.z, grounded && moving);
   }

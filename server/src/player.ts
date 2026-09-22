@@ -82,8 +82,20 @@ export class ServerPlayer implements MovementState {
   constructor(
     readonly id: number,
     readonly name: string,
-    readonly socket: WebSocket,
+    /**
+     * Null for a bot.
+     *
+     * A bot IS a ServerPlayer -- same fields, same solver, same hitboxes, same
+     * kill feed -- and the only thing it does not have is somebody on the
+     * other end of a wire. Modelling it as a null socket rather than as a
+     * separate class is what guarantees the two cannot drift apart: there is
+     * no second code path for a bot to be quietly wrong on.
+     */
+    readonly socket: WebSocket | null,
   ) {}
+
+  /** True when nobody is driving this player from a keyboard. */
+  get isBot(): boolean { return this.socket === null; }
 
   get weaponId(): number {
     return ARENA_LOADOUT[this.weaponIdx] ?? ARENA_LOADOUT[0];

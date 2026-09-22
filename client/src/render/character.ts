@@ -72,11 +72,16 @@ type BoneOffsets = ReadonlyArray<readonly [name: string, x: number, y: number, z
  */
 const VAULT_HOLD_S = 0.30;
 const MANTLE_HOLD_S = 0.14;
+/** How long the landing take runs for. Matches the trimmed clip's length. */
+const LAND_HOLD_S = 0.68;
 
 /** How far the hip drops, in metres, at a full crouch and in a slide. Paired
  *  with the poses: change one without the other and the feet leave the floor. */
 const CROUCH_DROP = -0.32;
-const SLIDE_DROP = -0.40;
+/** Zero: the slide clip lowers its own hips, so the root must not lower them
+ *  again. The hand-built slide pose this replaced had no such track and needed
+ *  the whole drop from here. */
+const SLIDE_DROP = 0;
 
 /** Knees bent, weight back, torso closed down over the weapon. Head lands at
  *  about CROUCH_HEIGHT, so the silhouette matches the shrunken capsule. */
@@ -91,38 +96,7 @@ const CROUCH_POSE: BoneOffsets = [
   ["mixamorigHead", -0.15, 0, 0],
 ];
 
-/**
- * A knee slide: trailing knee on the ground with the heel folded up behind it,
- * leading leg stretched out in front with the foot planted, torso upright with
- * only a slight lean back.
- *
- * The lean is deliberately small. The old pose put -0.45 into the hips AND
- * -0.35 into the spine, both backwards, which is not a slide -- it is a spine
- * bent the wrong way, and it read exactly like one.
- */
-const SLIDE_POSE: BoneOffsets = [
-  ["mixamorigLeftUpLeg", -1.05, 0, 0],
-  ["mixamorigLeftLeg", -0.15, 0, 0],
-  ["mixamorigLeftFoot", -0.35, 0, 0],
-  ["mixamorigRightUpLeg", 0.45, 0, 0],
-  ["mixamorigRightLeg", -1.75, 0, 0],
-  ["mixamorigSpine1", -0.15, 0, 0],
-  ["mixamorigHead", 0.15, 0, 0],
-];
 
-/** Both arms overhead onto the lip, body hanging, knees drawn up. */
-const MANTLE_POSE: BoneOffsets = [
-  ["mixamorigLeftArm", -0.60, 0, 1.50],
-  ["mixamorigLeftForeArm", -0.50, 0, 0],
-  ["mixamorigRightArm", -0.60, 0, -1.50],
-  ["mixamorigRightForeArm", 0, 0.50, -0.30],
-  ["mixamorigSpine1", 0.30, 0, 0],
-  ["mixamorigHead", -0.30, 0, 0],
-  ["mixamorigLeftUpLeg", -0.70, 0, 0],
-  ["mixamorigLeftLeg", -1.00, 0, 0],
-  ["mixamorigRightUpLeg", -0.10, 0, 0],
-  ["mixamorigRightLeg", -0.45, 0, 0],
-];
 
 /** A hurdle: leading knee driven up and through, trailing leg tucked in
  *  behind it, chest folded down over the obstacle, free hand pushed down to
@@ -138,6 +112,71 @@ const VAULT_POSE: BoneOffsets = [
   ["mixamorigLeftForeArm", -0.30, 0, 0],
   ["mixamorigRightArm", -0.30, 0, 0],
 ];
+
+/** Clips that play once and hold their last frame rather than looping. */
+const ONE_SHOT_CLIPS = new Set(["slide", "land", "death"]);
+
+/**
+ * Seconds of a take that are actually usable, for the ones that are not.
+ *
+ * "Running Slide" is a complete performance: three strides of a run, a drop
+ * into a baseball slide that ends almost flat on the character's back, and a
+ * recovery back to standing -- 1.53 seconds of it. A slide in this game lasts
+ * as long as the player's momentum does and has to hold a pose the whole time,
+ * so playing the take is wrong twice over: it loops back to running, and its
+ * deepest frame puts the head at 46 cm when the collision capsule it is
+ * supposed to fill is 1.15 m tall.
+ *
+ * The window below is the entry and the seated part of the slide only, which
+ * holds a knee-down pose with the head around 0.95 m -- inside the capsule,
+ * and the shape a player expects from a slide. The rest of the take is cut.
+ */
+const CLIP_WINDOW: Record<string, readonly [number, number]> = {
+  slide: [0.10, 0.24],
+  // "Falling To Landing" is a quarter second of falling, an impact that takes
+  // the hips from 0.89 m down to 0.56, and a recovery. It is triggered on
+  // touchdown, so the falling quarter has already happened.
+  land: [0.27, 0.95],
+  // "Knocked Out" stands still for a second and a half before it collapses.
+  // Nobody wants to watch that after being shot.
+  death: [1.60, 2.90],
+};
+
+/**
+ * The ground speed each locomotion clip looks natural at, in m/s./**
+ * The ground speed each locomotion clip looks natural at, in m/s.
+ *
+ * Every clip is in place, so nothing about the animation itself says how fast
+ * the character is travelling -- the playback rate is the only thing that
+ * couples the feet to the ground. These are the speeds at which each take
+ * plays at 1x; the ratio of the real speed to this drives timeScale.
+ *
+ * Clips not listed here (idle, jump, slide, climb, land, death) are events
+ * rather than locomotion and always play at their authored rate.
+ */
+const CLIP_SPEED: Record<string, number> = {
+  walk: 3.0,
+  run: 7.0,
+  walk_back: 3.0,
+  run_back: 6.0,
+  strafe_left: 5.0,
+  strafe_right: 5.0,
+};
+
+/**
+ * Every bone any pose layer writes to.
+ *
+ * The union of the tables above plus the arm and spine bones the aim and look
+ * layers touch. It exists so restoreClipPose knows exactly which bones have to
+ * have the clip's output put back before the mixer runs; a bone that is bent
+ * but missing from here winds itself up, which is the whole failure this list
+ * prevents.
+ */
+const POSED_BONES: readonly string[] = [...new Set([
+  ...CROUCH_POSE, ...VAULT_POSE,
+].map(([name]) => name).concat([
+  "mixamorigRightArm", "mixamorigLeftArm", "mixamorigSpine1", "mixamorigHead",
+]))];
 
 /**
  * One player's body. Built from boxes so there is no asset pipeline, no
@@ -178,9 +217,16 @@ export class Character {
   /** Seconds left of the minimum hold on a climb pose. See VAULT_HOLD_S. */
   private mantleHold = 0;
   private vaultHold = 0;
+  /** Seconds left of the landing clip, and last frame's stance, so the
+   *  touchdown can be spotted here rather than plumbed in from the caller. */
+  private landHold = 0;
+  private wasGrounded = true;
   /** getObjectByName walks the whole hierarchy; the rig has 67 bones and the
    *  poses below ask for a dozen of them every frame, per character. */
   private boneCache = new Map<string, THREE.Object3D | null>();
+  /** The clip's own output for each posed bone, before this frame's offsets.
+   *  See restoreClipPose -- without it the offsets compound. */
+  private clipPose = new Map<THREE.Object3D, THREE.Quaternion>();
   /** Smoothed crouch, 0-1. Smoothed here rather than by the caller because
    *  remote players only send a crouch BIT, and a bit applied straight to the
    *  pose snaps. */
@@ -362,7 +408,18 @@ export class Character {
       });
       this.root.add(art);
       this.mixer = new THREE.AnimationMixer(art);
-      for (const clip of models!.animations("character")) this.actions.set(clip.name, this.mixer.clipAction(clip));
+      for (const source of models!.animations("character")) {
+        const clip = trimToUsableRange(source);
+        const action = this.mixer.clipAction(clip);
+        if (ONE_SHOT_CLIPS.has(clip.name)) {
+          // These are events, not cycles. Clamping holds the last frame, which
+          // is what keeps a slide in its slide and leaves a body on the floor
+          // instead of springing back to the top of the take.
+          action.setLoop(THREE.LoopOnce, 1);
+          action.clampWhenFinished = true;
+        }
+        this.actions.set(clip.name, action);
+      }
       const idle = this.actions.get("idle");
       if (idle) {
         idle.play();
@@ -464,36 +521,58 @@ export class Character {
     aiming = false,
     mantling = false,
     vaulting = false,
+    /** Direction of travel in the player's own frame: +1 forward, -1 back,
+     *  and +1 strafe is to their right. Picks the locomotion clip. */
+    forward = 1,
+    strafe = 0,
+    alive = true,
   ): void {
-    // The three posed states are built by ADDING offsets to a clip, so the
-    // clip underneath has to be a still one or the legs keep running inside
-    // the pose. Idle is that clip for all three -- they were authored against
-    // it -- and the existing crossfade carries the transition.
-    //
     // A vault is a tick or two of simulation: long enough to put the player on
     // the other side of a crate, far too short to see at any frame rate. Both
     // climbs are latched for a moment so the move reads as a move rather than
     // as a flicker of the run cycle.
+    // Touching down plays the landing take, but only when the player is not
+    // already running it off: interrupting a sprint to absorb a 30 cm hop
+    // looks worse than not animating the landing at all.
+    if (grounded && !this.wasGrounded && speed < 4 && this.actions.has("land")) {
+      this.landHold = LAND_HOLD_S;
+    } else if (!grounded) {
+      this.landHold = 0;
+    } else {
+      this.landHold = Math.max(0, this.landHold - dt);
+    }
+    this.wasGrounded = grounded;
     this.vaultHold = vaulting ? VAULT_HOLD_S : Math.max(0, this.vaultHold - dt);
     this.mantleHold = mantling ? MANTLE_HOLD_S : Math.max(0, this.mantleHold - dt);
     const showVault = vaulting || this.vaultHold > 0;
     const showMantle = (mantling || this.mantleHold > 0) && !showVault;
-    const posed = sliding || showMantle || showVault;
-    const moveClip = speed > 4.5 ? "run" : speed > 0.4 ? (this.actions.has("walk") ? "walk" : "run") : "idle";
-    const next = this.actions.get(posed ? "idle" : !grounded ? "jump" : moveClip);
+    // Only the states without a clip of their own still need a built pose on
+    // top of a still one; the rest are animations now.
+    const posed = showVault;
+    const clip = this.pickClip(
+      speed, grounded, sliding, showMantle, showVault, alive, forward, strafe,
+      this.landHold > 0,
+    );
+    const next = this.actions.get(clip) ?? this.actions.get("idle");
     if (next && next !== this.currentAction) {
       next.reset().fadeIn(.18).play();
       this.currentAction?.fadeOut(.18);
       this.currentAction = next;
     }
     if (this.currentAction) {
-      // The run clip was authored at one pace. Sprinting is over 70% faster
-      // than walking now, so playing it at 1x makes a sprint read as a jog
-      // with the ground sliding underneath it.
-      this.currentAction.timeScale = next === this.actions.get("run") && !posed
-        ? Math.max(0.7, Math.min(1.9, speed / 7)) : 1;
+      // Locomotion clips are all in place, so the only thing that makes the
+      // feet keep up with the ground is the playback rate. Each one names the
+      // pace it was authored at and is played at the ratio of the real speed
+      // to that -- which is what stops a sprint (12.25 m/s) reading as a jog
+      // with the world sliding underneath it, and stops a crouch-walk (3.6)
+      // reading as a scramble.
+      const nominal = posed ? 0 : CLIP_SPEED[clip] ?? 0;
+      this.currentAction.timeScale = nominal > 0
+        ? Math.max(0.6, Math.min(2.0, speed / nominal)) : 1;
     }
+    this.restoreClipPose();
     this.mixer?.update(dt);
+    this.captureClipPose();
 
     if (this.mixer) {
       this.crouch += (crouchTarget - this.crouch) * (1 - Math.exp(-14 * dt));
@@ -508,9 +587,10 @@ export class Character {
       const mantle = this.mantleMix < 0.001 ? 0 : this.mantleMix;
       const vault = this.vaultMix < 0.001 ? 0 : this.vaultMix;
 
-      // Both stances fold the legs rather than shrinking them, so the hip has
-      // to come down by the amount the fold actually costs. Sliding wins over
-      // crouching because a slide IS the crouch, taken lower.
+      // Crouch folds the legs rather than shrinking them, so the hip has to
+      // come down by the amount the fold actually costs. The slide clip lowers
+      // its own hips, so it only needs the difference between where the clip
+      // puts them and the floor.
       const drop = SLIDE_DROP * slide + CROUCH_DROP * crouch * (1 - slide);
       this.root.position.set(x, y + drop, z);
       this.root.rotation.y = -yaw;
@@ -523,9 +603,10 @@ export class Character {
         this.bend("mixamorigLeftArm", 0.30);
       }
 
+      // Sliding and mantling have clips of their own now, so only crouch and
+      // the vault are still built by hand. Crouch is faded out under all three
+      // so its knee bend does not fight an animation that has its own.
       this.applyPose(CROUCH_POSE, crouch * (1 - slide) * (1 - mantle) * (1 - vault));
-      this.applyPose(SLIDE_POSE, slide);
-      this.applyPose(MANTLE_POSE, mantle);
       this.applyPose(VAULT_POSE, vault);
 
       // Spine and head follow the camera, but only as far as the pose leaves
@@ -641,6 +722,80 @@ export class Character {
     return found;
   }
 
+  /**
+   * Which clip should be playing.
+   *
+   * Ordered by how much the state overrides everything else: being dead, then
+   * the two climbs, then a slide, then being airborne, then ordinary
+   * locomotion. Direction matters for the last one -- the rig has backwards
+   * and strafing takes and they were being ignored, so a player retreating or
+   * side-stepping ran forwards on the spot while travelling the other way.
+   */
+  private pickClip(
+    speed: number, grounded: boolean, sliding: boolean,
+    mantling: boolean, vaulting: boolean, alive: boolean,
+    forward: number, strafe: number, landing: boolean,
+  ): string {
+    const has = (name: string) => this.actions.has(name);
+    if (!alive && has("death")) return "death";
+    if (mantling && has("climb")) return "climb";
+    if (vaulting) return has("jump") ? "jump" : "idle";
+    if (sliding && has("slide")) return "slide";
+    if (!grounded) return has("jump") ? "jump" : "idle";
+    if (landing) return "land";
+    if (speed <= 0.4) return "idle";
+
+    // Sideways only wins when it is clearly the dominant direction, so a
+    // diagonal still runs rather than flickering between two clips.
+    if (Math.abs(strafe) > Math.abs(forward) + 0.2) {
+      const side = strafe > 0 ? "strafe_right" : "strafe_left";
+      if (has(side)) return side;
+    }
+    if (forward < -0.2) {
+      const back = speed > 4.5 ? "run_back" : "walk_back";
+      if (has(back)) return back;
+      if (has("run_back")) return "run_back";
+    }
+    if (speed > 4.5) return "run";
+    return has("walk") ? "walk" : "run";
+  }
+
+  /**
+   * Put every posed bone back to the clip's own output before the mixer runs.
+   *
+   * The pose layers add to whatever rotation a bone is carrying, which assumes
+   * the mixer has just overwritten it with the clip's value. It has not,
+   * always: AnimationMixer compares the value it is about to write against the
+   * one it wrote last frame and SKIPS the write when they match --
+   *
+   *     if ( buffer[ i ] !== buffer[ i + stride ] ) { this.binding.setValue( … ); break; }
+   *
+   * -- which is a real optimisation for a rig where most bones are still, and
+   * a trap for anything layering on top of it. A bone the clip holds constant
+   * gets written exactly once, and every frame after that the offset lands on
+   * the previous frame's result instead of on the clip's. The walk clip holds
+   * the head bone constant, so crouch-walking wound the head a sixth of a
+   * radian further round its neck every frame -- about nine turns a second.
+   *
+   * So the clip's output is remembered per bone and put back first. A write
+   * the mixer skips then leaves the correct value in place rather than last
+   * frame's, and one it does perform overwrites it as usual.
+   */
+  private restoreClipPose(): void {
+    for (const [bone, quaternion] of this.clipPose) bone.quaternion.copy(quaternion);
+  }
+
+  /** Remember what the clip left on each posed bone, offsets not yet applied. */
+  private captureClipPose(): void {
+    for (const name of POSED_BONES) {
+      const bone = this.bone(name);
+      if (!bone) continue;
+      const saved = this.clipPose.get(bone);
+      if (saved) saved.copy(bone.quaternion);
+      else this.clipPose.set(bone, bone.quaternion.clone());
+    }
+  }
+
   /** Add to a bone's rotation. Never assign: see BoneOffsets. */
   private bend(name: string, x: number, y = 0, z = 0): void {
     const bone = this.bone(name);
@@ -733,6 +888,24 @@ export function walkingLegPose(hipY: number, swing: number): { hip: number; knee
 
 function clamp(v: number): number {
   return v < -1 ? -1 : v > 1 ? 1 : v;
+}
+
+/**
+ * Cut a clip down to CLIP_WINDOW, if it has one. Others pass straight through.
+ *
+ * Expressed in hundredths of a second (fps = 100) rather than in frames,
+ * because what matters is where the performance is in time and the takes are
+ * not all exported at the same rate.
+ */
+function trimToUsableRange(clip: THREE.AnimationClip): THREE.AnimationClip {
+  const window = CLIP_WINDOW[clip.name];
+  if (!window) return clip;
+  const trimmed = THREE.AnimationUtils.subclip(
+    clip, clip.name, Math.round(window[0] * 100), Math.round(window[1] * 100), 100,
+  );
+  // A window that caught no keyframes would silently drop the whole clip, so
+  // fall back to the original rather than animating nothing.
+  return trimmed.tracks.length > 0 ? trimmed : clip;
 }
 
 function physical(color: number, roughness = 0.72, metalness = 0): THREE.MeshStandardMaterial {

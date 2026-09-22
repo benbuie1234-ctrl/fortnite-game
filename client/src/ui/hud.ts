@@ -381,7 +381,10 @@ export class Hud {
     this.netstat.innerHTML =
       `<b style="color:${colour};font-size:14px">${rounded}</b> fps${capNote}` +
       ` &nbsp;·&nbsp; <b>${frameMs}</b> ms/frame` +
-      `<br/><b>${Math.round(ping)}</b> ms ping &nbsp;·&nbsp; <b>${pending}</b> queued`;
+      // "in flight", not "queued": this is unacknowledged INPUT, a netcode
+      // stat that sits at 1-3 and moves every tick. It was being read as a
+      // count of people in the game, which it has never been.
+      `<br/><b>${Math.round(ping)}</b> ms ping &nbsp;·&nbsp; <b>${pending}</b> inputs in flight`;
   }
 
   /** Call once per frame to expire the transient overlays. */

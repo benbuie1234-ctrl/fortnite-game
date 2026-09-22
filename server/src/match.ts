@@ -17,6 +17,7 @@ import { stepPlayer, fallDamage, BTN_FIRE, BTN_AIM, BTN_RELOAD, BTN_JUMP } from 
 import { weaponById, ARENA_LOADOUT } from "@shared/weapons";
 import { CritterState } from "@shared/critters";
 import { ServerPlayer } from "./player";
+import { BotBrain, pickBotName } from "./bot";
 import { resolveFire, tryPlace, beginReload, finishReloads } from "./combat";
 import { BUILD_SHIELD } from "@shared/placement";
 import { SLOT_SHIELD } from "@shared/build";
@@ -33,10 +34,27 @@ const MAX_INPUTS_PER_TICK = 4;
 const INPUT_TIMEOUT_MS = 45_000;
 const MATS_PER_SECOND = 2;
 
+/**
+ * How many bots a room keeps alongside its humans.
+ *
+ * A match with one person in it is a person walking around an empty map, which
+ * is the worst possible first impression, so the room tops itself up to this
+ * many players and fills the gap with bots. They yield immediately: the moment
+ * a real player wants the slot, a bot leaves to make room, so bots can never
+ * be the reason somebody gets "match full".
+ *
+ * Deliberately only while somebody is actually here. Bots in an empty room
+ * would keep the Durable Object ticking at 30 Hz forever, which is duration
+ * billing for a match nobody is playing.
+ */
+const ROOM_TARGET_POPULATION = 4;
+
 export class MatchRoom implements DurableObject {
   private world = new World();
   private players = new Map<number, ServerPlayer>();
   private bySocket = new Map<WebSocket, ServerPlayer>();
+  /** One mind per bot, keyed by the player id it drives. */
+  private brains = new Map<number, BotBrain>();
   private events: GameEvent[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
   private tickCount = 0;
@@ -55,6 +73,8 @@ export class MatchRoom implements DurableObject {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
     }
+    // A bot never costs a human their seat.
+    if (this.players.size >= MAX_PLAYERS_PER_MATCH) this.removeOneBot();
     if (this.players.size >= MAX_PLAYERS_PER_MATCH) {
       return new Response("match full", { status: 503 });
     }
@@ -94,6 +114,7 @@ export class MatchRoom implements DurableObject {
 
     this.sendWelcome(player);
     this.sendFullWorld(player);
+    this.fillWithBots();
     this.broadcastMatchState();
     this.startTicking();
 
@@ -132,7 +153,7 @@ export class MatchRoom implements DurableObject {
           const ahead = (cmd.seq - player.lastReceivedSeq) & 0xffff;
           if (player.receivedInput && (ahead === 0 || ahead > 0x8000)) continue;
           if (player.inputQueue.length >= 128) {
-            player.socket.close(1008, "Input backlog exceeded; please reconnect");
+            player.socket?.close(1008, "Input backlog exceeded; please reconnect");
             return;
           }
           player.receivedInput = true;
@@ -148,7 +169,7 @@ export class MatchRoom implements DurableObject {
         const clientTime = r.u32();
         const w = new Writer(16);
         w.u8(S_PONG).u32(clientTime).u32(Date.now() >>> 0);
-        player.socket.send(w.finish());
+        player.socket?.send(w.finish());
         break;
       }
       case C_HELLO:
@@ -159,7 +180,7 @@ export class MatchRoom implements DurableObject {
   }
 
   private sendWelcome(player: ServerPlayer): void {
-    player.socket.send(JSON.stringify({
+    player.socket?.send(JSON.stringify({
       t: S_WELCOME,
       id: player.id,
       name: player.name,
@@ -192,13 +213,13 @@ export class MatchRoom implements DurableObject {
       n++;
     }
     w.patchU16(countAt, n);
-    player.socket.send(w.finish());
+    player.socket?.send(w.finish());
   }
 
   private broadcastJson(obj: unknown): void {
     const text = JSON.stringify(obj);
     for (const p of this.players.values()) {
-      try { p.socket.send(text); } catch { /* socket closing */ }
+      try { p.socket?.send(text); } catch { /* socket closing */ }
     }
   }
 
@@ -243,10 +264,60 @@ export class MatchRoom implements DurableObject {
   private removePlayer(player: ServerPlayer): void {
     if (!this.players.has(player.id)) return;
     this.players.delete(player.id);
-    this.bySocket.delete(player.socket);
-    try { player.socket.close(); } catch { /* already closed */ }
+    if (player.socket) this.bySocket.delete(player.socket);
+    this.brains.delete(player.id);
+    try { player.socket?.close(); } catch { /* already closed */ }
+    // Bots exist for the benefit of the people in the room. With nobody left
+    // they are just a 30 Hz tick nobody is watching, so they go too -- which
+    // is also what lets the room fall idle and stop billing.
+    if (!player.isBot && this.humanCount === 0) this.clearBots();
     this.broadcastMatchState();
     if (this.players.size === 0) this.stopTicking();
+  }
+
+  // -------------------------------------------------------------------------
+  // Bots
+  // -------------------------------------------------------------------------
+
+  private get humanCount(): number {
+    let n = 0;
+    for (const p of this.players.values()) if (!p.isBot) n++;
+    return n;
+  }
+
+  /** Top the room up to ROOM_TARGET_POPULATION, but only while a human is in it. */
+  private fillWithBots(): void {
+    if (this.humanCount === 0) return;
+    const taken = new Set([...this.players.values()].map((p) => p.name));
+    while (this.players.size < ROOM_TARGET_POPULATION) {
+      const id = this.allocateId();
+      if (id < 0) return;
+      const name = pickBotName(taken);
+      taken.add(name);
+      const bot = new ServerPlayer(id, name, null);
+      const spawn = this.pickSpawn();
+      bot.resetForSpawn(spawn.x, spawn.y, spawn.z, spawn.yaw);
+      // Never times out: there is no socket to go quiet on us, and the
+      // inactivity sweep would otherwise remove every bot after 45 seconds.
+      bot.lastInputAtMs = Number.MAX_SAFE_INTEGER;
+      this.players.set(id, bot);
+      this.brains.set(id, new BotBrain());
+    }
+  }
+
+  /** Drop one bot, preferring a dead one so a fight is not interrupted. */
+  private removeOneBot(): void {
+    let victim: ServerPlayer | null = null;
+    for (const p of this.players.values()) {
+      if (!p.isBot) continue;
+      if (!victim || (!p.alive && victim.alive)) victim = p;
+    }
+    if (victim) this.removePlayer(victim);
+  }
+
+  /** The last human leaving takes the bots with them. */
+  private clearBots(): void {
+    for (const p of [...this.players.values()]) if (p.isBot) this.removePlayer(p);
   }
 
   private startTicking(): void {
@@ -283,10 +354,23 @@ export class MatchRoom implements DurableObject {
     const nowSec = nowMs / 1000;
     this.tickCount++;
 
+    // Bots write their input the same way a socket would have delivered one,
+    // so stepOnePlayer below cannot tell the difference and does not try to.
+    if (this.brains.size > 0) {
+      const everyone = [...this.players.values()];
+      for (const [id, brain] of this.brains) {
+        const bot = this.players.get(id);
+        if (!bot) { this.brains.delete(id); continue; }
+        if (bot.inputQueue.length < MAX_INPUTS_PER_TICK) {
+          bot.inputQueue.push(brain.think(bot, this.world, everyone, nowSec));
+        }
+      }
+    }
+
     for (const player of [...this.players.values()]) {
       if (nowMs - player.lastInputAtMs > INPUT_TIMEOUT_MS) {
         try {
-          player.socket.send(JSON.stringify({ t: S_KICK, reason: "timed out" }));
+          player.socket?.send(JSON.stringify({ t: S_KICK, reason: "timed out" }));
         } catch { /* already gone */ }
         this.removePlayer(player);
         continue;
@@ -496,7 +580,7 @@ export class MatchRoom implements DurableObject {
         events: this.events,
       });
 
-      try { me.socket.send(w.finish()); } catch { /* socket closing */ }
+      try { me.socket?.send(w.finish()); } catch { /* socket closing */ }
     }
   }
 }

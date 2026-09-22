@@ -12,7 +12,10 @@ const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.05,100);cons
 const pose=document.getElementById('pose') as unknown as HTMLSelectElement,angle=document.getElementById('angle') as unknown as HTMLSelectElement;
 let last=performance.now(),minFoot=Infinity,maxFoot=-Infinity;
 pose.onchange=()=>{minFoot=Infinity;maxFoot=-Infinity;};
-function frame(t:number){requestAnimationFrame(frame);const dt=Math.min(.05,(t-last)/1000);last=t;const v=pose.value,c=v.includes('crouch'),moving=v==='run'||v==='crouchwalk'||v==='slide';const sliding=v==='slide';ch.update(0,0,0,0,0,moving?(c?2:sliding?12:6):0,v!=='jump'&&v!=='vault'&&v!=='mantle',dt,c||sliding?1:0,sliding,v==='aim',v==='mantle',v==='vault');ch.aimAt(new THREE.Vector3(0,1.2,20));
+function frame(t:number){requestAnimationFrame(frame);const dt=Math.min(.05,(t-last)/1000);last=t;const v=pose.value,c=v.includes('crouch'),sliding=v==='slide';
+const speeds:Record<string,number>={run:6,crouchwalk:2,slide:12,back:6,strafe:5,sprint:12.25};
+const spd=speeds[v]??0;const fwd=v==='back'?-1:v==='strafe'?0:1,str=v==='strafe'?1:0;
+ch.update(0,0,0,0,0,spd,v!=='jump'&&v!=='vault'&&v!=='mantle',dt,c||sliding?1:0,sliding,v==='aim',v==='mantle',v==='vault',fwd,str,v!=='death');ch.aimAt(new THREE.Vector3(0,1.2,20));
 // Dev bone tweaker. Set window.poseTune = {mixamorigSpine:[x,y,z], ...} from the
 // console to dial a pose in without an edit-reload cycle, and window.poseRootY
 // to shift the body. Applied after update(), so it wins for the frame.
