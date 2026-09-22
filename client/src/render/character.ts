@@ -341,6 +341,24 @@ export class Character {
 
       if (isBlockRanger) {
         for (const name of names) (this as unknown as Record<string, THREE.Object3D>)[name] = art.getObjectByName(name)!;
+        art.traverse(node => {
+          if (!(node instanceof THREE.Mesh)) return;
+          node.castShadow = true;
+          node.receiveShadow = true;
+          for (const mat of Array.isArray(node.material) ? node.material : [node.material]) {
+            if (mat instanceof THREE.MeshStandardMaterial) {
+              if (mat.name === "Armor") mat.color.setHex(skin.colors.primary);
+              if (mat.name === "Suit") mat.color.setHex(skin.colors.secondary);
+              if (mat.name === "Accent") mat.color.setHex(skin.colors.accent);
+              if (node.name.startsWith("visor")) {
+                mat.color.setHex(skin.colors.visor);
+                mat.roughness = 0.18;
+                mat.metalness = 0.65;
+              }
+            }
+          }
+        });
+        this.root.add(art);
       } else {
         const rightHand = art.getObjectByName("mixamorigRightHand") || art.getObjectByName("RightHand");
         if (rightHand) {
@@ -366,50 +384,47 @@ export class Character {
           this.root.add(this.blueprint);
           this.blueprint.position.set(-0.25, 1.25, 0.35);
         }
-      }
 
-      const texLoader = new THREE.TextureLoader();
-      const bodyTex = texLoader.load('/textures/character/body_diffuse.jpg');
-      bodyTex.colorSpace = THREE.SRGBColorSpace;
-      const headTex = texLoader.load('/textures/character/head_diffuse.jpg');
-      headTex.colorSpace = THREE.SRGBColorSpace;
+        const texLoader = new THREE.TextureLoader();
+        const bodyTex = texLoader.load('/textures/character/body_diffuse.jpg');
+        bodyTex.colorSpace = THREE.SRGBColorSpace;
+        const headTex = texLoader.load('/textures/character/head_diffuse.jpg');
+        headTex.colorSpace = THREE.SRGBColorSpace;
 
-      art.traverse(node => {
-        if (node instanceof THREE.SkinnedMesh) {
-          node.frustumCulled = false;
-        }
-        if (!(node instanceof THREE.Mesh)) return;
-        node.castShadow = true;
-        node.receiveShadow = true;
-        const mats = Array.isArray(node.material) ? node.material : [node.material];
-        mats.forEach((mat, idx) => {
-          if (mat instanceof THREE.MeshStandardMaterial) {
-            mat.color.setHex(0xffffff);
-            mat.map = idx === 0 ? bodyTex : headTex;
-            mat.roughness = 0.78;
-            mat.metalness = 0.1;
-            mat.needsUpdate = true;
+        art.traverse(node => {
+          if (node instanceof THREE.SkinnedMesh) {
+            node.frustumCulled = false;
           }
+          if (!(node instanceof THREE.Mesh)) return;
+          node.castShadow = true;
+          node.receiveShadow = true;
+          const mats = Array.isArray(node.material) ? node.material : [node.material];
+          mats.forEach((mat, idx) => {
+            if (mat instanceof THREE.MeshStandardMaterial) {
+              mat.color.setHex(0xffffff);
+              mat.map = idx === 0 ? bodyTex : headTex;
+              mat.roughness = 0.78;
+              mat.metalness = 0.1;
+              mat.needsUpdate = true;
+            }
+          });
         });
-      });
-      this.root.add(art);
-      this.mixer = new THREE.AnimationMixer(art);
-      for (const source of models!.animations("character")) {
-        const clip = trimToUsableRange(source);
-        const action = this.mixer.clipAction(clip);
-        if (ONE_SHOT_CLIPS.has(clip.name)) {
-          // These are events, not cycles. Clamping holds the last frame, which
-          // is what keeps a slide in its slide and leaves a body on the floor
-          // instead of springing back to the top of the take.
-          action.setLoop(THREE.LoopOnce, 1);
-          action.clampWhenFinished = true;
+        this.root.add(art);
+        this.mixer = new THREE.AnimationMixer(art);
+        for (const source of models!.animations("character")) {
+          const clip = trimToUsableRange(source);
+          const action = this.mixer.clipAction(clip);
+          if (ONE_SHOT_CLIPS.has(clip.name)) {
+            action.setLoop(THREE.LoopOnce, 1);
+            action.clampWhenFinished = true;
+          }
+          this.actions.set(clip.name, action);
         }
-        this.actions.set(clip.name, action);
-      }
-      const idle = this.actions.get("idle");
-      if (idle) {
-        idle.play();
-        this.currentAction = idle;
+        const idle = this.actions.get("idle");
+        if (idle) {
+          idle.play();
+          this.currentAction = idle;
+        }
       }
     }
     this.setNameplate(name);
@@ -458,6 +473,20 @@ export class Character {
     this.materials[2].color.setHex(skin.colors.accent);
     this.materials[3].color.setHex(skin.colors.skin);
     this.materials[4].color.setHex(skin.colors.visor);
+    this.root.traverse(node => {
+      if (node instanceof THREE.Mesh) {
+        for (const mat of Array.isArray(node.material) ? node.material : [node.material]) {
+          if (mat instanceof THREE.MeshStandardMaterial) {
+            if (mat.name === "Armor") mat.color.setHex(skin.colors.primary);
+            if (mat.name === "Suit") mat.color.setHex(skin.colors.secondary);
+            if (mat.name === "Accent") mat.color.setHex(skin.colors.accent);
+            if (node.name.startsWith("visor")) {
+              mat.color.setHex(skin.colors.visor);
+            }
+          }
+        }
+      }
+    });
   }
 
   /** Hide the plate entirely. Used for the local player, who does not need a
@@ -634,8 +663,21 @@ export class Character {
     }
 
     const swing = moving && grounded ? Math.sin(this.phase) * Math.min(0.85, speed * 0.13) : 0;
-    this.armL.rotation.x = -1.05-pitch*.8-swing*.1;
-    this.armR.rotation.x = -.8-pitch*.8+swing*.1;
+    this.armL.rotation.x = -1.05 - pitch * 0.8 - swing * 0.1;
+    this.armR.rotation.x = -0.8 - pitch * 0.8 + swing * 0.1;
+
+    if (sliding) {
+      this.armL.rotation.x = -0.4;
+      this.armR.rotation.x = -0.4;
+    }
+    if (aiming && this.weaponId !== 255) {
+      this.armL.rotation.x = -1.35 - pitch * 0.9;
+      this.armR.rotation.x = -1.25 - pitch * 0.9;
+    }
+    if (mantling) {
+      this.armL.rotation.x = -2.2;
+      this.armR.rotation.x = -2.2;
+    }
 
     // Idle breathing, and a slight bob while running.
     const bob = moving && grounded ? Math.abs(Math.sin(this.phase)) * 0.035 : Math.sin(this.phase * 0.5) * 0.012;
@@ -647,7 +689,7 @@ export class Character {
     // silhouette read as a crouch from across the map, which is the whole
     // point of a stance that also shrinks your hitbox.
     const hipY = LEG_H + (CROUCH_HIP_Y - LEG_H) * crouch;
-    const lean = crouch * CROUCH_LEAN;
+    const lean = crouch * CROUCH_LEAN + (sliding ? 0.35 : 0);
 
     // Where the foot has to end up, measured from the hip. Straight down while
     // standing; as the hip falls the same foot is closer, and the knee bends by
@@ -660,11 +702,11 @@ export class Character {
     this.hipR.position.y = hipY;
     // A positive rotation about X swings the limb BACKWARD (the model faces
     // +Z), so the forward reach of the knee is negative.
-    this.hipL.rotation.x = left.hip;
-    this.hipR.rotation.x = right.hip;
+    this.hipL.rotation.x = sliding ? -1.15 : left.hip;
+    this.hipR.rotation.x = sliding ? -1.15 : right.hip;
     // The trailing leg lifts its heel, which is most of what sells a walk.
-    this.kneeL.rotation.x = left.knee;
-    this.kneeR.rotation.x = right.knee;
+    this.kneeL.rotation.x = sliding ? 1.55 : left.knee;
+    this.kneeR.rotation.x = sliding ? 1.55 : right.knee;
     this.levelFeet();
 
     if (!grounded) {
