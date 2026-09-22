@@ -233,7 +233,11 @@ console.log("trees");
 {
   // A point outside the trunk must fall to the ground, never land on an invisible disc.
   const w = new World(); buildArena(w);
-  const tree = SCENERY.find(p => p.kind === 'tree')!;
+  // A tree standing on its own: in the forest the next trunk is a metre away,
+  // and landing on THAT would say nothing about whether this one has a disc
+  // around it.
+  const tree = SCENERY.find((p, i) => p.kind === 'tree'
+    && SCENERY.every((q, j) => j === i || Math.hypot(q.x - p.x, q.z - p.z) > 4))!;
   const p = { ...newMovementState(), x: tree.x + 1.3, y: tree.y + 5, z: tree.z };
   for (let i = 0; i < 150; i++) stepPlayer(p, input(0, 0), w, TICK_DT);
   check('no floating tree platform remains', p.grounded && p.y < tree.y + 1);

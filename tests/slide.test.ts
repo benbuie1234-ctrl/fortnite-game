@@ -35,9 +35,9 @@ function sprinting(w: World, x: number, z: number, yaw = EAST): MovementState {
 // ---------------------------------------------------------------------------
 console.log("a hill is worth finding");
 {
-  // The long western face of the eastern hill: ~10 m of descent over ~28 m,
-  // steepest around half-grade. Flat ground for the control is the same map
-  // well past the bottom of it.
+  // The eastern face below Crestview Heights: about nineteen metres of descent
+  // over thirty, which is the longest sustained fall line on the island. The
+  // control is the mesa top itself, which the plaza pad holds dead level.
   const w = new World();
   w.terrainEnabled = true;
 
@@ -55,8 +55,8 @@ console.log("a hill is worth finding");
     return { s, entry, peak, sliding, travelled };
   }
 
-  const down = slide(140, 6, 200);
-  const flat = slide(178, 6, 200);
+  const down = slide(156, -156, 200);
+  const flat = slide(56, -176, 200);
   console.log(`    downhill: ${down.sliding} ticks, ${down.travelled.toFixed(1)} m, peak ${down.peak.toFixed(1)} m/s`);
   console.log(`    flat:     ${flat.sliding} ticks, ${flat.travelled.toFixed(1)} m, peak ${flat.peak.toFixed(1)} m/s`);
 
@@ -78,7 +78,7 @@ console.log("a hill is worth finding");
   // Uphill is the same rule with the sign flipped, which is what stops a
   // slide being a way to travel everywhere.
   const up = (() => {
-    const s = sprinting(w, 166, 6, Math.PI / 2); // facing back up the slope
+    const s = sprinting(w, 186, -156, Math.PI / 2); // at the foot, facing back up
     let sliding = 0;
     for (let i = 0; i < 150; i++) {
       stepPlayer(s, input(1, BTN_SPRINT | BTN_CROUCH, Math.PI / 2), w, TICK_DT);

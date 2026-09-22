@@ -86,13 +86,16 @@ function highestUnder(cx: number, cz: number, r: number): number {
 for (let i = 0; i < 16; i++) {
   const cx = (random() - 0.5) * 380;
   const cz = (random() - 0.5) * 380;
-  const r = 14 + random() * 22;
+  const r = 12 + random() * 16;
   CRITTERS.push({
     kind: CRITTER_BIRD,
     cx, cz, r,
     rate: 0.16 + random() * 0.2,
     phase: random() * Math.PI * 2,
-    height: 16 + random() * 14,
+    // Height above the highest ground under the loop. The island has enough
+    // relief that a loop hanging off a hillside is already well clear of the
+    // low side, so this only has to cover the flat case.
+    height: 13 + random() * 9,
     base: highestUnder(cx, cz, r),
     radius: BIRD_RADIUS,
   });

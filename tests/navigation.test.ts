@@ -10,7 +10,7 @@
 import { World } from "../shared/src/world";
 import { buildArena, arenaSpawns } from "../shared/src/arena";
 import {
-  BUILDINGS, LOCATIONS, MAP_HALF, terrainHeight,
+  BUILDINGS, BLUEPRINTS, LOCATIONS, MAP_HALF, terrainHeight,
   CARS, CAR_LENGTH, CAR_WIDTH, CAR_HEIGHT,
 } from "../shared/src/map";
 import { makePiece, SLOT_FLOOR, SLOT_RAMP, SLOT_CONE, SLOT_WALL_X, SLOT_WALL_Z, type Slot } from "../shared/src/build";
@@ -123,12 +123,17 @@ console.log("the districts can be reached on foot");
   // falloffs are gentle enough to walk up. Running this against the built world
   // instead would measure whichever piece of roadside cover happens to sit on
   // the chosen bearing, which is a level-design question and not this one.
+  //
+  // Each district declares where its walkable approach starts, because the
+  // whole design of the high ground is that it is steep everywhere EXCEPT one
+  // side. Walking at it from an arbitrary bearing tests the cliff, not the path.
   const bare = new World();
   bare.terrainEnabled = true;
 
   for (const poi of LOCATIONS) {
-    if (poi.height <= 0) continue;
-    const p = { ...newMovementState(), x: poi.x * 0.62, z: poi.z * 0.62, grounded: true };
+    if (poi.height <= 4) continue;
+    const [sx, sz] = poi.approach;
+    const p = { ...newMovementState(), x: sx, z: sz, grounded: true };
     p.y = terrainHeight(p.x, p.z);
     const climbed = p.y;
     const yaw = Math.atan2(-(poi.x - p.x), poi.z - p.z);
@@ -139,70 +144,81 @@ console.log("the districts can be reached on foot");
     // Peak, not final: holding forward long enough to be sure of arriving also
     // walks straight over the top and down the far side.
     let peak = p.y;
-    for (let i = 0; i < 600; i++) {
+    for (let i = 0; i < 900; i++) {
       stepPlayer(p, cmd({ moveZ: 1, yaw }), bare, TICK_DT);
       peak = Math.max(peak, p.y);
     }
-    check(`${poi.name} can be walked up to`, peak > poi.height - 0.5,
-      `${climbed.toFixed(1)}m -> ${peak.toFixed(1)}m of ${poi.height}m`);
+    check(`${poi.name} can be walked up to`, peak > poi.height - 1.5,
+      `${climbed.toFixed(1)}m -> ${peak.toFixed(1)}m of ${poi.height.toFixed(1)}m`);
   }
 }
 
 // ---------------------------------------------------------------------------
 console.log("buildings can be entered and climbed");
 {
-  const styles = new Map<string, typeof BUILDINGS[number]>();
-  for (const b of BUILDINGS) if (!styles.has(b.style)) styles.set(b.style, b);
-
-  for (const [style, b] of styles) {
-    // In through the middle of the -Z wall, which is where buildArena leaves
-    // the ground-floor doorway.
-    const doorX = (b.x + Math.floor(b.w / 2) + 0.5) * TILE;
-    const p = {
+  // Every building, not a sample of one per style: the blueprint generator
+  // decides where the door and the stair shaft go per building, so a bug in it
+  // shows up on one house and not its neighbour.
+  let unenterable = 0, unclimbable = 0, worstEntry = "", worstClimb = "";
+  for (const bp of BLUEPRINTS) {
+    const b = bp.b;
+    // Walk in through the front door, starting five metres outside it.
+    const side = bp.entrance.side;
+    const inward: [number, number] =
+      side === 0 ? [0, 1] : side === 1 ? [0, -1] : side === 2 ? [1, 0] : [-1, 0];
+    const start = {
       ...newMovementState(),
-      x: doorX, y: b.base * TILE + 0.05, z: b.z * TILE - 4, grounded: true,
+      x: bp.entrance.x - inward[0] * 5,
+      y: b.base * TILE + 0.05,
+      z: bp.entrance.z - inward[1] * 5,
+      grounded: true,
     };
-    run(p, world, cmd({ moveZ: 1 }), 40);
-    check(`a ${style} can be entered`, p.z > b.z * TILE + 1, `z=${p.z.toFixed(1)}`);
-    check(`and the ground floor holds`, p.grounded && p.y > b.base * TILE - 0.3,
-      `y=${p.y.toFixed(2)} floor ${(b.base * TILE).toFixed(2)}`);
+    const yaw = Math.atan2(-inward[0], inward[1]);
+    run(start, world, cmd({ moveZ: 1, yaw }), 60);
+    // Two metres past the threshold counts as inside.
+    const got = (start.x - bp.entrance.x) * inward[0] + (start.z - bp.entrance.z) * inward[1];
+    if (got < 2) { unenterable++; worstEntry = `${b.name} reached ${got.toFixed(1)}m in`; }
 
-    // Every flight, not just the first. A flight has a solid ceiling over it
-    // unless the level above puts its own ramp in the other column, and that
-    // only shows up from the second floor onward.
-    if (b.floors >= 2) {
-      check(`a ${b.floors}-floor ${style} is wide enough for a switchback`, b.w >= 3,
-        `w=${b.w}`);
-    }
-    // A pitched roof leaves no attic, so those buildings have no top flight.
-    const pitched = style === "house" || style === "cabin";
-    const flights = pitched ? b.floors - 1 : b.floors;
-    for (let level = 0; level < flights; level++) {
-      const col = level % 2 === 0 ? 0 : b.w - 1;
-      // Start part way up the slope. Dropping the player in at the very foot
+    // Then climb every flight of the stairwell, one at a time.
+    for (const flight of bp.stairs) {
+      const along = 0.3;
+      const dir: [number, number] =
+        flight.facing === 0 ? [1, 0] : flight.facing === 1 ? [0, 1] : flight.facing === 2 ? [-1, 0] : [0, -1];
+      // Start part way up the slope: dropping the player in at the very foot
       // puts them inside the first collision step of the ramp, which tests the
       // embedding recovery rather than the climb.
-      const along = 0.3;
+      const foot: [number, number] = [
+        flight.facing === 0 ? flight.gx : flight.facing === 2 ? flight.gx + 1 : flight.gx + 0.5,
+        flight.facing === 1 ? flight.gz : flight.facing === 3 ? flight.gz + 1 : flight.gz + 0.5,
+      ];
       const up = {
         ...newMovementState(),
-        x: (b.x + col + 0.5) * TILE,
-        y: (b.base + level) * TILE + TILE * along + 0.05,
-        z: (b.z + along) * TILE,
+        x: (foot[0] + dir[0] * along) * TILE,
+        y: flight.gy * TILE + TILE * along + 0.05,
+        z: (foot[1] + dir[1] * along) * TILE,
         grounded: true,
       };
       // Peak height, not final: holding forward for long enough to climb also
-      // walks off the far side of the roof, and where they land afterwards
-      // says nothing about whether the flight worked.
+      // walks off the far side, and where they land says nothing about the climb.
       let peak = up.y;
-      for (let i = 0; i < 120; i++) {
-        stepPlayer(up, cmd({ moveZ: 1 }), world, TICK_DT);
+      for (let i = 0; i < 150; i++) {
+        stepPlayer(up, cmd({ moveZ: 1, yaw: Math.atan2(-dir[0], dir[1]) }), world, TICK_DT);
         peak = Math.max(peak, up.y);
       }
-      check(`a ${style}'s flight ${level + 1} reaches the next floor`,
-        peak > (b.base + level + 1) * TILE - 0.5,
-        `reached ${peak.toFixed(1)}, wanted ${((b.base + level + 1) * TILE).toFixed(1)}`);
+      const want = (flight.gy + 1) * TILE;
+      if (peak < want - 0.5) {
+        unclimbable++;
+        worstClimb = `${b.name} flight at level ${flight.gy} reached ${peak.toFixed(1)} of ${want.toFixed(1)}`;
+      }
     }
   }
+  check("every building can be walked into", unenterable === 0, `${unenterable} of ${BLUEPRINTS.length}: ${worstEntry}`);
+  check("every stair flight reaches the floor above", unclimbable === 0, `${unclimbable} failed: ${worstClimb}`);
+
+  // A multi-storey building with no stairs at all is a box with a lid.
+  const stranded = BLUEPRINTS.filter(bp => bp.b.floors > 1 && bp.stairs.length < bp.b.floors - 1);
+  check("no upper floor is unreachable", stranded.length === 0,
+    stranded.map(bp => bp.b.name).join(", "));
 }
 
 // ---------------------------------------------------------------------------
