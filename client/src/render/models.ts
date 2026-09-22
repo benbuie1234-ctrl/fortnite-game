@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
+import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 /**
  * Optional 3D models, loaded from `client/public/models/`.
@@ -80,10 +81,10 @@ export class ModelLibrary {
   get(id: ModelId): THREE.Object3D | null {
     const source = this.items.get(id);
     if (!source) return null;
-    const clone = source.clone(true);
+    const clone = id === "character" ? skeletonClone(source) : source.clone(true);
     if (id === "character" || id.startsWith("weapon_")) clone.traverse(node => {
       if (node instanceof THREE.Mesh) {
-        node.geometry = node.geometry.clone();
+        if (id.startsWith("weapon_")) node.geometry = node.geometry.clone();
         node.material = Array.isArray(node.material) ? node.material.map(m => m.clone()) : node.material.clone();
       }
     });

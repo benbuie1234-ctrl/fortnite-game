@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
+import { NodeIO } from '@gltf-transform/core';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { dedup, prune, meshopt } from '@gltf-transform/functions';
+import { MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -99,12 +103,12 @@ for (const config of animConfigs) {
         for (let i = 0; i < track.values.length; i += 3) {
           if (config.inPlace && track.name.includes('Hips')) {
             values[i] = 0; // zero out lateral translation drift
-            values[i + 1] = track.values[i + 1] * 0.01; // scale cm to m
+            values[i + 1] = track.values[i + 1]; // keep original bone-space vertical bob
             values[i + 2] = 0; // zero out forward/backward translation
           } else {
-            values[i] = track.values[i] * 0.01;
-            values[i + 1] = track.values[i + 1] * 0.01;
-            values[i + 2] = track.values[i + 2] * 0.01;
+            values[i] = track.values[i];
+            values[i + 1] = track.values[i + 1];
+            values[i + 2] = track.values[i + 2];
           }
         }
         newTracks.push(new THREE.VectorKeyframeTrack(track.name, track.times, values));
@@ -128,5 +132,16 @@ const glbData = await exporter.parseAsync(charGroup, {
 
 const outPath = "client/public/models/player.glb";
 fs.writeFileSync(outPath, Buffer.from(glbData));
+console.log(`Exported uncompressed GLB: ${(glbData.byteLength / 1024 / 1024).toFixed(2)} MB`);
+
+console.log("Optimizing with Meshopt...");
+await MeshoptEncoder.ready;
+const io = new NodeIO()
+  .registerExtensions(ALL_EXTENSIONS)
+  .registerDependencies({ "meshopt.encoder": MeshoptEncoder, "meshopt.decoder": MeshoptDecoder });
+
+const doc = await io.read(outPath);
+await doc.transform(dedup(), prune(), meshopt({ encoder: MeshoptEncoder, level: "high" }));
+await io.write(outPath, doc);
 const stats = fs.statSync(outPath);
-console.log(`Successfully generated ${outPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);
+console.log(`Successfully generated optimized ${outPath} (${(stats.size / 1024 / 1024).toFixed(2)} MB)`);

@@ -200,34 +200,30 @@ export class Character {
 
       if (isBlockRanger) {
         for (const name of names) (this as unknown as Record<string, THREE.Object3D>)[name] = art.getObjectByName(name)!;
-      } else {
-        const rightHand = art.getObjectByName("mixamorigRightHand") || art.getObjectByName("RightHand");
-        if (rightHand) {
-          this.root.remove(this.gun);
-          this.root.remove(this.pickaxe);
-          rightHand.add(this.gun);
-          rightHand.add(this.pickaxe);
-          this.gun.position.set(0.08, 0.12, 0.0);
-          this.gun.rotation.set(0, Math.PI / 2, -Math.PI / 2);
-          this.pickaxe.position.set(0.08, 0.12, 0.0);
-          this.pickaxe.rotation.set(0, Math.PI / 2, -Math.PI / 2);
-        }
       }
 
       art.traverse(node => {
+        if (node instanceof THREE.SkinnedMesh) {
+          node.frustumCulled = false;
+        }
         if (!(node instanceof THREE.Mesh)) return;
         node.castShadow = true;
         node.receiveShadow = true;
         for (const mat of Array.isArray(node.material) ? node.material : [node.material]) {
           if (mat instanceof THREE.MeshStandardMaterial) {
             if (mat.name === "Armor") mat.color.setHex(skin.colors.primary);
-            if (mat.name === "Accent" || mat.name === "Suit") mat.color.setHex(skin.colors.accent);
+            if (mat.name === "Accent" || mat.name === "Suit") mat.color.setHex(skin.colors.secondary);
           }
         }
       });
       this.root.add(art);
       this.mixer = new THREE.AnimationMixer(art);
       for (const clip of models!.animations("character")) this.actions.set(clip.name, this.mixer.clipAction(clip));
+      const idle = this.actions.get("idle");
+      if (idle) {
+        idle.play();
+        this.currentAction = idle;
+      }
     }
     this.setNameplate(name);
   }
@@ -336,8 +332,11 @@ export class Character {
       this.root.rotation.y = -yaw;
       this.kick = Math.max(0, this.kick - dt);
       this.muzzle.visible = this.weaponId !== W_PICKAXE && this.kick > 0.045;
+      this.pickaxe.rotation.x = -pitch + (this.kick > 0 ? Math.sin((0.35 - this.kick) / 0.35 * Math.PI) * 1.6 : 0);
+      this.gun.position.set(-0.2, 1.28 - (CROUCH_HIP_Y - LEG_H) * crouch * 0.5, 0.25 - this.kick);
+      this.gun.rotation.x = -pitch - this.kick * 1.2;
       const spine = this.root.getObjectByName("mixamorigSpine1") || this.root.getObjectByName("mixamorigSpine");
-      if (spine) spine.rotation.x = -pitch * 0.55;
+      if (spine) spine.rotation.x = -pitch * 0.45;
       const head = this.root.getObjectByName("mixamorigHead");
       if (head) head.rotation.x = -pitch * 0.35;
       this.nameplate.position.y = PLAYER_HEIGHT + 0.42;
