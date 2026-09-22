@@ -13,10 +13,51 @@ interface Placement {
 
 export function createFurnishings(scene: THREE.Scene, models: ModelLibrary): number {
   const placements: Placement[] = [];
+  furnishKeyPoints(placements);
   dressStreets(placements);
   dressYards(placements);
   buildCemetery(placements);
   return instance(scene, models, placements);
+}
+
+/**
+ * Purposeful, minimal indoor furnishings: 2-3 items per building, tucked
+ * against exterior walls to preserve 90%+ open floor space for fast building
+ * and clean gunplay.
+ */
+function furnishKeyPoints(out: Placement[]): void {
+  BUILDINGS.forEach((b) => {
+    const x0 = b.x * TILE, z0 = b.z * TILE;
+    const wM = b.w * TILE, dM = b.d * TILE;
+
+    if (b.style === 'house') {
+      const y0 = b.base * TILE;
+      out.push({ id: 'sofa', x: x0 + wM - 1.4, y: y0, z: z0 + dM - 1.2, yaw: Math.PI });
+      out.push({ id: 'coffee_table', x: x0 + wM - 1.4, y: y0, z: z0 + dM - 2.4, yaw: Math.PI });
+      out.push({ id: 'fridge', x: x0 + 1.2, y: y0, z: z0 + dM - 1.0, yaw: 0 });
+
+      if (b.floors > 1) {
+        const y1 = (b.base + 1) * TILE;
+        out.push({ id: 'bed_double', x: x0 + 1.8, y: y1, z: z0 + dM - 1.6, yaw: 0 });
+        out.push({ id: 'chest', x: x0 + wM - 1.2, y: y1, z: z0 + dM - 1.2, yaw: -Math.PI / 4 });
+      }
+    } else if (b.style === 'cabin') {
+      const y0 = b.base * TILE;
+      out.push({ id: 'log', x: x0 + 1.4, y: y0, z: z0 + dM - 1.2, yaw: Math.PI / 2 });
+      out.push({ id: 'chest', x: x0 + wM - 1.2, y: y0, z: z0 + dM - 1.2, yaw: -Math.PI / 4 });
+    } else if (b.style === 'warehouse') {
+      const y0 = b.base * TILE;
+      out.push({ id: 'pallet', x: x0 + 1.4, y: y0, z: z0 + dM - 1.4, yaw: 0 });
+      out.push({ id: 'crate_large', x: x0 + 1.4, y: y0, z: z0 + dM - 1.4, yaw: 0 });
+      out.push({ id: 'crate_wood', x: x0 + wM - 1.4, y: y0, z: z0 + 1.4, yaw: 0 });
+      out.push({ id: 'barrel', x: x0 + wM - 1.2, y: y0, z: z0 + dM - 1.2, yaw: 0 });
+    } else if (b.style === 'city') {
+      const y0 = b.base * TILE;
+      out.push({ id: 'desk', x: x0 + 1.2, y: y0, z: z0 + dM / 2, yaw: Math.PI / 2 });
+      const topY = (b.base + b.floors - 1) * TILE;
+      out.push({ id: 'chest', x: x0 + wM - 1.2, y: topY, z: z0 + dM - 1.2, yaw: -Math.PI / 4 });
+    }
+  });
 }
 
 /**
