@@ -86,6 +86,8 @@ const conn = new Connection({
     if (Array.isArray(msg.players)) matchPlayers = msg.players as MatchPlayerInfo[];
     if (typeof msg.target === "number") { scoreTarget = msg.target; hud.scoreTarget = scoreTarget; }
     refreshStandings();
+    const me = matchPlayers.find((p) => p.id === conn.selfId);
+    hud.setKills(me ? me.kills : 0, scoreTarget);
     if (msg.roundOver) {
       const winner = String(msg.winnerName ?? "Someone");
       sound.win();
@@ -395,6 +397,7 @@ function enterGame(id: number, name: string): void {
   controls.pitch = 0;
   renderReady=false;
   playing = true;
+  hud.setKills(0, scoreTarget);
   controls.reset();
   critters.state.reset();
   tickAccumulator = 0;
@@ -425,6 +428,7 @@ function leaveGame(reason: string): void {
     return;
   }
   playing = false;
+  hud.setKills(0, scoreTarget);
   conn.disconnect();
   controls.reset();
   clearTimeout(helpTimer);
@@ -572,6 +576,13 @@ function handleEvents(events: readonly GameEvent[]): void {
         sound.death();
         if (e.victim === conn.selfId) {
           respawnAtMs = performance.now() + 3000;
+        }
+        if (e.killer === conn.selfId) {
+          const me = matchPlayers.find((p) => p.id === conn.selfId);
+          if (me) {
+            me.kills++;
+            hud.setKills(me.kills, scoreTarget);
+          }
         }
         break;
       }

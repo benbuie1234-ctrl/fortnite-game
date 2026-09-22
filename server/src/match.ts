@@ -62,6 +62,7 @@ export class MatchRoom implements DurableObject {
   /** Which birds and fish are currently down. Authoritative; clients mirror it
    *  from EV_CRITTER rather than being told the whole set. */
   private critters = new CritterState();
+  private isQuickPlay = true;
 
   // The room is entirely in-memory and ephemeral: a match that ends leaves
   // nothing to persist, so neither the state store nor the env is retained.
@@ -73,8 +74,17 @@ export class MatchRoom implements DurableObject {
     if (request.headers.get("Upgrade") !== "websocket") {
       return new Response("expected websocket", { status: 426 });
     }
+
+    const url = new URL(request.url);
+    const roomCode = url.searchParams.get("room")?.trim();
+    this.isQuickPlay = !roomCode;
+
     // A bot never costs a human their seat.
-    if (this.players.size >= MAX_PLAYERS_PER_MATCH) this.removeOneBot();
+    if (this.isQuickPlay) {
+      while (this.players.size >= MAX_PLAYERS_PER_MATCH && this.hasBot) {
+        this.removeOneBot();
+      }
+    }
     if (this.players.size >= MAX_PLAYERS_PER_MATCH) {
       return new Response("match full", { status: 503 });
     }
@@ -88,7 +98,6 @@ export class MatchRoom implements DurableObject {
     // loop and the in-memory world alive between messages.
     server.accept();
 
-    const url = new URL(request.url);
     const name = sanitizeName(url.searchParams.get("name") ?? "Player");
     const id = this.allocateId();
     if (id < 0) return new Response("match full", { status: 503 });
@@ -114,7 +123,11 @@ export class MatchRoom implements DurableObject {
 
     this.sendWelcome(player);
     this.sendFullWorld(player);
-    this.fillWithBots();
+    if (this.isQuickPlay) {
+      this.fillWithBots();
+    } else {
+      this.clearBots();
+    }
     this.broadcastMatchState();
     this.startTicking();
 
@@ -270,7 +283,13 @@ export class MatchRoom implements DurableObject {
     // Bots exist for the benefit of the people in the room. With nobody left
     // they are just a 30 Hz tick nobody is watching, so they go too -- which
     // is also what lets the room fall idle and stop billing.
-    if (!player.isBot && this.humanCount === 0) this.clearBots();
+    if (!player.isBot) {
+      if (this.humanCount === 0) {
+        this.clearBots();
+      } else if (this.isQuickPlay) {
+        this.fillWithBots();
+      }
+    }
     this.broadcastMatchState();
     if (this.players.size === 0) this.stopTicking();
   }
@@ -285,9 +304,16 @@ export class MatchRoom implements DurableObject {
     return n;
   }
 
-  /** Top the room up to ROOM_TARGET_POPULATION, but only while a human is in it. */
+  private get hasBot(): boolean {
+    for (const p of this.players.values()) if (p.isBot) return true;
+    return false;
+  }
+
+  /** Top the room up to ROOM_TARGET_POPULATION, but only on quick play and while there are not enough real players. */
   private fillWithBots(): void {
+    if (!this.isQuickPlay) return;
     if (this.humanCount === 0) return;
+    if (this.humanCount >= ROOM_TARGET_POPULATION) return;
     const taken = new Set([...this.players.values()].map((p) => p.name));
     while (this.players.size < ROOM_TARGET_POPULATION) {
       const id = this.allocateId();

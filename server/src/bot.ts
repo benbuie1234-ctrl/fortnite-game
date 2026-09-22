@@ -50,17 +50,17 @@ import type { ServerPlayer } from "./player";
  * one number worth touching, because accuracy is the only thing in this file
  * that actually decides a gunfight.
  */
-const AIM_WOBBLE = 0.014;
+const AIM_WOBBLE = 0.040;
 /** Seconds between a target becoming visible and the bot turning toward it. */
-const REACTION_MIN = 0.20, REACTION_MAX = 0.42;
+const REACTION_MIN = 0.35, REACTION_MAX = 0.65;
 /** How fast a bot can swing onto a target, radians per second. A human flick
  *  is far faster than this over small angles and slower over large ones; the
  *  cap is what stops a bot spinning 180 degrees instantly, which is the single
  *  most obvious tell that something is not a person. */
-const TURN_RATE_MIN = 4.5, TURN_RATE_MAX = 8.0;
+const TURN_RATE_MIN = 2.8, TURN_RATE_MAX = 5.0;
 /** Trigger discipline: seconds of fire, then seconds off. */
-const BURST_ON_MIN = 0.22, BURST_ON_MAX = 0.60;
-const BURST_OFF_MIN = 0.16, BURST_OFF_MAX = 0.38;
+const BURST_ON_MIN = 0.18, BURST_ON_MAX = 0.42;
+const BURST_OFF_MIN = 0.28, BURST_OFF_MAX = 0.55;
 
 // ---------------------------------------------------------------------------
 // Behaviour
@@ -318,7 +318,7 @@ export class BotBrain {
     }
     // Only pull the trigger when actually pointed near them: firing through a
     // 40-degree error is what makes a bot look like it is spraying at nothing.
-    if (nowSec < this.fireUntil && this.aimOffset(self, target) < 0.22) {
+    if (nowSec < this.fireUntil && this.aimOffset(self, target) < 0.18) {
       cmd.buttons |= BTN_FIRE;
     }
   }

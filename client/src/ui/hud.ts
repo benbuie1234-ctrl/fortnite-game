@@ -41,6 +41,8 @@ export class Hud {
   private crosshair = el("crosshair");
   private buildPreview = el("buildPreview");
   private locationBadge = el("locationBadge");
+  private killTallyCount = el("killTallyCount");
+  private killTallyTarget = el("killTallyTarget");
   private matBoxes = [el("matWoodBox"), el("matBrickBox"), el("matMetalBox")];
   private matValues = [el("matWood"), el("matBrick"), el("matMetal")];
 
@@ -239,6 +241,15 @@ export class Hud {
   show(): void { this.hud.classList.remove("hidden"); }
   hide(): void { this.hud.classList.add("hidden"); }
   setLocation(name: string): void { this.locationBadge.textContent = name; }
+  setKills(kills: number, target = this.scoreTarget): void {
+    this.killTallyCount.textContent = String(Math.max(0, kills));
+    if (target > 0) {
+      this.killTallyTarget.textContent = `/ ${target}`;
+      this.killTallyTarget.style.display = "";
+    } else {
+      this.killTallyTarget.style.display = "none";
+    }
+  }
 
   /**
    * Draw health and shield as one pool on one scale.
