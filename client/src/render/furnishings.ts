@@ -11,262 +11,12 @@ interface Placement {
   yaw: number;
 }
 
-interface Item {
-  id: ModelId;
-  dx: number;
-  dz: number;
-  yOffset?: number;
-  yaw: number;
-}
-
-// ---------------------------------------------------------------------------
-// Room Sets: rich, fully dressed 6m x 6m layouts with proper vertical stacking
-// ---------------------------------------------------------------------------
-
-const LIVING_ROOM: Item[] = [
-  // Seating & focal lounge
-  { id: 'sofa_long', dx: -1.9, dz: 0.0, yaw: Math.PI / 2 },
-  { id: 'armchair', dx: -0.2, dz: 1.9, yaw: Math.PI * 0.82 },
-  { id: 'coffee_table', dx: -0.2, dz: 0.0, yaw: 0 },
-  { id: 'rug', dx: -0.2, dz: 0.0, yaw: 0 },
-  // Media center against opposite wall
-  { id: 'tv_cabinet', dx: 2.1, dz: 0.0, yaw: -Math.PI / 2 },
-  { id: 'tv', dx: 2.1, dz: 0.0, yOffset: 0.62, yaw: -Math.PI / 2 },
-  { id: 'speaker', dx: 2.1, dz: -1.4, yaw: -Math.PI / 2 },
-  { id: 'speaker', dx: 2.1, dz: 1.4, yaw: -Math.PI / 2 },
-  // Storage, plants and lighting
-  { id: 'bookcase', dx: -2.1, dz: -2.0, yaw: Math.PI / 2 },
-  { id: 'books', dx: -2.1, dz: -2.0, yOffset: 0.77, yaw: Math.PI / 2 },
-  { id: 'floor_lamp', dx: -2.2, dz: 2.1, yaw: 0 },
-  { id: 'potted_plant', dx: 1.8, dz: 2.1, yaw: 0 },
-  { id: 'ceiling_fan', dx: 0.0, dz: 0.0, yOffset: 5.45, yaw: 0 },
-];
-
-const KITCHEN_AND_DINING: Item[] = [
-  // Full kitchen run along back wall
-  { id: 'fridge_large', dx: -2.2, dz: -2.3, yaw: 0 },
-  { id: 'kitchen_sink', dx: -1.2, dz: -2.3, yaw: 0 },
-  { id: 'cabinet_drawer', dx: -0.2, dz: -2.3, yaw: 0 },
-  { id: 'coffee_machine', dx: -0.2, dz: -2.3, yOffset: 0.90, yaw: 0 },
-  { id: 'stove', dx: 0.8, dz: -2.3, yaw: 0 },
-  { id: 'microwave', dx: 0.8, dz: -2.3, yOffset: 0.90, yaw: 0 },
-  { id: 'cabinet', dx: 1.8, dz: -2.3, yaw: 0 },
-  // Wall-mounted upper cabinets
-  { id: 'cabinet_upper', dx: -1.2, dz: -2.3, yOffset: 1.95, yaw: 0 },
-  { id: 'cabinet_upper', dx: 0.8, dz: -2.3, yOffset: 1.95, yaw: 0 },
-  { id: 'cabinet_upper', dx: 1.8, dz: -2.3, yOffset: 1.95, yaw: 0 },
-  { id: 'trashcan', dx: 2.4, dz: -1.5, yaw: 0 },
-  // Dining suite
-  { id: 'dining_table', dx: 0.0, dz: 1.2, yaw: 0 },
-  { id: 'chair_cushion', dx: -0.9, dz: 0.8, yaw: Math.PI / 2 },
-  { id: 'chair_cushion', dx: -0.9, dz: 1.6, yaw: Math.PI / 2 },
-  { id: 'chair_cushion', dx: 0.9, dz: 0.8, yaw: -Math.PI / 2 },
-  { id: 'chair_cushion', dx: 0.9, dz: 1.6, yaw: -Math.PI / 2 },
-  { id: 'ceiling_lamp', dx: 0.0, dz: 1.2, yOffset: 5.25, yaw: 0 },
-];
-
-const MASTER_BEDROOM: Item[] = [
-  // Bed suite
-  { id: 'bed_double', dx: 0.0, dz: -1.6, yaw: 0 },
-  { id: 'nightstand', dx: -1.6, dz: -2.2, yaw: 0 },
-  { id: 'table_lamp', dx: -1.6, dz: -2.2, yOffset: 0.77, yaw: 0 },
-  { id: 'nightstand', dx: 1.6, dz: -2.2, yaw: 0 },
-  { id: 'table_lamp', dx: 1.6, dz: -2.2, yOffset: 0.77, yaw: 0 },
-  { id: 'rug', dx: 0.0, dz: -0.5, yaw: 0 },
-  // Wardrobe
-  { id: 'bookcase_closed', dx: -2.2, dz: 1.2, yaw: Math.PI / 2 },
-  // Study nook
-  { id: 'desk', dx: 2.0, dz: 1.2, yaw: -Math.PI / 2 },
-  { id: 'monitor', dx: 2.0, dz: 1.2, yOffset: 0.77, yaw: -Math.PI / 2 },
-  { id: 'laptop', dx: 2.0, dz: 1.7, yOffset: 0.77, yaw: -Math.PI / 2 },
-  { id: 'desk_chair', dx: 1.1, dz: 1.2, yaw: Math.PI / 2 },
-  { id: 'potted_plant', dx: 2.2, dz: -2.2, yaw: 0 },
-  { id: 'ceiling_fan', dx: 0.0, dz: 0.0, yOffset: 5.45, yaw: 0 },
-];
-
-const GUEST_BEDROOM: Item[] = [
-  { id: 'bed_bunk', dx: -1.6, dz: -1.5, yaw: 0 },
-  { id: 'bed_single', dx: 1.6, dz: -1.5, yaw: 0 },
-  { id: 'nightstand', dx: 0.0, dz: -2.2, yaw: 0 },
-  { id: 'table_lamp', dx: 0.0, dz: -2.2, yOffset: 0.77, yaw: 0 },
-  { id: 'coat_rack', dx: 2.3, dz: 1.8, yaw: 0 },
-  { id: 'round_table', dx: 0.0, dz: 1.2, yaw: 0 },
-  { id: 'chair', dx: -0.7, dz: 1.2, yaw: Math.PI / 2 },
-  { id: 'chair', dx: 0.7, dz: 1.2, yaw: -Math.PI / 2 },
-  { id: 'rug_round', dx: 0.0, dz: 1.2, yaw: 0 },
-  { id: 'box_closed', dx: -2.1, dz: 1.6, yaw: 0 },
-  { id: 'box_open', dx: -1.4, dz: 1.6, yaw: 0 },
-  { id: 'ceiling_lamp', dx: 0.0, dz: 0.0, yOffset: 5.25, yaw: 0 },
-];
-
-const BATHROOM_AND_LAUNDRY: Item[] = [
-  { id: 'bathtub', dx: -1.6, dz: -1.8, yaw: 0 },
-  { id: 'shower', dx: -2.1, dz: 1.4, yaw: Math.PI / 2 },
-  { id: 'toilet', dx: 0.2, dz: -2.3, yaw: 0 },
-  { id: 'bath_sink', dx: 1.8, dz: -2.3, yaw: 0 },
-  { id: 'washer', dx: 1.8, dz: 1.2, yaw: -Math.PI / 2 },
-  { id: 'dryer', dx: 1.8, dz: 2.1, yaw: -Math.PI / 2 },
-  { id: 'trashcan', dx: 0.8, dz: -2.3, yaw: 0 },
-  { id: 'box_closed', dx: 0.8, dz: 2.1, yaw: 0 },
-  { id: 'ceiling_lamp', dx: 0.0, dz: 0.0, yOffset: 5.25, yaw: 0 },
-];
-
-const ENTRY_FOYER: Item[] = [
-  // Doorway corridor (-1.0 < dx < 1.0, dz < 0) kept clear
-  { id: 'bench_cushion', dx: 1.8, dz: -1.2, yaw: -Math.PI / 2 },
-  { id: 'coat_rack', dx: 2.2, dz: -2.2, yaw: 0 },
-  { id: 'rug_round', dx: 0.0, dz: -0.8, yaw: 0 },
-  { id: 'potted_plant', dx: -2.2, dz: -2.2, yaw: 0 },
-  { id: 'cabinet', dx: -2.2, dz: 0.5, yaw: Math.PI / 2 },
-  { id: 'radio', dx: -2.2, dz: 0.5, yOffset: 0.90, yaw: Math.PI / 2 },
-  { id: 'bookcase', dx: 2.2, dz: 1.2, yaw: -Math.PI / 2 },
-  { id: 'ceiling_lamp', dx: 0.0, dz: -0.8, yOffset: 5.25, yaw: 0 },
-];
-
-const OFFICE_SUITE: Item[] = [
-  { id: 'desk', dx: 0.0, dz: -0.5, yaw: 0 },
-  { id: 'desk_chair', dx: 0.0, dz: -1.4, yaw: 0 },
-  { id: 'monitor', dx: -0.3, dz: -0.5, yOffset: 0.77, yaw: 0 },
-  { id: 'monitor', dx: 0.3, dz: -0.5, yOffset: 0.77, yaw: 0 },
-  { id: 'laptop', dx: 0.8, dz: -0.5, yOffset: 0.77, yaw: 0 },
-  { id: 'chair', dx: -0.8, dz: 0.8, yaw: Math.PI },
-  { id: 'chair', dx: 0.8, dz: 0.8, yaw: Math.PI },
-  { id: 'bookcase', dx: -2.2, dz: -1.5, yaw: Math.PI / 2 },
-  { id: 'bookcase_closed', dx: -2.2, dz: 0.2, yaw: Math.PI / 2 },
-  { id: 'books', dx: -2.2, dz: -1.5, yOffset: 0.77, yaw: Math.PI / 2 },
-  { id: 'floor_lamp', dx: -2.2, dz: 1.8, yaw: 0 },
-  { id: 'potted_plant', dx: 2.2, dz: 2.0, yaw: 0 },
-  { id: 'trashcan', dx: -1.0, dz: -0.5, yaw: 0 },
-  { id: 'ceiling_lamp', dx: 0.0, dz: 0.0, yOffset: 5.25, yaw: 0 },
-];
-
-const CAFE_LOUNGE: Item[] = [
-  { id: 'kitchen_bar', dx: -1.8, dz: -2.0, yaw: 0 },
-  { id: 'coffee_machine', dx: -1.8, dz: -2.0, yOffset: 0.90, yaw: 0 },
-  { id: 'bar_stool', dx: -1.8, dz: -1.1, yaw: Math.PI },
-  { id: 'bar_stool', dx: -1.0, dz: -1.1, yaw: Math.PI },
-  { id: 'round_table', dx: 1.2, dz: -1.2, yaw: 0 },
-  { id: 'chair', dx: 0.5, dz: -1.2, yaw: Math.PI / 2 },
-  { id: 'chair', dx: 1.9, dz: -1.2, yaw: -Math.PI / 2 },
-  { id: 'round_table', dx: 1.2, dz: 1.2, yaw: 0 },
-  { id: 'chair', dx: 0.5, dz: 1.2, yaw: Math.PI / 2 },
-  { id: 'chair', dx: 1.9, dz: 1.2, yaw: -Math.PI / 2 },
-  { id: 'armchair_relax', dx: -1.8, dz: 1.5, yaw: Math.PI / 2 },
-  { id: 'floor_lamp', dx: -2.2, dz: 2.2, yaw: 0 },
-  { id: 'ceiling_fan', dx: 0.0, dz: 0.0, yOffset: 5.45, yaw: 0 },
-];
-
-const CABIN_HEARTH: Item[] = [
-  { id: 'campfire', dx: 0.0, dz: 0.0, yaw: 0 },
-  { id: 'log', dx: -1.6, dz: 0.0, yaw: Math.PI / 2 },
-  { id: 'log', dx: 1.6, dz: 0.0, yaw: -Math.PI / 2 },
-  { id: 'stump', dx: 0.0, dz: 1.6, yaw: 0 },
-  { id: 'armchair_relax', dx: -1.8, dz: -1.8, yaw: Math.PI / 4 },
-  { id: 'chest', dx: 2.0, dz: -1.8, yaw: -Math.PI / 2 },
-  { id: 'bucket', dx: 2.2, dz: -1.0, yaw: 0 },
-  { id: 'bed_double', dx: -1.6, dz: 1.8, yaw: Math.PI },
-  { id: 'nightstand', dx: -0.3, dz: 2.2, yaw: Math.PI },
-  { id: 'table_lamp', dx: -0.3, dz: 2.2, yOffset: 0.77, yaw: Math.PI },
-  { id: 'workbench', dx: 1.8, dz: 1.6, yaw: -Math.PI / 2 },
-  { id: 'barrel', dx: 2.2, dz: 0.5, yaw: 0 },
-];
-
-const WORKSHOP_WAREHOUSE: Item[] = [
-  { id: 'workbench', dx: -1.6, dz: -2.0, yaw: 0 },
-  { id: 'chest', dx: 0.6, dz: -2.2, yaw: 0 },
-  { id: 'bucket', dx: 1.8, dz: -2.2, yaw: 0 },
-  { id: 'pallet', dx: 1.8, dz: 0.0, yaw: 0 },
-  { id: 'planks', dx: 1.8, dz: 0.0, yOffset: 0.18, yaw: 0 },
-  { id: 'crate_large', dx: 1.8, dz: 1.6, yaw: 0 },
-  { id: 'crate_wood', dx: 0.6, dz: 1.8, yaw: 0 },
-  { id: 'barrel_open', dx: -2.0, dz: 1.2, yaw: 0 },
-  { id: 'barrel', dx: -1.2, dz: 1.8, yaw: 0 },
-  { id: 'dumpster_open', dx: -1.8, dz: -0.2, yaw: Math.PI / 2 },
-  { id: 'ceiling_lamp', dx: 0.0, dz: 0.0, yOffset: 5.25, yaw: 0 },
-];
-
 export function createFurnishings(scene: THREE.Scene, models: ModelLibrary): number {
   const placements: Placement[] = [];
-  furnishBuildings(placements);
   dressStreets(placements);
   dressYards(placements);
   buildCemetery(placements);
   return instance(scene, models, placements);
-}
-
-function furnishBuildings(out: Placement[]): void {
-  BUILDINGS.forEach((b) => {
-    for (let level = 0; level < b.floors; level++) {
-      const baseY = (b.base + level) * TILE;
-      const doorCol = Math.floor(b.w / 2);
-      const stairCol = level % 2 === 0 ? 0 : b.w - 1;
-      const hasStairs = level < b.floors - 1;
-
-      for (let cx = 0; cx < b.w; cx++) {
-        for (let cz = 0; cz < b.d; cz++) {
-          const cellX = (b.x + cx + 0.5) * TILE;
-          const cellZ = (b.z + cz + 0.5) * TILE;
-
-          // Check if this specific cell contains the stair run
-          const isStairCell = hasStairs && cx === stairCol && cz === 0;
-
-          let roomItems: Item[];
-
-          if (b.style === 'house') {
-            if (level === 0) {
-              if (cx === doorCol && cz === 0) {
-                roomItems = ENTRY_FOYER;
-              } else if (cx === 0 && cz === 0) {
-                roomItems = isStairCell ? GUEST_BEDROOM : LIVING_ROOM;
-              } else if (cz >= 1 && cx === 0) {
-                roomItems = KITCHEN_AND_DINING;
-              } else if (cz >= 1 && cx === 1) {
-                roomItems = BATHROOM_AND_LAUNDRY;
-              } else {
-                roomItems = LIVING_ROOM;
-              }
-            } else {
-              // Level 1+ upstairs
-              if (cx === 0 && cz === 0) {
-                roomItems = MASTER_BEDROOM;
-              } else if (cx >= 1 && cz === 0) {
-                roomItems = isStairCell ? OFFICE_SUITE : GUEST_BEDROOM;
-              } else if (cz >= 1 && cx === 0) {
-                roomItems = GUEST_BEDROOM;
-              } else {
-                roomItems = BATHROOM_AND_LAUNDRY;
-              }
-            }
-          } else if (b.style === 'cabin') {
-            roomItems = CABIN_HEARTH;
-          } else if (b.style === 'warehouse') {
-            roomItems = WORKSHOP_WAREHOUSE;
-          } else {
-            // City commercial / office block
-            if (level === 0) {
-              roomItems = (cx + cz) % 2 === 0 ? CAFE_LOUNGE : ENTRY_FOYER;
-            } else {
-              roomItems = (cx + cz) % 2 === 0 ? OFFICE_SUITE : MASTER_BEDROOM;
-            }
-          }
-
-          // Place the items with exact world coordinates and vertical elevation
-          for (const item of roomItems) {
-            // If this is a stair cell, keep the stair run lane clear
-            if (isStairCell && Math.abs(item.dx) < 1.0) continue;
-
-            out.push({
-              id: item.id,
-              x: cellX + item.dx,
-              y: baseY + (item.yOffset ?? 0),
-              z: cellZ + item.dz,
-              yaw: item.yaw,
-            });
-          }
-        }
-      }
-    }
-  });
 }
 
 /**
@@ -327,11 +77,9 @@ function dressYards(out: Placement[]): void {
     const doorX = (b.x + Math.floor(b.w / 2) + 0.5) * TILE;
 
     if (b.style === 'house') {
-      // Front yard: planters and porch lighting
       out.push({ id: 'potted_plant', x: doorX - 2.2, y: y + 0.36, z: f.z0 - 1.2, yaw: 0 });
       out.push({ id: 'potted_plant', x: doorX + 2.2, y: y + 0.36, z: f.z0 - 1.2, yaw: 0 });
 
-      // Back yard patio suite: outdoor table with parasol and patio chairs
       const patioX = (f.x0 + f.x1) / 2;
       const patioZ = f.z1 + 3.2;
       if (!onRoad(patioX, patioZ, 2.0)) {
@@ -339,32 +87,22 @@ function dressYards(out: Placement[]): void {
         out.push({ id: 'parasol', x: patioX, y, z: patioZ, yaw: 0 });
         out.push({ id: 'chair', x: patioX - 1.1, y, z: patioZ, yaw: Math.PI / 2 });
         out.push({ id: 'chair', x: patioX + 1.1, y, z: patioZ, yaw: -Math.PI / 2 });
-        out.push({ id: 'chair', x: patioX, y, z: patioZ - 1.1, yaw: 0 });
-        out.push({ id: 'chair', x: patioX, y, z: patioZ + 1.1, yaw: Math.PI });
-        out.push({ id: 'street_bench', x: patioX - 3.2, y, z: patioZ, yaw: Math.PI / 2 });
       }
     } else if (b.style === 'cabin') {
-      // Campfire with log seats outside cabin
       const campX = f.x0 - 4.5;
       const campZ = (f.z0 + f.z1) / 2;
       if (!onRoad(campX, campZ, 2.0)) {
         out.push({ id: 'campfire', x: campX, y, z: campZ, yaw: 0 });
         out.push({ id: 'log', x: campX - 1.6, y, z: campZ, yaw: Math.PI / 2 });
         out.push({ id: 'log', x: campX + 1.6, y, z: campZ, yaw: -Math.PI / 2 });
-        out.push({ id: 'stump', x: campX, y, z: campZ + 1.6, yaw: 0 });
-        out.push({ id: 'bucket', x: campX + 2.2, y, z: campZ - 1.0, yaw: 0 });
         out.push({ id: 'tent', x: campX - 4.0, y, z: campZ + 2.0, yaw: 0.8 });
       }
     } else if (b.style === 'warehouse') {
-      // Industrial loading yard
       const yardZ = f.z0 - 2.6;
       out.push({ id: 'pallet', x: f.x0 + 2.0, y, z: yardZ, yaw: 0 });
       out.push({ id: 'planks', x: f.x0 + 2.0, y: y + 0.18, z: yardZ, yaw: 0 });
       out.push({ id: 'crate_large', x: f.x0 + 4.5, y, z: yardZ, yaw: 0 });
-      out.push({ id: 'crate_wood', x: f.x0 + 6.2, y, z: yardZ, yaw: 0 });
-      out.push({ id: 'barrel_open', x: f.x1 - 2.0, y, z: yardZ, yaw: 0 });
       out.push({ id: 'barrel', x: f.x1 - 3.2, y, z: yardZ, yaw: 0 });
-      out.push({ id: 'scaffold', x: f.x1 + 1.8, y, z: (f.z0 + f.z1) / 2, yaw: 0 });
     }
   });
 }
@@ -372,7 +110,7 @@ function dressYards(out: Placement[]): void {
 /**
  * Landmark cemetery on the ridge.
  */
-const CEMETERY = { x: 52, z: 148, rows: 5, cols: 7 };
+const CEMETERY = { x: 52, z: 148, rows: 4, cols: 5 };
 function buildCemetery(out: Placement[]): void {
   const stones: ModelId[] = ['gravestone', 'gravestone_cross', 'gravestone_round'];
   for (let r = 0; r < CEMETERY.rows; r++) {
@@ -381,7 +119,7 @@ function buildCemetery(out: Placement[]): void {
       const z = CEMETERY.z + (r - (CEMETERY.rows - 1) / 2) * 4.2;
       if (insideBuilding(x, z, 3) || onRoad(x, z, 3)) continue;
       out.push({
-        id: stones[(r * 7 + c) % stones.length],
+        id: stones[(r * 5 + c) % stones.length],
         x,
         y: terrainHeight(x, z),
         z,
@@ -394,36 +132,25 @@ function buildCemetery(out: Placement[]): void {
   const halfZ = (CEMETERY.rows * 4.2) / 2 + 2.6;
 
   // Railings around perimeter
-  for (let s = -halfX; s <= halfX; s += 2) {
+  for (let s = -halfX; s <= halfX; s += 2.5) {
     for (const side of [-1, 1]) {
       const x = CEMETERY.x + s, z = CEMETERY.z + halfZ * side;
       out.push({ id: 'iron_fence', x, y: terrainHeight(x, z), z, yaw: 0 });
     }
   }
-  for (let s = -halfZ; s <= halfZ; s += 2) {
+  for (let s = -halfZ; s <= halfZ; s += 2.5) {
     for (const side of [-1, 1]) {
       const x = CEMETERY.x + halfX * side, z = CEMETERY.z + s;
       out.push({ id: 'iron_fence', x, y: terrainHeight(x, z), z, yaw: Math.PI / 2 });
     }
   }
-  // Corner lanterns and crypt
-  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
-    const x = CEMETERY.x + halfX * sx, z = CEMETERY.z + halfZ * sz;
-    out.push({ id: 'lamp_post', x, y: terrainHeight(x, z), z, yaw: 0 });
-  }
   out.push({
     id: 'crypt',
     x: CEMETERY.x,
-    y: terrainHeight(CEMETERY.x, CEMETERY.z - halfZ - 5),
-    z: CEMETERY.z - halfZ - 5,
+    y: terrainHeight(CEMETERY.x, CEMETERY.z - halfZ - 4),
+    z: CEMETERY.z - halfZ - 4,
     yaw: 0,
   });
-
-  for (const [dx, dz] of [[-6, 2], [7, -3], [-8, -6], [9, 6]]) {
-    const x = CEMETERY.x + dx, z = CEMETERY.z + dz;
-    out.push({ id: 'dead_tree', x, y: terrainHeight(x, z), z, yaw: 0 });
-    out.push({ id: 'pumpkin', x: x + 1.2, y: terrainHeight(x + 1.2, z + 0.8), z: z + 0.8, yaw: 0.5 });
-  }
 
   for (let i = SCENERY.length - 1; i >= 0; i--) {
     const s = SCENERY[i];
@@ -434,7 +161,7 @@ function buildCemetery(out: Placement[]): void {
 }
 
 /**
- * GPU Instanced batching: thousands of props drawn in ~30 draw calls total.
+ * GPU Instanced batching.
  */
 function instance(scene: THREE.Scene, models: ModelLibrary, placements: Placement[]): number {
   const byId = new Map<ModelId, Placement[]>();
