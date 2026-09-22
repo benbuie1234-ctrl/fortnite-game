@@ -138,10 +138,10 @@ for (const [dx,dz,w,d,floors,color] of [
  [-6,1,3,4,2,0xca8870], [1,1,3,3,4,0xb9b7cf],
  [5,2,2,3,1,0xd4b66f],
 ]) BUILDINGS.push({x:NEAR+dx,z:NEAR+dz,w,d,floors,base:CITY_BASE,style:'city',color});
-for (const [dx,dz,w,d,color] of [
- [-6,-5,2,2,0xe3b07e],[-2,-5,2,3,0x85acaa],[3,-5,2,2,0xd89887],
- [-6,1,2,3,0xaebf8c],[-1,2,2,2,0xe1c591],[4,1,2,2,0x93b6c7],
-]) BUILDINGS.push({x:FAR+dx,z:NEAR+dz,w,d,floors:1,base:MEADOW_BASE,style:'house',color});
+for (const [dx,dz,w,d,floors,color] of [
+ [-6,-5,3,2,2,0xe3b07e],[-2,-5,3,2,2,0x85acaa],[2,-5,2,2,1,0xd89887],
+ [-6,2,3,2,2,0xaebf8c],[-2,2,3,2,2,0xe1c591],[2,2,2,2,1,0x93b6c7],
+]) BUILDINGS.push({x:FAR+dx,z:NEAR+dz,w,d,floors,base:MEADOW_BASE,style:'house',color});
 for (const [dx,dz,w,d,color] of [
  [-5,-5,3,3,0x779fa3],[1,-5,4,3,0xc19871],[-4,1,3,3,0x8294b2],[2,2,3,2,0xba8068],
 ]) BUILDINGS.push({x:NEAR+dx,z:FAR+dz,w,d,floors:1,base:0,style:'warehouse',color});
@@ -387,4 +387,170 @@ for(const b of BUILDINGS)for(let side=0;side<4;side++) {
    for(const sign of [-1,1])panel(u+sign*(TILE/2-.45),base+2.85,.9,3.5);
   }
  }
+}
+
+// --- Custom architectural elements: real staircases, interior walls, and front porches ---
+
+// 1. Real architectural wooden staircases for multi-story buildings
+for (const b of BUILDINGS) {
+  const pitched = b.style === 'house' || b.style === 'cabin';
+  const flights = pitched ? b.floors - 1 : b.floors - 1;
+  if (flights <= 0) continue;
+
+  for (let level = 0; level < flights; level++) {
+    const stairCol = level % 2 === 0 ? 0 : b.w - 1;
+    const sx = (b.x + stairCol + 0.5) * TILE;
+    const sy = (b.base + level) * TILE;
+    const sz = b.z * TILE;
+    const stairW = 1.8;
+    const posX = sx;
+    const startZ = sz + 0.5;
+    const steps = 16;
+    const stepH = TILE / steps; // 0.375m
+    const stepD = 0.30;
+
+    // Real individual wooden steps
+    for (let s = 0; s < steps; s++) {
+      ARCHITECTURE.push({
+        x: posX,
+        y: sy + (s + 0.5) * stepH,
+        z: startZ + (s + 0.5) * stepD,
+        w: stairW,
+        h: stepH,
+        d: stepD,
+        color: 0x6e523e,
+      });
+    }
+
+    // Wooden handrail on the open side
+    const railX = posX + stairW * 0.5 + 0.05;
+    for (let s = 0; s < steps; s += 2) {
+      ARCHITECTURE.push({
+        x: railX,
+        y: sy + s * stepH + 0.92,
+        z: startZ + (s + 1) * stepD,
+        w: 0.08,
+        h: 0.08,
+        d: stepD * 2.1,
+        color: 0x4a3424,
+      });
+    }
+    // Newel posts at bottom, middle, and landing
+    for (const s of [0, 7, 15]) {
+      ARCHITECTURE.push({
+        x: railX,
+        y: sy + s * stepH + 0.55,
+        z: startZ + s * stepD,
+        w: 0.12,
+        h: 1.1,
+        d: 0.12,
+        color: 0x4a3424,
+      });
+    }
+  }
+}
+
+// 2. Interior partition walls and doorways for houses and cabins
+for (const b of BUILDINGS) {
+  if (b.style !== 'house' && b.style !== 'cabin') continue;
+  const x0 = b.x * TILE, z0 = b.z * TILE;
+  const wM = b.w * TILE;
+  const wallColor = 0xf2ebe1;
+  const trimColor = 0x6e523e;
+
+  for (let level = 0; level < b.floors; level++) {
+    const y = (b.base + level) * TILE;
+
+    if (b.d >= 2) {
+      const wallZ = z0 + TILE;
+      const doorCenter = x0 + wM * 0.5;
+      const doorW = 1.8, doorH = 2.8;
+
+      const leftW = (doorCenter - doorW * 0.5) - x0;
+      if (leftW > 0.5) {
+        ARCHITECTURE.push({
+          x: x0 + leftW * 0.5,
+          y: y + TILE * 0.5,
+          z: wallZ,
+          w: leftW,
+          h: TILE - 0.1,
+          d: 0.22,
+          color: wallColor,
+        });
+      }
+      const rightW = (x0 + wM) - (doorCenter + doorW * 0.5);
+      if (rightW > 0.5) {
+        ARCHITECTURE.push({
+          x: (doorCenter + doorW * 0.5) + rightW * 0.5,
+          y: y + TILE * 0.5,
+          z: wallZ,
+          w: rightW,
+          h: TILE - 0.1,
+          d: 0.22,
+          color: wallColor,
+        });
+      }
+      // Header
+      ARCHITECTURE.push({
+        x: doorCenter,
+        y: y + (doorH + TILE) * 0.5,
+        z: wallZ,
+        w: doorW + 0.1,
+        h: TILE - doorH,
+        d: 0.22,
+        color: wallColor,
+      });
+      // Door casing
+      ARCHITECTURE.push({ x: doorCenter - doorW * 0.5, y: y + doorH * 0.5, z: wallZ, w: 0.12, h: doorH, d: 0.28, color: trimColor });
+      ARCHITECTURE.push({ x: doorCenter + doorW * 0.5, y: y + doorH * 0.5, z: wallZ, w: 0.12, h: doorH, d: 0.28, color: trimColor });
+      ARCHITECTURE.push({ x: doorCenter, y: y + doorH, z: wallZ, w: doorW + 0.24, h: 0.14, d: 0.28, color: trimColor });
+    }
+  }
+}
+
+// 3. Elevated front porches with steps and roof porticos for houses
+for (const b of BUILDINGS) {
+  if (b.style !== 'house') continue;
+  const doorX = (b.x + Math.floor(b.w / 2) + 0.5) * TILE;
+  const y = b.base * TILE;
+  const z = b.z * TILE;
+
+  ARCHITECTURE.push({
+    x: doorX,
+    y: y + 0.18,
+    z: z - 1.1,
+    w: 3.2,
+    h: 0.36,
+    d: 2.0,
+    color: 0x7c5a3d,
+  });
+  ARCHITECTURE.push({
+    x: doorX,
+    y: y + 0.08,
+    z: z - 2.3,
+    w: 2.4,
+    h: 0.16,
+    d: 0.5,
+    color: 0x7c5a3d,
+  });
+  ARCHITECTURE.push({
+    x: doorX,
+    y: y + 3.6,
+    z: z - 1.1,
+    w: 3.4,
+    h: 0.22,
+    d: 2.2,
+    color: 0xb57c5c,
+  });
+  for (const s of [-1, 1]) {
+    ARCHITECTURE.push({
+      x: doorX + s * 1.4,
+      y: y + 1.8,
+      z: z - 1.9,
+      w: 0.18,
+      h: 3.6,
+      d: 0.18,
+      color: 0xeee0c4,
+    });
+  }
 }
