@@ -1,4 +1,4 @@
-// Climbing, ramp exits, sprint stamina and tree perches.
+// Climbing, ramp exits, sprint stamina and tree trunks.
 import { World } from "../shared/src/world";
 import {
   stepPlayer, newMovementState,
@@ -10,9 +10,9 @@ import {
 } from "../shared/src/build";
 import {
   TILE, TICK_DT, MANTLE_REACH, SPRINT_STAMINA_MAX, SPRINT_REGEN_DELAY,
-  SPRINT_MIN_TO_START, TREE_PERCH_RADIUS, TREE_PERCH_THICKNESS,
+  SPRINT_MIN_TO_START,
 } from "../shared/src/constants";
-import { treePerchHeight, treeIndexFromKey } from "../shared/src/arena";
+import { buildArena, treeIndexFromKey } from "../shared/src/arena";
 import { SCENERY } from "../shared/src/map";
 
 let failures = 0;
@@ -178,12 +178,6 @@ console.log("slide tiers");
 // ---------------------------------------------------------------------------
 console.log("trees");
 {
-  const tallest = Math.max(...SCENERY.filter(p => p.kind === "tree").map(p => p.size));
-  const highestPerch = treePerchHeight(tallest) + TREE_PERCH_THICKNESS;
-  check("every perch is within a single mantle",
-    highestPerch <= MANTLE_REACH, `${highestPerch.toFixed(2)} vs ${MANTLE_REACH.toFixed(2)}`);
-  check("and the platform is wider than the trunk", TREE_PERCH_RADIUS > 0.28);
-
   const treeIndex = SCENERY.findIndex(p => p.kind === "tree");
   check("a tree collider maps back to its scenery entry",
     treeIndexFromKey(-treeIndex - 2) === treeIndex);
@@ -193,44 +187,12 @@ console.log("trees");
 }
 
 {
-  // Standing on a tree perch: climb onto it and stay there.
-  const w = new World();
-  const tree = SCENERY.find(p => p.kind === "tree")!;
-  const perch = tree.y + treePerchHeight(tree.size);
-  w.addObstacle([tree.x - 0.28, tree.y, tree.z - 0.28, tree.x + 0.28, tree.y + tree.size, tree.z + 0.28], -1);
-  w.addObstacle([
-    tree.x - TREE_PERCH_RADIUS, perch, tree.z - TREE_PERCH_RADIUS,
-    tree.x + TREE_PERCH_RADIUS, perch + TREE_PERCH_THICKNESS, tree.z + TREE_PERCH_RADIUS,
-  ], -1);
-  // Offset clear of the trunk: dropping onto the perch from inside the trunk
-  // tests the embedded-collider recovery, not the perch.
-  const p = { ...newMovementState(), x: tree.x + 0.72, y: perch + 1.5, z: tree.z };
-  for (let i = 0; i < 90; i++) stepPlayer(p, input(0, 0), w, TICK_DT);
-  check("a tree perch holds you up",
-    Math.abs(p.y - (perch + TREE_PERCH_THICKNESS)) < 0.05, `y=${p.y.toFixed(2)}`);
-  check("and you are grounded on it", p.grounded === true);
-}
-
-{
-  // The whole point of the perch: run at a tree holding jump and forward, and
-  // end up sitting in it. A trunk is far too thin to stop you horizontally, so
-  // this only works because the mantle also reaches while airborne.
-  const w = new World();
-  const size = 5;
-  const perch = treePerchHeight(size);
-  w.addObstacle([-0.28, 0, -0.28, 0.28, size, 0.28], -2);
-  w.addObstacle([
-    -TREE_PERCH_RADIUS, perch, -TREE_PERCH_RADIUS,
-    TREE_PERCH_RADIUS, perch + TREE_PERCH_THICKNESS, TREE_PERCH_RADIUS,
-  ], -2);
-
-  const p = { ...newMovementState(), x: 0, y: 0, z: -2.4, grounded: true };
-  let landed = 0;
-  for (let i = 0; i < 120; i++) {
-    stepPlayer(p, input(0, 1, BTN_JUMP), w, TICK_DT);
-    if (p.grounded && p.y > perch - 0.1) landed = p.y;
-  }
-  check("you can climb into a tree", landed > perch - 0.1, `best y ${landed.toFixed(2)}, perch ${perch.toFixed(2)}`);
+  // A point outside the trunk must fall to the ground, never land on an invisible disc.
+  const w = new World(); buildArena(w);
+  const tree = SCENERY.find(p => p.kind === 'tree')!;
+  const p = { ...newMovementState(), x: tree.x + 1.3, y: tree.y + 5, z: tree.z };
+  for (let i = 0; i < 150; i++) stepPlayer(p, input(0, 0), w, TICK_DT);
+  check('no floating tree platform remains', p.grounded && p.y < tree.y + 1);
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);

@@ -148,24 +148,6 @@ export const MANTLE_FORWARD = 0.75;
  *  clamber takes the same ~0.6 s however big a tile is. */
 export const MANTLE_SPEED = TILE * 1.73;
 
-// --- trees -----------------------------------------------------------------
-
-/**
- * Trees carry a standable platform in the canopy. Height is a fraction of the
- * tree's size, clamped so the lowest branch is always within mantle reach.
- *
- * Raised along with the world scale. At the old limits a perch topped out at
- * 2.8 m, which is below the top of a single wall -- so sitting in a tree put
- * you level with the cover everyone was already standing behind, which is not
- * a vantage point. The ceiling is still comfortably inside MANTLE_REACH, so a
- * tree remains a one-move climb.
- */
-export const TREE_PERCH_MIN_HEIGHT = 2.6;
-export const TREE_PERCH_MAX_HEIGHT = 5.0;
-/** Half-width and thickness of that platform. */
-export const TREE_PERCH_RADIUS = 1.5;
-export const TREE_PERCH_THICKNESS = 0.35;
-
 // --- fall damage -----------------------------------------------------------
 //
 // Previously a single linear term off a raw impact speed that several different

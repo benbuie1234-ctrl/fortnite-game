@@ -245,7 +245,7 @@ function createCloudLayer(): CloudLayer {
   const material = new THREE.MeshBasicMaterial({
     map: texture,
     transparent: true,
-    opacity: 0.85,
+    opacity: 0.68,
     depthWrite: false,
     // Seen from the inside.
     side: THREE.BackSide,
@@ -257,6 +257,11 @@ function createCloudLayer(): CloudLayer {
   // meets the skyline.
   const geometry = new THREE.SphereGeometry(RADIUS, 40, 20, 0, Math.PI * 2, 0, Math.PI * 0.54);
   projectCloudUVs(geometry);
+  // Fade out at the horizon, where planar UVs otherwise stretch into vertical curtains.
+  const pos=geometry.getAttribute('position');const shades=[];
+  for(let i=0;i<pos.count;i++){const a=THREE.MathUtils.smoothstep(pos.getY(i)/RADIUS,.12,.5);shades.push(1,1,1,a);}
+  geometry.setAttribute('color',new THREE.Float32BufferAttribute(shades,4));
+  material.vertexColors=true;
   const mesh = new THREE.Mesh(geometry, material);
   // Flattened hard: a hemisphere of cloud would wrap down around the player.
   mesh.scale.set(1, 0.34, 1);
@@ -327,7 +332,7 @@ function cloudTexture(): THREE.CanvasTexture {
 
   // Each cloud is a cluster of soft radial blobs, drawn with wraparound so the
   // texture tiles without a visible seam across the sky.
-  const clouds = 14;
+  const clouds = 9;
   for (let c = 0; c < clouds; c++) {
     const cx = rand() * SIZE;
     const cy = rand() * SIZE;

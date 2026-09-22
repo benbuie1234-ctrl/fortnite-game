@@ -1,5 +1,10 @@
 {
   "models": {
+    "tree_oak": "tree_oak.glb",
+    "tree_autumn": "tree_autumn.glb",
+    "bush": "bush.glb",
+    "flower": "flower.glb",
+    "fern": "fern.glb",
     "tree": "tree.glb",
     "rock": "rock.glb",
     "grass": "grass.glb",

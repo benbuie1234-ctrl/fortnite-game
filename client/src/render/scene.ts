@@ -168,8 +168,10 @@ export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Rende
         camera.position.z + sunDir.z * SUN_DISTANCE,
       );
       sun.target.position.copy(camera.position);
-      skySystem.update(clock.getDelta(), camera);
-      atmosphere.update(clock.getElapsedTime(), camera);
+      const dt=clock.getDelta(),time=clock.elapsedTime;
+      skySystem.update(dt, camera);
+      atmosphere.update(time, camera);
+      landscape.update(time);
       if (bloomEnabled) composer.render();
       else renderer.render(scene, camera);
     },

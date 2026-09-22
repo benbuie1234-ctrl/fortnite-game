@@ -1,17 +1,11 @@
 import { TILE } from './constants';
 import { Piece,Slot,SLOT_FLOOR,SLOT_WALL_X,SLOT_WALL_Z,SLOT_RAMP,Facing,packKey } from './build';
 import { World } from './world';
-import { MAP_HALF,BUILDINGS,SCENERY,PROPS,CARS,CAR_LENGTH,CAR_WIDTH,CAR_HEIGHT,terrainHeight,cell } from './map';
-import { TREE_PERCH_MIN_HEIGHT,TREE_PERCH_MAX_HEIGHT,TREE_PERCH_RADIUS,TREE_PERCH_THICKNESS } from './constants';
+import { MAP_HALF,BUILDINGS,SCENERY,PROPS,CARS,CAR_LENGTH,CAR_WIDTH,CAR_HEIGHT,terrainHeight,cell,DOCK,ARCHITECTURE } from './map';
 export const ARENA_OWNER=255;
 export const ARENA_HALF_TILES=MAP_HALF/TILE;
 export const ARENA_WALL_HEIGHT=0;
 export function isArenaPiece(p:Piece):boolean{return p.ownerId===ARENA_OWNER;}
-/** Where a tree's branch platform sits, clamped so the lowest branch of even
- *  the tallest tree is still inside a single mantle. */
-export function treePerchHeight(size:number):number {
-  return Math.max(TREE_PERCH_MIN_HEIGHT,Math.min(TREE_PERCH_MAX_HEIGHT,size*.55));
-}
 /** Cars are keyed from here downward, clear of scenery (-2 down) and props
  *  (-10000 down), so a collider can always be traced back to what it is. */
 export const CAR_KEY_BASE=-20000;
@@ -32,17 +26,11 @@ function place(w:World,x:number,y:number,z:number,slot:Slot,facing:Facing=0):voi
 /** Enterable buildings with front/back doors, open windows and continuous stairwells. */
 export function buildArena(world:World,_seed=1):void {
  world.terrainEnabled=true;
+ ARCHITECTURE.forEach((p,i)=>world.addObstacle([p.x-p.w/2,p.y-p.h/2,p.z-p.d/2,p.x+p.w/2,p.y+p.h/2,p.z+p.d/2],-40000-i));
  SCENERY.forEach((p,i)=>{
    const r=p.kind==='tree'?.28:p.size*.3,h=p.kind==='tree'?p.size:p.size*.5;
    world.addObstacle([p.x-r,p.y,p.z-r,p.x+r,p.y+h,p.z+r],-i-2);
-   // Trees carry a standable branch platform. It shares the trunk's key, so a
-   // shot that strips the leaves strips the same tree whichever part it hit.
-   if(p.kind==='tree'){
-   const perch=p.y+treePerchHeight(p.size);
-   world.addObstacle([
-     p.x-TREE_PERCH_RADIUS,perch,p.z-TREE_PERCH_RADIUS,
-     p.x+TREE_PERCH_RADIUS,perch+TREE_PERCH_THICKNESS,p.z+TREE_PERCH_RADIUS,
-   ],-i-2);}
+
  });
  PROPS.forEach((p,i)=>world.addObstacle([p.x-p.w/2,p.y,p.z-p.d/2,p.x+p.w/2,p.y+p.h,p.z+p.d/2],-10000-i));
  // Cars. The collider is an axis-aligned box sized to whichever way round the
@@ -121,11 +109,9 @@ export function buildArena(world:World,_seed=1):void {
  // walks there.
  const deckX0=cell(-198), deckX1=cell(-144), deckZ0=cell(102), deckZ1=cell(114);
  for(let x=deckX0;x<=deckX1;x++)for(let z=deckZ0;z<=deckZ1;z++)place(world,x,0,z,SLOT_FLOOR);
- // Railings down both long sides; the landward end stays open.
- for(let x=deckX0;x<=deckX1;x++) {
-  place(world,x,0,deckZ0,SLOT_WALL_Z);
-  place(world,x,0,deckZ1+1,SLOT_WALL_Z);
- }
+ // Low, visible dock rails instead of six-metre solid walls.
+ for(const [i,z] of [DOCK.z0,DOCK.z1].entries())world.addObstacle([DOCK.x0,0,z-.12,DOCK.x1,1.15,z+.12],-30000-i);
+
 
 }
 export function arenaSpawns():Array<{x:number;y:number;z:number;yaw:number}> {

@@ -6,8 +6,6 @@ import { resolvePlacement, placementIssue, BUILD_SHIELD } from "@shared/placemen
 import { unpackKey } from "@shared/build";
 import { weaponById, ARENA_LOADOUT, W_SNIPER, W_PICKAXE } from "@shared/weapons";
 import { locationAt, SCENERY } from "@shared/map";
-import { TREE_PERCH_RADIUS } from "@shared/constants";
-import { treePerchHeight } from "@shared/arena";
 import { SKINS } from "@shared/skins";
 import {
   EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
@@ -627,15 +625,13 @@ let occupiedTree = -1;
 
 /** The tree whose canopy contains this point, or -1. */
 function treeAt(x: number, y: number, z: number): number {
-  const reach = TREE_PERCH_RADIUS + 0.7;
+  const reach = 2.2;
   for (let i = 0; i < SCENERY.length; i++) {
     const p = SCENERY[i];
     if (p.kind !== "tree") continue;
     if (Math.abs(p.x - x) > reach || Math.abs(p.z - z) > reach) continue;
-    // Only once you are actually up in it; standing at the base does not
-    // count. Measured against the perch rather than a fixed 1.2 m, which stops
-    // meaning "up in the tree" the moment the perches move.
-    if (y < p.y + treePerchHeight(p.size) - 0.6 || y > p.y + p.size * 1.7) continue;
+    // Fade foliage only when the camera is actually inside the canopy.
+    if (y < p.y + p.size * .45 || y > p.y + p.size * 1.7) continue;
     return i;
   }
   return -1;

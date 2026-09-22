@@ -8,13 +8,13 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, prune, meshopt } from '@gltf-transform/functions';
+import { dedup, prune, meshopt, flatten, join } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
 const source=process.env.ASSET_SOURCE || '../assets';
 const out='client/public/models';await fs.mkdir(out,{recursive:true});
 await MeshoptEncoder.ready;
 const io=new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({'meshopt.encoder':MeshoptEncoder,'meshopt.decoder':MeshoptDecoder});
-const files={tree:['nature-kit','Models/GLTF format/tree_pineTallC.glb'],rock:['nature-kit','Models/GLTF format/rock_largeD.glb'],grass:['nature-kit','Models/GLTF format/grass.glb'],weapon_ar:['blaster-kit','Models/GLB format/blaster-e.glb'],weapon_shotgun:['blaster-kit','Models/GLB format/blaster-b.glb'],weapon_smg:['blaster-kit','Models/GLB format/blaster-a.glb'],weapon_sniper:['blaster-kit','Models/GLB format/blaster-n.glb'],crate:['blaster-kit','Models/GLB format/crate-medium.glb']};
+const files={tree_oak:['nature-kit','Models/GLTF format/tree_detailed.glb'],tree_autumn:['nature-kit','Models/GLTF format/tree_oak_fall.glb'],bush:['nature-kit','Models/GLTF format/plant_bushDetailed.glb'],flower:['nature-kit','Models/GLTF format/flower_purpleC.glb'],fern:['nature-kit','Models/GLTF format/grass_leafsLarge.glb'],tree:['nature-kit','Models/GLTF format/tree_pineTallC.glb'],rock:['nature-kit','Models/GLTF format/rock_largeD.glb'],grass:['nature-kit','Models/GLTF format/grass.glb'],weapon_ar:['blaster-kit','Models/GLB format/blaster-e.glb'],weapon_shotgun:['blaster-kit','Models/GLB format/blaster-b.glb'],weapon_smg:['blaster-kit','Models/GLB format/blaster-a.glb'],weapon_sniper:['blaster-kit','Models/GLB format/blaster-n.glb'],crate:['blaster-kit','Models/GLB format/crate-medium.glb']};
 let bytes=0;
 for(const [id,[pack,file]] of Object.entries(files)){
  try {
@@ -75,7 +75,28 @@ const animations=[new THREE.AnimationClip('idle',2,tracks),new THREE.AnimationCl
 for(const clip of animations)clip.tracks=clip.tracks.map(t=>{const axis=t.name.endsWith('[z]')?'z':'x';const vals=[];for(const a of t.values){const e=new THREE.Euler();e[axis]=a;vals.push(...new THREE.Quaternion().setFromEuler(e).toArray());}return new THREE.QuaternionKeyframeTrack('backpack.quaternion',Array.from(t.times),vals);});
 const data=await new GLTFExporter().parseAsync(rig,{binary:true,animations});
 const doc=await io.readBinary(new Uint8Array(data));await doc.transform(dedup(),prune(),meshopt({encoder:MeshoptEncoder,level:'high'}));await io.write(`${out}/ranger.glb`,doc);
+// Original broadleaf tree: tapered roots, branching trunk and layered crowns.
+// Exported and compressed like the rest of the asset library.
+for (const autumn of [false,true]) {
+ const tree=new THREE.Group();tree.name=autumn?'CopperOak':'MeadowOak';
+ const bark=new THREE.MeshStandardMaterial({color:0x715443,roughness:.95});bark.name='woodBark';
+ const leaves=[0x537740,0x6b904b,0x83a55c].map((color,i)=>{const m=new THREE.MeshStandardMaterial({color,roughness:.95,flatShading:true});m.name=['leafDark','leafGreen','leafLight'][i];return m;});
+ const branch=(a,b,r1,r2)=>{const from=new THREE.Vector3(...a),to=new THREE.Vector3(...b),delta=to.clone().sub(from);const m=new THREE.Mesh(new THREE.CylinderGeometry(r2,r1,delta.length(),9),bark);m.position.copy(from).add(to).multiplyScalar(.5);m.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),delta.normalize());tree.add(m);};
+ branch([0,0,0],[.12,4.6,.05],.24,.12);
+ for(let i=0;i<5;i++){const a=i*2.399;branch([Math.cos(a)*.52,.04,Math.sin(a)*.52],[.02,1.1,0],.09,.15);}
+ for(let i=0;i<9;i++){
+  const a=i*2.399,r=1.1+(i%3)*.28,cy=4.5+(i%4)*.55;
+  const cx=Math.sin(a)*r,cz=Math.cos(a)*r;
+  branch([.08,2.5+(i%3)*.5,0],[cx,cy,cz],.12,.045);
+  const crown=new THREE.Mesh(new THREE.IcosahedronGeometry(1,2),leaves[i%3]);
+  crown.position.set(cx,cy,cz);crown.scale.set(1.35+(i%2)*.25,1.1+(i%3)*.15,1.3);crown.rotation.set(i*.32,a,i*.15);tree.add(crown);
+ }
+ const top=new THREE.Mesh(new THREE.IcosahedronGeometry(1,2),leaves[2]);top.position.set(0,6.25,0);top.scale.set(1.55,1.4,1.5);tree.add(top);
+ const raw=await new GLTFExporter().parseAsync(tree,{binary:true});const treeDoc=await io.readBinary(new Uint8Array(raw));
+ await treeDoc.transform(flatten(),join(),dedup(),prune(),meshopt({encoder:MeshoptEncoder,level:'high'}));
+ await io.write(`${out}/${autumn?'tree_autumn':'tree_oak'}.glb`,treeDoc);
+}
 const manifest={models:Object.fromEntries([...Object.keys(files).map(id=>[id,`${id}.glb`]),['character','ranger.glb']])};await fs.writeFile(`${out}/manifest.json`,JSON.stringify(manifest,null,2)+'\n');
 for(const name of ['nature-kit','blaster-kit'])await fs.copyFile(path.join(source,name,'License.txt'),`${out}/${name}-LICENSE.txt`);
-await fs.writeFile(`${out}/CREDITS.txt`,`CLUTCH ASSET CREDITS\n\nKenney Nature Kit (CC0)\nhttps://kenney.nl/assets/nature-kit\n\nKenney Blaster Kit 2.1 (CC0)\nhttps://kenney.nl/assets/blaster-kit\n\nModels are converted to self-contained, Meshopt-compressed GLB files.\nSee the included original license files.\n\nClutch Ranger: original articulated character created for this game.\nSource and rebuild instructions: scripts/build-assets.mjs.\n`);
+await fs.writeFile(`${out}/CREDITS.txt`,`CLUTCH ASSET CREDITS\n\nKenney Nature Kit (CC0)\nhttps://kenney.nl/assets/nature-kit\n\nKenney Blaster Kit 2.1 (CC0)\nhttps://kenney.nl/assets/blaster-kit\n\nModels are converted to self-contained, Meshopt-compressed GLB files.\nSee the included original license files.\n\nClutch Ranger and Meadow/Copper Oak: original models created for this game.\nSource and rebuild instructions: scripts/build-assets.mjs.\n`);
 console.log('Environment and weapon bytes:',bytes,'plus ranger',(await fs.stat(`${out}/ranger.glb`)).size);

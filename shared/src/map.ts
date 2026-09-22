@@ -130,45 +130,27 @@ export const BUILDINGS:Building[]=[];
 // plateau, and everything still compiles.
 const NEAR = cell(-108), FAR = cell(108);
 
-// Skyline: towers on a raised plateau, two cells apart so the streets between
-// them are one tile wide -- close enough to build across, which is the point.
-const CITY_BASE = cell(TILE * 4);
-for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
-  BUILDINGS.push({
-    x: NEAR - 5 + col * 5, z: NEAR - 4 + row * 4, w: 3, d: 2,
-    floors: 2 + (row * 2 + col) % 3, base: CITY_BASE, style: 'city',
-    color: [0xc6d4d9, 0xe4c6a8, 0xa9bccc, 0xc3bbcf][(row + col) % 4],
-  });
-}
-
-// Meadows: single-storey houses with pitched roofs, on a low shelf.
-const MEADOW_BASE = cell(TILE * 1);
-for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
-  if (row === 1 && col === 1) continue; // a green in the middle of the neighbourhood
-  BUILDINGS.push({
-    x: FAR - 4 + col * 4, z: NEAR - 4 + row * 4, w: 2, d: 2, floors: 1,
-    base: MEADOW_BASE, style: 'house', color: [0xe6c08f, 0xb8d2be, 0xe5aea0, 0xabc8d9][(row + col) % 4],
-  });
-}
-
-// Tidal: wide warehouses at the waterline.
-for (let i = 0; i < 4; i++) {
-  BUILDINGS.push({
-    x: NEAR - 5 + (i % 2) * 6, z: FAR - 4 + Math.floor(i / 2) * 6, w: 3, d: 3, floors: 1,
-    base: 0, style: 'warehouse', color: [0x739aa0, 0xbb9b79, 0x8895ae][i % 3],
-  });
-}
-
-// Pinewatch: cabins around a lookout tower, on the summit.
-const RIDGE_BASE = cell(TILE * 5);
-for (const [dx, dz] of [[-4, -4], [3, -4], [-4, 3], [3, 3]]) {
-  BUILDINGS.push({ x: FAR + dx, z: FAR + dz, w: 2, d: 2, floors: 1, base: RIDGE_BASE, style: 'cabin', color: 0xb89970 });
-}
-BUILDINGS.push({ x: FAR - 1, z: FAR, w: 3, d: 2, floors: 4, base: RIDGE_BASE, style: 'city', color: 0xd4c4a1 });
-
-// The Citadel: a two-storey blockhouse on the central mesa. Everybody can see
-// it from everywhere, which is what makes the middle of the map worth a fight.
-BUILDINGS.push({ x: -2, z: -2, w: 4, d: 4, floors: 2, base: cell(TILE * 2), style: 'city', color: 0xb7a8c8 });
+// Authored blocks leave a continuous street through each district. Different
+// footprints and heights create courtyards, alleys and readable silhouettes.
+const CITY_BASE = 4, MEADOW_BASE = 1, RIDGE_BASE = 5;
+for (const [dx,dz,w,d,floors,color] of [
+ [-6,-6,3,3,3,0xe0c8ac], [1,-6,4,2,2,0x7ca7ac],
+ [-6,1,3,4,2,0xca8870], [1,1,3,3,4,0xb9b7cf],
+ [5,2,2,3,1,0xd4b66f],
+]) BUILDINGS.push({x:NEAR+dx,z:NEAR+dz,w,d,floors,base:CITY_BASE,style:'city',color});
+for (const [dx,dz,w,d,color] of [
+ [-6,-5,2,2,0xe3b07e],[-2,-5,2,3,0x85acaa],[3,-5,2,2,0xd89887],
+ [-6,1,2,3,0xaebf8c],[-1,2,2,2,0xe1c591],[4,1,2,2,0x93b6c7],
+]) BUILDINGS.push({x:FAR+dx,z:NEAR+dz,w,d,floors:1,base:MEADOW_BASE,style:'house',color});
+for (const [dx,dz,w,d,color] of [
+ [-5,-5,3,3,0x779fa3],[1,-5,4,3,0xc19871],[-4,1,3,3,0x8294b2],[2,2,3,2,0xba8068],
+]) BUILDINGS.push({x:NEAR+dx,z:FAR+dz,w,d,floors:1,base:0,style:'warehouse',color});
+for (const [dx,dz,w,d] of [[-5,-5,2,3],[2,-5,2,2],[-5,2,2,2],[3,2,2,3]])
+ BUILDINGS.push({x:FAR+dx,z:FAR+dz,w,d,floors:1,base:RIDGE_BASE,style:'cabin',color:0x9c7958});
+BUILDINGS.push({x:FAR-1,z:FAR,w:3,d:2,floors:3,base:RIDGE_BASE,style:'city',color:0xc8b795});
+// Four pavilions frame an open central court; the cross streets stay clear.
+for (const [x,z,floors,color] of [[-5,-5,2,0xd1b69a],[2,-5,3,0x82a4a4],[-5,2,2,0xbe8c79],[2,2,2,0xb9b9ce]])
+ BUILDINGS.push({x,z,w:3,d:3,floors,base:2,style:'city',color});
 
 /**
  * Cover between the districts.
@@ -277,7 +259,7 @@ for(const poi of LOCATIONS) {
   ROADS.push({x1:poi.x,z1:poi.z,x2:poi.x*0.18,z2:poi.z*0.18,width:7,color:0xbba97e});
 }
 
-const onRoad=(x:number,z:number,pad:number)=>ROADS.some(r=>{
+export const onRoad=(x:number,z:number,pad:number)=>ROADS.some(r=>{
   const dx=r.x2-r.x1, dz=r.z2-r.z1, len2=dx*dx+dz*dz || 1;
   const t=Math.max(0,Math.min(1,((x-r.x1)*dx+(z-r.z1)*dz)/len2));
   return Math.hypot(x-(r.x1+dx*t),z-(r.z1+dz*t))<r.width/2+pad;
@@ -343,7 +325,7 @@ export const CARS:Car[]=[];
   }
 }
 
-export interface Prop {x:number;y:number;z:number;w:number;h:number;d:number;color:number;}
+export interface Prop {x:number;y:number;z:number;w:number;h:number;d:number;color:number;kind?:'crate'|'fence'|'bench'|'planter'|'cabinet'|'vent'|'barrel'|'clock';}
 export const PROPS:Prop[]=[];
 for(const b of BUILDINGS.filter(b=>b.style==='house')) {
   const f=buildingFootprint(b);
@@ -354,9 +336,9 @@ for(const b of BUILDINGS.filter(b=>b.style==='house')) {
   // the middle of BOTH the -Z and +Z walls, so anything parked off either of
   // those faces is standing in a doorway -- which is exactly where the planter
   // used to be, sealing the back door of every house in the district.
-  PROPS.push({x:f.x0-2.0,y,z:(f.z0+f.z1)/2,w:.5,h:1.0,d:f.z1-f.z0,color:0xf0e6cc});
-  PROPS.push({x:f.x0-4.2,y:y+.4,z:(f.z0+f.z1)/2-2.5,w:1.0,h:.8,d:3.2,color:0x927550});
-  PROPS.push({x:f.x0-4.2,y:y+.6,z:(f.z0+f.z1)/2+2.5,w:2.0,h:1.2,d:2.0,color:0xb29369});
+  PROPS.push({x:f.x0-2.0,y,z:(f.z0+f.z1)/2,w:.5,h:1.0,d:f.z1-f.z0,color:0xf0e6cc,kind:'fence'});
+  PROPS.push({x:f.x0-4.2,y,z:(f.z0+f.z1)/2-2.5,w:1.0,h:.8,d:3.2,color:0x927550,kind:'bench'});
+  PROPS.push({x:f.x0-4.2,y,z:(f.z0+f.z1)/2+2.5,w:2.0,h:1.2,d:2.0,color:0xb29369,kind:'planter'});
   SCENERY.push({x:f.x0-7,z:f.z0-3,y,size:6,kind:'tree'});
 }
 // Cargo stacks out on the decking, as short-range cover. Placed on the deck
@@ -367,4 +349,42 @@ for(let i=0;i<10;i++) {
     x:-190+(i%5)*10, y:0, z:104+Math.floor(i/5)*12,
     w:7,h:5,d:7,color:[0x9a5b4a,0x4a6f9a,0x6f8f5a][i%3],
   });
+}
+
+// Shared furnishings: the visual model and the solid cover use these exact bounds.
+for(const [i,b] of BUILDINGS.entries()) {
+ const x=b.x*TILE,z=b.z*TILE,y=b.base*TILE,w=b.w*TILE,d=b.d*TILE;
+ PROPS.push({x:x+1.0,y,z:z+d-1.0,w:1.5,h:1.9,d:1.0,color:0x856a54,kind:'cabinet'});
+ // Leave the doorway column and the alternating front stairwell unobstructed.
+ PROPS.push({x:x+(b.w===2?1.2:w-1.2),y,z:z+d-3.6,w:1.5,h:1.5,d:1.5,color:0x65858a,kind:i%2?'barrel':'crate'});
+ if(b.style==='city')PROPS.push({x:x+w/2,y:y+b.floors*TILE,z:z+d-2,w:2.8,h:1.2,d:1.8,color:0x819497,kind:'vent'});
+}
+
+// The plaza clock is the central navigation landmark, with solid matching cover.
+PROPS.push({x:0,y:TILE*2,z:0,w:3,h:12,d:3,color:0xd6c09d,kind:'clock'});
+export const DOCK={x0:cell(-198)*TILE,x1:(cell(-144)+1)*TILE,z0:cell(102)*TILE,z1:(cell(114)+1)*TILE};
+
+/** Solid parts around door and window openings. Shared with rendering so a
+ * facade never paints over an escape route or hides an invisible wall. */
+export const ARCHITECTURE:Array<{x:number;y:number;z:number;w:number;h:number;d:number;color:number}>=[];
+for(const b of BUILDINGS)for(let side=0;side<4;side++) {
+ const count=side<2?b.w:b.d;
+ const panel=(u:number,v:number,w:number,h:number)=>{
+  ARCHITECTURE.push(side<2?
+   {x:b.x*TILE+u,y:b.base*TILE+v,z:(b.z+(side===0?0:b.d))*TILE,w,h,d:.25,color:b.color}:
+   {x:(b.x+(side===2?0:b.w))*TILE,y:b.base*TILE+v,z:b.z*TILE+u,w:.25,h,d:w,color:b.color});
+ };
+ for(let f=0;f<b.floors;f++)for(let c=0;c<count;c++) {
+  const open=side<2?(f===0?c===Math.floor(b.w/2):c%3===1):c%3===1;
+  if(!open)continue;
+  const u=(c+.5)*TILE,base=f*TILE,door=side<2&&f===0;
+  if(door){
+   const jamb=(TILE-2.4)/2;
+   for(const sign of [-1,1])panel(u+sign*(1.2+jamb/2),base+TILE/2,jamb,TILE);
+   panel(u,base+(3.3+TILE)/2,2.4,TILE-3.3);
+  } else {
+   panel(u,base+.55,TILE,1.1);panel(u,base+TILE-.7,TILE,1.4);
+   for(const sign of [-1,1])panel(u+sign*(TILE/2-.45),base+2.85,.9,3.5);
+  }
+ }
 }

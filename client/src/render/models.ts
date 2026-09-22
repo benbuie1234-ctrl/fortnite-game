@@ -26,6 +26,7 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
 
 /** Logical slots the game knows how to use. Anything else is ignored. */
 export type ModelId =
+  | "tree_oak" | "tree_autumn" | "bush" | "flower" | "fern"
   | "tree" | "rock" | "house" | "crate" | "barrel" | "grass" | "character"
   | "weapon_ar" | "weapon_shotgun" | "weapon_sniper" | "weapon_smg" | "weapon_pistol";
 
@@ -95,7 +96,7 @@ export class ModelLibrary {
         object.scale.set(1 / Math.max(.001,size.x), 1 / Math.max(.001,size.y), 1 / Math.max(.001,size.z));
         object.position.set(-center.x / size.x, -box.min.y / size.y, -center.z / size.z);
       } else {
-        const height = id === "tree" ? 3.6 : .35;
+        const height = id === "tree" || id.startsWith("tree_") ? 3.6 : id === "bush" ? 1.2 : id === "fern" ? .7 : .35;
         const factor = height / Math.max(.001,size.y);
         object.scale.multiplyScalar(factor);
         object.position.set(-center.x * factor, -box.min.y * factor, -center.z * factor);
@@ -113,9 +114,21 @@ export class ModelLibrary {
       // cannot take light from the environment map would sit in the scene
       // looking pasted on, so convert it.
       const mat = node.material as THREE.Material | THREE.Material[];
-      node.material = Array.isArray(mat)
-        ? mat.map(toPhysical)
-        : toPhysical(mat);
+      node.material = Array.isArray(mat) ? mat.map(m => toPhysical(m.clone())) : toPhysical(mat.clone());
+      if (id === 'rock') for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+        const m=material as THREE.MeshStandardMaterial;
+        m.color.setHex(/grass|moss/i.test(m.name)?0x7b9054:0x93968d);m.roughness=.95;
+      }
+      if (id === 'tree' || id.startsWith('tree_') || ['bush','grass','fern','flower'].includes(id)) {
+        for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+          const m = material as THREE.MeshStandardMaterial;
+          const name = m.name.toLowerCase();
+          if (/leaf|grass/.test(name)) m.color.setHex(id === 'tree_autumn' ? 0xb89544 : id === 'tree' ? 0x426f54 : id === 'tree_oak' ? 0x6c934c : 0x6c9155);
+          if (/leaf/.test(name)) m.color.multiplyScalar(name.includes("dark") ? .82 : name.includes("light") ? 1.15 : 1);
+          if (/bark|wood/.test(name)) m.color.setHex(0x715443);
+          m.roughness = .9;
+        }
+      }
     });
 
     this.items.set(id, wrapper);
@@ -204,6 +217,21 @@ export class InstancedModel {
     model.traverse((node) => {
       if (!(node instanceof THREE.Mesh)) return;
       const geometry = node.geometry.clone();
+      // Quantized GLBs store normalized integer coordinates. Baking a world
+      // transform into that storage wraps/clamps positions and mangles trees.
+      // Expand attributes to floats before applying any scale/translation.
+      for (const name of ['position', 'normal', 'tangent']) {
+        const attribute = geometry.getAttribute(name);
+        if (!attribute || attribute.array instanceof Float32Array) continue;
+        const values = new Float32Array(attribute.count * attribute.itemSize);
+        for (let i = 0; i < attribute.count; i++) {
+          values[i * attribute.itemSize] = attribute.getX(i);
+          values[i * attribute.itemSize + 1] = attribute.getY(i);
+          values[i * attribute.itemSize + 2] = attribute.getZ(i);
+          if (attribute.itemSize === 4) values[i * 4 + 3] = attribute.getW(i);
+        }
+        geometry.setAttribute(name, new THREE.BufferAttribute(values, attribute.itemSize));
+      }
       // Bake the sub-mesh's position within the model into its vertices.
       geometry.applyMatrix4(node.matrixWorld);
       const material = Array.isArray(node.material) ? node.material.map(m => m.clone()) : node.material.clone();
@@ -243,8 +271,9 @@ export class InstancedModel {
     }
   }
 
-  addTo(scene: THREE.Scene): void {
+  addTo(scene: THREE.Scene, castShadow = true): void {
     for (const part of this.parts) {
+      part.castShadow = castShadow;
       part.instanceMatrix.needsUpdate = true;
       if (part.instanceColor) part.instanceColor.needsUpdate = true;
       part.computeBoundingSphere();

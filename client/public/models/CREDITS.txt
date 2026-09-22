@@ -9,5 +9,5 @@ https://kenney.nl/assets/blaster-kit
 Models are converted to self-contained, Meshopt-compressed GLB files.
 See the included original license files.
 
-Clutch Ranger: original articulated character created for this game.
+Clutch Ranger and Meadow/Copper Oak: original models created for this game.
 Source and rebuild instructions: scripts/build-assets.mjs.

@@ -1,12 +1,12 @@
 import * as THREE from 'three';
-import { MAP_HALF,terrainHeight,BUILDINGS,LOCATIONS,SCENERY,PROPS,ROADS,LAKE_SHAPE,LAKE_SURFACE } from '@shared/map';
-import { treePerchHeight } from '@shared/arena';
-import { TREE_PERCH_RADIUS,TREE_PERCH_THICKNESS,TILE } from '@shared/constants';
+import { MAP_HALF,terrainHeight,BUILDINGS,SCENERY,PROPS,ROADS,LAKE_SHAPE,LAKE_SURFACE,onRoad,buildingFootprint } from '@shared/map';
 import { getTextures, planarUVs } from './textures';
 import { createCars } from './cars';
-import { InstancedModel, type ModelLibrary } from './models';
+import { createEnvironment } from './environment';
+import { InstancedModel, type ModelLibrary, type ModelId } from './models';
 
 export interface Landscape {
+  update(time:number):void;
   /** Fade one tree, addressed by its index in SCENERY. 1 = fully solid. */
   setTreeAlpha(sceneryIndex:number,alpha:number):void;
 }
@@ -52,19 +52,14 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  // with the rocks turned every container into a boulder.
  const propGeo=new THREE.BoxGeometry(1,1,1);
  const leafGeo=new THREE.ConeGeometry(1,1,7);
- // A flattened disc of branches at the perch height, so the platform you can
- // stand on is something you can see before you try to climb onto it.
- const branchGeo=new THREE.CylinderGeometry(TREE_PERCH_RADIUS,TREE_PERCH_RADIUS*.8,TREE_PERCH_THICKNESS,7);
  const detail=getTextures(1).detail;
  const solidMaterial=new THREE.MeshStandardMaterial({color:0xffffff,map:detail,roughness:0.88,metalness:0,envMapIntensity:0.9});
  const treeList=SCENERY.filter(p=>p.kind==='tree'),rockList=SCENERY.filter(p=>p.kind==='rock');
  const foliageMaterial=makeFoliageMaterial(solidMaterial);
  const trunks=new THREE.InstancedMesh(trunkGeo,foliageMaterial,treeList.length);
  const leaves=new THREE.InstancedMesh(leafGeo,foliageMaterial,treeList.length*3);
- const branches=new THREE.InstancedMesh(branchGeo,foliageMaterial,treeList.length);
  const trunkAlpha=addAlphaAttribute(trunkGeo,treeList.length);
  const leafAlpha=addAlphaAttribute(leafGeo,treeList.length*3);
- const branchAlpha=addAlphaAttribute(branchGeo,treeList.length);
  // SCENERY holds trees and rocks interleaved; everything downstream addresses
  // a tree by its SCENERY index, so keep the translation in one place.
  const treeSlotBySceneryIndex=new Map<number,number>();
@@ -73,32 +68,28 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  const props=new THREE.InstancedMesh(propGeo,solidMaterial,PROPS.length);
  const matrix=new THREE.Object3D();
 
- // A real tree model replaces the box-and-cones version. Same placement data
- // either way, so the fallback and the upgrade always agree on where trees are.
- const treeModel=models?.get('tree');
- const treeInstances=treeModel?new InstancedModel(treeModel,treeList.length,true):null;
- if(treeInstances?.valid) {
-  treeList.forEach((p,i)=>{
-   matrix.position.set(p.x,p.y,p.z);
-   matrix.scale.setScalar(p.size*0.5);
-   matrix.rotation.set(0,(i*2.399)%(Math.PI*2),0); // vary facing so a forest is not a grid of clones
-   matrix.updateMatrix();
-   treeInstances.setMatrixAt(i,matrix.matrix);
+ // Natural species mix: conifers on the ridge, broadleaf and autumn trees
+ // around the towns. No platform or second trunk underneath an imported tree.
+ const species:ModelId[]=['tree','tree_oak','tree_autumn'];
+ const treeBatches=new Map<number,{batch:InstancedModel;slot:number}>();
+ for(const id of species) {
+  const list=treeList.map((p,i)=>({p,i})).filter(({p,i})=>{
+   const chosen=Math.hypot(p.x-108,p.z-108)<85?'tree':i%7===0?'tree_autumn':'tree_oak';return chosen===id;
   });
-  treeInstances.addTo(scene);
-  matrix.rotation.set(0,0,0);
+  const model=models?.get(id);if(!model||!list.length)continue;
+  const batch=new InstancedModel(model,list.length,true);if(!batch.valid)continue;
+  list.forEach(({p,i},slot)=>{matrix.position.set(p.x,p.y,p.z);matrix.scale.setScalar(p.size*.5);matrix.rotation.set(0,i*2.399,0);matrix.updateMatrix();batch.setMatrixAt(slot,matrix.matrix);treeBatches.set(i,{batch,slot});});batch.addTo(scene);
  }
-
- const useProceduralTrees=!treeInstances?.valid;
+ matrix.rotation.set(0,0,0);
+ const useProceduralTrees=treeBatches.size!==treeList.length;
  const rockModel=models?.get("rock"),crateModel=models?.get("crate");
  const rockInstances=rockModel?new InstancedModel(rockModel,rockList.length):null;
- const crateInstances=crateModel?new InstancedModel(crateModel,PROPS.length):null;
+ const crateList=PROPS.filter(p=>!p.kind||p.kind==='crate');
+ const crateInstances=crateModel?new InstancedModel(crateModel,crateList.length):null;
  treeList.forEach((p,i)=>{
-   matrix.position.set(p.x,p.y+p.size/2,p.z);matrix.scale.set(1,p.size,1);matrix.updateMatrix();trunks.setMatrixAt(i,matrix.matrix);trunks.setColorAt(i,new THREE.Color(0x806445));
-   matrix.position.set(p.x,p.y+treePerchHeight(p.size)+TREE_PERCH_THICKNESS/2,p.z);matrix.scale.set(1,1,1);matrix.updateMatrix();
-   branches.setMatrixAt(i,matrix.matrix);branches.setColorAt(i,new THREE.Color(0x6a5238));
+   matrix.position.set(p.x,p.y+p.size/2,p.z);matrix.scale.set(treeBatches.has(i)?0:1,p.size,treeBatches.has(i)?0:1);matrix.updateMatrix();trunks.setMatrixAt(i,matrix.matrix);trunks.setColorAt(i,new THREE.Color(0x806445));
    for(let tier=0;tier<3;tier++){
-     const spread=p.size*(.66-tier*.17);
+     const spread=treeBatches.has(i)?0:p.size*(.66-tier*.17);
      matrix.position.set(p.x,p.y+p.size*(.72+tier*.34),p.z);
      matrix.scale.set(spread,p.size*.82,spread);
      // Rotate each tier differently so the canopy is not three aligned cones.
@@ -115,20 +106,22 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  rockList.forEach((p,i)=>{
   matrix.position.set(p.x,p.y,p.z);matrix.scale.set(p.size*.6,p.size*.5,p.size*.6);matrix.rotation.set(0,0,0);matrix.updateMatrix();
   if(rockInstances?.valid) rockInstances.setMatrixAt(i,matrix.matrix);
-  else { matrix.position.y+=p.size*.2;matrix.updateMatrix();rocks.setMatrixAt(i,matrix.matrix);rocks.setColorAt(i,new THREE.Color(0x8d9aa0)); }
+  else { matrix.position.y+=p.size*.2;matrix.updateMatrix();rocks.setMatrixAt(i,matrix.matrix);rocks.setColorAt(i,new THREE.Color(0x85928b)); }
  });
- PROPS.forEach((p,i)=>{
+ crateList.forEach((p,i)=>{
   matrix.position.set(p.x,p.y,p.z);matrix.scale.set(p.w,p.h,p.d);matrix.updateMatrix();
   if(crateInstances?.valid)crateInstances.setMatrixAt(i,matrix.matrix);
   else {matrix.position.y+=p.h/2;matrix.updateMatrix();props.setMatrixAt(i,matrix.matrix);props.setColorAt(i,new THREE.Color(p.color));}
  });
  rockInstances?.addTo(scene);crateInstances?.addTo(scene);
- for(const batch of [branches,...(useProceduralTrees?[trunks,leaves]:[]),...(!rockInstances?.valid?[rocks]:[]),...(!crateInstances?.valid?[props]:[])]){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
+ for(const batch of [...(useProceduralTrees?[trunks,leaves]:[]),...(!rockInstances?.valid?[rocks]:[]),...(!crateInstances?.valid?[props]:[])]){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
  const size=MAP_HALF*2;
  const ground=new THREE.PlaneGeometry(size,size,240,240);ground.rotateX(-Math.PI/2);
  const positions=ground.getAttribute('position');const colors=[];
  for(let i=0;i<positions.count;i++) {
-  const x=positions.getX(i),z=positions.getZ(i),h=terrainHeight(x,z);positions.setY(i,h);
+  const x=positions.getX(i),z=positions.getZ(i),h=terrainHeight(x,z);
+  const underFloor=BUILDINGS.some(b=>{const f=buildingFootprint(b);return x>=f.x0&&x<=f.x1&&z>=f.z0&&z<=f.z1;});
+  positions.setY(i,h-(underFloor?.08:0));
   const noise=(Math.sin(x*.13)*Math.cos(z*.17)+1)*.035;
   const color=new THREE.Color(h<-.1?0xbfae7b:h>10?0x638957:0x80aa63);color.multiplyScalar(.94+noise);colors.push(color.r,color.g,color.b);
  }
@@ -137,7 +130,14 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  // rather than stretching once across the entire map.
  planarUVs(ground,7);
  const terrain=new THREE.Mesh(ground,new THREE.MeshStandardMaterial({vertexColors:true,map:detail,roughness:0.95,metalness:0,envMapIntensity:0.9}));terrain.receiveShadow=true;scene.add(terrain);
- const water=new THREE.Mesh(new THREE.CircleGeometry(1,64),new THREE.MeshStandardMaterial({color:0x53b6c8,transparent:true,opacity:.78,roughness:0.08,metalness:0.25,envMapIntensity:1.4}));
+ const waterMaterial=new THREE.MeshStandardMaterial({color:0x3c929f,transparent:true,opacity:.88,roughness:.3,metalness:.08,envMapIntensity:.7});
+ const waterTime={value:0};
+ waterMaterial.onBeforeCompile=shader=>{
+  shader.uniforms.uWaterTime=waterTime;
+  shader.vertexShader='varying vec3 vWaterPosition;\n'+shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvWaterPosition=(modelMatrix*vec4(position,1.0)).xyz;');
+  shader.fragmentShader='uniform float uWaterTime; varying vec3 vWaterPosition;\n'+shader.fragmentShader.replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\nnormal = normalize(normal + vec3(sin(vWaterPosition.x*1.7+uWaterTime)*.08, cos(vWaterPosition.z*1.3+uWaterTime*.7)*.08,0.0));');
+ };
+ const water=new THREE.Mesh(new THREE.CircleGeometry(1,64),waterMaterial);
  water.rotation.x=-Math.PI/2;water.scale.set(LAKE_SHAPE.rx,LAKE_SHAPE.rz,1);water.position.set(LAKE_SHAPE.x,LAKE_SURFACE,LAKE_SHAPE.z);scene.add(water);
  // Concentric, translucent ripples break up the single-color lake surface and
  // catch the sun as the player approaches the shoreline.
@@ -153,68 +153,81 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  }
  // Roads are tessellated to follow the actual shared terrain, including the ridge ascent.
  function road(x1:number,z1:number,x2:number,z2:number,width:number,color:number):void {
-  const length=Math.hypot(x2-x1,z2-z1),nx=-(z2-z1)/length*width/2,nz=(x2-x1)/length*width/2;
-  const verts=[],indices=[];const steps=Math.ceil(length/3);
-  for(let i=0;i<=steps;i++){const t=i/steps,x=x1+(x2-x1)*t,z=z1+(z2-z1)*t;for(const sign of [-1,1])verts.push(x+nx*sign,terrainHeight(x+nx*sign,z+nz*sign)+.04,z+nz*sign);if(i<steps){const a=i*2;indices.push(a,a+2,a+1,a+1,a+2,a+3);}}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));g.setIndex(indices);g.computeVertexNormals();
-  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color,side:THREE.DoubleSide}));m.receiveShadow=true;scene.add(m);
+  const length=Math.hypot(x2-x1,z2-z1),nx=-(z2-z1)/length,nz=(x2-x1)/length;
+  const verts:number[]=[],indices:number[]=[],steps=Math.ceil(length/1.5),across=Math.ceil(width/1.5);
+  const inside=(x:number,z:number)=>BUILDINGS.some(b=>{const f=buildingFootprint(b,.12);return x>f.x0&&x<f.x1&&z>f.z0&&z<f.z1;});
+  for(let i=0;i<=steps;i++)for(let j=0;j<=across;j++) {
+   const t=i/steps,side=(j/across-.5)*width,x=x1+(x2-x1)*t+nx*side,z=z1+(z2-z1)*t+nz*side;
+   verts.push(x,terrainHeight(x,z)+.055,z);
+  }
+  for(let i=0;i<steps;i++)for(let j=0;j<across;j++) {
+   const a=i*(across+1)+j,b=a+across+1;
+   if([a,a+1,b,b+1].some(v=>inside(verts[v*3],verts[v*3+2])))continue;
+   indices.push(a,b,a+1,a+1,b,b+1);
+  }
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));g.setIndex(indices);g.computeVertexNormals();planarUVs(g,5);
+  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color,map:detail,roughness:.96,side:THREE.DoubleSide}));m.receiveShadow=true;scene.add(m);
  }
  // Exactly the corridors the map module declares, so the surface you can see
  // and the corridor the scenery generator keeps clear are the same thing. They
  // used to be two hand-maintained lists and had drifted apart.
  for(const r of ROADS)road(r.x1,r.z1,r.x2,r.z2,r.width,r.color);
- // Thin facade accents read as window frames; open cells remain open routes.
- const box=new THREE.BoxGeometry(1,1,1),mat=new THREE.MeshStandardMaterial({color:0xffffff});
- const details:{x:number;y:number;z:number;sx:number;sy:number;sz:number;color:number}[]=[];
- for(const b of BUILDINGS) {
-  for(let level=0;level<b.floors;level++)for(let x=0;x<b.w;x++) {
-   if(x===Math.floor(b.w/2)&&level===0)continue;
-   if(level>0&&x%3===1)continue;
-   for(const side of [0,b.d])details.push({x:(b.x+x+.5)*TILE,y:(b.base+level)*TILE+TILE*.55,z:(b.z+side)*TILE+(side===0?-.2:.2),sx:TILE*.55,sy:TILE*.36,sz:.05,color:0x4a7384});
+ createEnvironment(scene);
+ createGroundCover(scene,models);
+ // Layered, irregular silhouettes beyond the arena instead of identical pyramids.
+ for(let ring=0;ring<2;ring++)for(let i=0;i<24;i++) {
+  const a=i*Math.PI*2/24+ring*.16;
+  const geo=new THREE.SphereGeometry(1,12,8,0,Math.PI*2,0,Math.PI/2);
+  const pos=geo.getAttribute('position');const shades=[];
+  for(let j=0;j<pos.count;j++){
+   const vx=pos.getX(j),vy=pos.getY(j),vz=pos.getZ(j);
+   const noise=1+.18*Math.sin(vx*8+i)*Math.cos(vz*9+i*2);
+   pos.setXYZ(j,vx*(55+i%4*10),vy*(28+i%5*9)*noise,vz*(50+i%3*9));
+   const c=new THREE.Color(ring?0x77959d:0x677e7b).multiplyScalar(.85+vy*.25);shades.push(c.r,c.g,c.b);
   }
-  details.push({x:(b.x+b.w/2)*TILE,y:b.base*TILE+TILE*.88,z:b.z*TILE-1.2,sx:TILE*1.2,sy:.26,sz:2.6,color:b.style==='house'?0xf3e4c6:0x4b6978});
-  if(b.style==='house') {
-   // Fascia, front steps and a contrasting door surround make each home legible.
-   details.push({x:(b.x+b.w/2)*TILE,y:(b.base+b.floors)*TILE-.2,z:b.z*TILE-.26,sx:b.w*TILE+.5,sy:.3,sz:.3,color:0xf2e6c9});
-   for(const dx of [-TILE*.45,TILE*.45])details.push({x:(b.x+Math.floor(b.w/2)+.5)*TILE+dx,y:b.base*TILE+TILE*.5,z:b.z*TILE-.26,sx:.2,sy:TILE,sz:.2,color:0xf2e6c9});
-  }
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(shades,3));geo.computeVertexNormals();
+  const mountain=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,flatShading:true}));
+  mountain.position.set(Math.cos(a)*(MAP_HALF+125+ring*100),-8,Math.sin(a)*(MAP_HALF+125+ring*100));scene.add(mountain);
  }
- const facade=new THREE.InstancedMesh(box,mat,details.length),dummy=new THREE.Object3D();
- details.forEach((d,i)=>{dummy.position.set(d.x,d.y,d.z);dummy.scale.set(d.sx,d.sy,d.sz);dummy.updateMatrix();facade.setMatrixAt(i,dummy.matrix);facade.setColorAt(i,new THREE.Color(d.color));});facade.computeBoundingSphere();scene.add(facade);
- // Door numbers and a pair of street names give the neighborhood useful callouts.
- BUILDINGS.filter(b=>b.style==='house').forEach((b,i)=>{
-   const canvas=document.createElement('canvas');canvas.width=128;canvas.height=64;
-   const ctx=canvas.getContext('2d')!;ctx.fillStyle='#24454d';ctx.fillRect(0,0,128,64);ctx.fillStyle='#fff4d8';ctx.font='bold 34px system-ui';ctx.textAlign='center';ctx.fillText(String(101+i),64,45);
-   const sign=new THREE.Mesh(new THREE.PlaneGeometry(1.3,.65),new THREE.MeshBasicMaterial({map:new THREE.CanvasTexture(canvas),side:THREE.DoubleSide}));
-   sign.position.set((b.x+Math.floor(b.w/2)+.5)*TILE,b.base*TILE+TILE*.75,b.z*TILE-.3);sign.rotation.y=Math.PI;scene.add(sign);
- });
- // Names on the landscape are visible approach landmarks.
- for(const poi of LOCATIONS){
-  const canvas=document.createElement('canvas');canvas.width=512;canvas.height=80;const ctx=canvas.getContext('2d')!;
-  ctx.fillStyle='#102d3acc';ctx.fillRect(0,0,512,80);ctx.fillStyle='#fff';ctx.font='bold 30px system-ui';ctx.textAlign='center';ctx.fillText(poi.name,256,51);
-  const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(canvas),depthTest:true}));sprite.position.set(poi.x,terrainHeight(poi.x,poi.z)+34,poi.z);sprite.scale.set(38,6,1);scene.add(sprite);
- }
- // Mountain backdrop is beyond the playable boundary, never mistaken for traversable cover.
- for(let i=0;i<20;i++){
-  const a=i*Math.PI*2/20;const mountain=new THREE.Mesh(new THREE.ConeGeometry(55,60+i%4*18,5),new THREE.MeshStandardMaterial({color:i%2?0x688693:0x789b9f}));
-  mountain.position.set(Math.cos(a)*(MAP_HALF*1.5),14,Math.sin(a)*(MAP_HALF*1.5));scene.add(mountain);
- }
+ const horizon=new THREE.Mesh(new THREE.PlaneGeometry(1800,1800),new THREE.MeshStandardMaterial({color:0x638e92,roughness:.6}));
+ horizon.rotation.x=-Math.PI/2;horizon.position.y=-8;scene.add(horizon);
 
  createCars(scene);
 
  return {
+  update(time){waterTime.value=time;},
   setTreeAlpha(sceneryIndex,alpha) {
    const slot=treeSlotBySceneryIndex.get(sceneryIndex);
    if(slot===undefined)return;
-   treeInstances?.setAlphaAt(slot, Math.max(.08, Math.min(1, alpha)));
+   const tree=treeBatches.get(slot);tree?.batch.setAlphaAt(tree.slot,Math.max(.08,Math.min(1,alpha)));
    const clamped=Math.max(0.12,Math.min(1,alpha));
    if(trunkAlpha.getX(slot)===clamped)return;
    trunkAlpha.setX(slot,clamped);trunkAlpha.needsUpdate=true;
-   branchAlpha.setX(slot,clamped);branchAlpha.needsUpdate=true;
    // Leaves fade harder than the trunk: the canopy is what blocks the view,
    // and a trunk you can see straight through reads as a bug rather than cover.
    for(let tier=0;tier<3;tier++)leafAlpha.setX(slot*3+tier,clamped === 1 ? 1 : Math.max(0.08,clamped*0.72));
    leafAlpha.needsUpdate=true;
   },
  };
+}
+
+/** Deterministic small plants are decorative; no invisible foliage colliders.
+ * Clustered and spatially batched so a meadow does not cost one call per blade. */
+function createGroundCover(scene:THREE.Scene,models?:ModelLibrary):void {
+ let seed=81731;const rand=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
+ const groups=new Map<string,{id:ModelId;points:{x:number;y:number;z:number;s:number;r:number}[]}>();
+ for(let i=0;i<8500;i++) {
+  const x=(rand()-.5)*MAP_HALF*1.93,z=(rand()-.5)*MAP_HALF*1.93,y=terrainHeight(x,z);
+  if(y<.1||onRoad(x,z,1.2)||BUILDINGS.some(b=>{const f=buildingFootprint(b,2);return x>f.x0&&x<f.x1&&z>f.z0&&z<f.z1;}))continue;
+  if(Math.sin(x*.045)*Math.cos(z*.053)<-.15)continue;
+  const id:ModelId=i%17===0?'bush':i%5===0?'flower':i%3===0?'fern':'grass';
+  const key=`${id},${Math.floor(x/48)},${Math.floor(z/48)}`;
+  const g=groups.get(key)??{id,points:[]};g.points.push({x,y,z,s:.7+rand()*.9,r:rand()*6.28});groups.set(key,g);
+ }
+ const obj=new THREE.Object3D();
+ for(const g of groups.values()){
+  const model=models?.get(g.id);if(!model)continue;
+  const batch=new InstancedModel(model,g.points.length);
+  g.points.forEach((p,i)=>{obj.position.set(p.x,p.y,p.z);obj.scale.setScalar(p.s);obj.rotation.set(0,p.r,0);obj.updateMatrix();batch.setMatrixAt(i,obj.matrix);});batch.addTo(scene,false);
+ }
 }

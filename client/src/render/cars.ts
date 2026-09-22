@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import { CARS, CAR_LENGTH, CAR_WIDTH, CAR_HEIGHT, terrainHeight } from "@shared/map";
 
 /**
@@ -20,16 +21,16 @@ export function createCars(scene: THREE.Scene): void {
   const L = CAR_LENGTH, W = CAR_WIDTH, H = CAR_HEIGHT;
 
   // Car-local space: +Z is forward, +Y up, sitting on y=0.
-  const hull = new THREE.BoxGeometry(W, H * 0.42, L);
+  const hull = new RoundedBoxGeometry(W, H * 0.42, L, 3, .16);
   const nose = new THREE.BoxGeometry(W * 0.88, H * 0.2, L * 0.34);
-  const cabin = new THREE.BoxGeometry(W * 0.8, H * 0.34, L * 0.4);
+  const cabin = new RoundedBoxGeometry(W * 0.8, H * 0.34, L * 0.4, 3, .15);
   const glass = new THREE.BoxGeometry(W * 0.74, H * 0.3, L * 0.38);
   const spoiler = new THREE.BoxGeometry(W * 0.92, H * 0.06, L * 0.1);
   const wheel = new THREE.CylinderGeometry(H * 0.32, H * 0.32, W * 0.16, 14);
   wheel.rotateZ(Math.PI / 2);
 
   const paint = new THREE.MeshStandardMaterial({
-    color: 0xffffff, roughness: 0.28, metalness: 0.55, envMapIntensity: 1.2,
+    color: 0xffffff, roughness: 0.4, metalness: 0.35, envMapIntensity: 0.75,
   });
   const dark = new THREE.MeshStandardMaterial({ color: 0x14161b, roughness: 0.9, metalness: 0 });
   const tint = new THREE.MeshStandardMaterial({
@@ -86,6 +87,23 @@ export function createCars(scene: THREE.Scene): void {
     }
   });
   meshes.push(wheels);
+
+  // Headlamps, tail lamps, bumper inserts, split grille and alloy wheel faces.
+  const chrome=new THREE.MeshStandardMaterial({color:0xa9b8b5,roughness:.4,metalness:.5});
+  const lamp=new THREE.MeshStandardMaterial({color:0xffebc0,roughness:.3,emissive:0xffd384,emissiveIntensity:.12});
+  const tail=new THREE.MeshStandardMaterial({color:0xc95442,roughness:.3});
+  function detail(g:THREE.BufferGeometry,m:THREE.Material,offsets:THREE.Vector3[]):void {
+   const batch=new THREE.InstancedMesh(g,m,CARS.length*offsets.length);
+   CARS.forEach((c,i)=>{placeCar(car,c);offsets.forEach((v,j)=>{part.position.copy(v);part.rotation.set(0,0,0);part.updateMatrix();batch.setMatrixAt(i*offsets.length+j,car.matrix.clone().multiply(part.matrix));});});meshes.push(batch);
+  }
+  detail(new RoundedBoxGeometry(.54,.19,.10,2,.035),lamp,[-1,1].map(s=>new THREE.Vector3(s*W*.3,H*.42,L*.502)));
+  detail(new THREE.BoxGeometry(.5,.15,.08),tail,[-1,1].map(s=>new THREE.Vector3(s*W*.3,H*.43,-L*.502)));
+  detail(new THREE.BoxGeometry(W*.5,.18,.09),dark,[new THREE.Vector3(0,H*.25,L*.505)]);
+  detail(new THREE.BoxGeometry(W*.83,.065,.1),chrome,[new THREE.Vector3(0,H*.15,L*.51),new THREE.Vector3(0,H*.15,-L*.51)]);
+  const hubs=new THREE.CylinderGeometry(H*.20,H*.20,.05,12);hubs.rotateZ(Math.PI/2);
+  const hubOffsets:THREE.Vector3[]=[];for(const dx of [-1,1])for(const dz of [-1,1])hubOffsets.push(new THREE.Vector3(dx*W*.55,H*.32,dz*L*.33));detail(hubs,chrome,hubOffsets);
+  detail(new THREE.BoxGeometry(.06,.06,.3),chrome,[-1,1].map(s=>new THREE.Vector3(s*W*.505,H*.52,-L*.06)));
+  detail(new RoundedBoxGeometry(.22,.15,.3,2,.04),paint,[-1,1].map(s=>new THREE.Vector3(s*W*.52,H*.76,L*.12)));
 
   for (const mesh of meshes) {
     mesh.instanceMatrix.needsUpdate = true;
