@@ -265,6 +265,10 @@ export class Connection {
         this.handlers.onWelcome(msg.id as number, msg.name as string);
         break;
       case S_MATCH:
+        if (msg.roundOver) {
+          this.pending.length = 0;
+          this.unsent.length = 0;
+        }
         this.handlers.onMatchState(msg);
         break;
       case S_CHAT:

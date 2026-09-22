@@ -77,6 +77,29 @@ fpsSelect.addEventListener("change", () => {
 });
 
 let winTimerInterval: ReturnType<typeof setInterval> | null = null;
+function winScoreboardHtml(players: MatchPlayerInfo[], selfId: number): string {
+  if (!players || players.length === 0) return '<div style="color:#8da4b5;padding:12px;">No players in match</div>';
+  const sorted = [...players].sort(
+    (a, b) => (b.wins ?? 0) - (a.wins ?? 0) || b.kills - a.kills || a.deaths - b.deaths,
+  );
+  let rows = "";
+  for (const p of sorted) {
+    const isMe = p.id === selfId;
+    const name = String(p.name ?? "Player").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    rows += `<tr class="${isMe ? "me" : ""}">` +
+      `<td>${isMe ? "★ " : ""}${name}</td>` +
+      `<td class="num">${p.kills ?? 0}</td>` +
+      `<td class="num">${p.deaths ?? 0}</td>` +
+      `<td class="num">${p.wins ?? 0}</td>` +
+      `<td class="num">${p.ping ?? 0} ms</td>` +
+      `</tr>`;
+  }
+  return `<table class="win-table">` +
+    `<thead><tr><th>PLAYER</th><th>KILLS</th><th>DEATHS</th><th>WINS</th><th>PING</th></tr></thead>` +
+    `<tbody>${rows}</tbody>` +
+    `</table>`;
+}
+
 function showWinScreen(winnerId: number, winnerName: string, nextRoundSec = 5): void {
   const winScreen = document.getElementById("winScreen");
   const winCard = document.getElementById("winCard");
@@ -95,7 +118,7 @@ function showWinScreen(winnerId: number, winnerName: string, nextRoundSec = 5): 
     ? `You won the round with ${scoreTarget} eliminations!`
     : `${winnerName} won the round with ${scoreTarget} eliminations!`;
 
-  winStats.innerHTML = standingsTable(matchPlayers, conn.selfId, scoreTarget);
+  winStats.innerHTML = winScoreboardHtml(matchPlayers, conn.selfId);
 
   let remaining = nextRoundSec;
   winTimer.textContent = String(remaining);
@@ -121,6 +144,9 @@ function hideWinScreen(): void {
   if (!winScreen) return;
   winScreen.classList.remove("active");
   setTimeout(() => winScreen.classList.add("hidden"), 350);
+  if (playing && !document.body.classList.contains("touch")) {
+    controls.requestLock();
+  }
 }
 
 const conn = new Connection({

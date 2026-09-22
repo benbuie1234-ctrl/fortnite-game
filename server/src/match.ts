@@ -427,11 +427,7 @@ export class MatchRoom implements DurableObject {
     finishReloads(player, nowSec);
     player.addMats(MATS_PER_SECOND * TICK_DT);
 
-    if (nowSec < this.intermissionEndAt) {
-      player.wasFiring = false;
-      player.inputQueue.length = 0;
-      return;
-    }
+    const isIntermission = nowSec < this.intermissionEndAt;
 
     let processed = 0;
     while (player.inputQueue.length > 0 && processed < MAX_INPUTS_PER_TICK) {
@@ -457,10 +453,12 @@ export class MatchRoom implements DurableObject {
 
       stepPlayer(player, cmd, this.world, TICK_DT);
 
-      const fall = fallDamage(player.lastFallHeight, player.lastLandingSpeed);
-      if (fall > 0) {
-        player.hp -= fall;
-        player.lastDamagedBy = -1;
+      if (!isIntermission) {
+        const fall = fallDamage(player.lastFallHeight, player.lastLandingSpeed);
+        if (fall > 0) {
+          player.hp -= fall;
+          player.lastDamagedBy = -1;
+        }
       }
 
       if (isOutOfBounds(player.x, player.y, player.z)) {
@@ -471,15 +469,15 @@ export class MatchRoom implements DurableObject {
 
       if ((cmd.buttons & BTN_RELOAD) !== 0) beginReload(player, inputTime);
 
-      const firing = (cmd.buttons & BTN_FIRE) !== 0;
+      const firing = !isIntermission && (cmd.buttons & BTN_FIRE) !== 0;
       const weapon = weaponById(player.weaponId);
 
       if (player.inBuildMode) {
         // Turbo build: holding the button keeps placing at the build cooldown.
-        if (firing) tryPlace(this.world, player, inputTime, nowMs, this.events);
+        if (firing && !isIntermission) tryPlace(this.world, player, inputTime, nowMs, this.events);
       } else {
         const triggered = weapon.auto ? firing : firing && !player.wasFiring;
-        if (triggered) {
+        if (triggered && !isIntermission) {
           resolveFire(this.world, player, [...this.players.values()], inputTime, nowMs, this.events, this.critters);
         }
       }

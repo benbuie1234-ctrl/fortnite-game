@@ -95,7 +95,8 @@ const animConfigs = [
   // lockY as well: a ladder climb raises its own root half a metre over its
   // 0.77 s, and the solver already owns the player's height while mantling --
   // played as authored the two rises compound and the body leaves the capsule.
-  { file: 'Climbing Ladder.fbx', name: 'climb', inPlace: true, lockY: true },
+  // rotateY rotates 180 degrees so the character faces the wall/ladder.
+  { file: 'Climbing Ladder.fbx', name: 'climb', inPlace: true, lockY: true, rotateY: Math.PI },
   { file: 'Knocked Out.fbx', name: 'death', inPlace: true },
 ];
 
@@ -132,6 +133,19 @@ for (const config of animConfigs) {
           }
         }
         newTracks.push(new THREE.VectorKeyframeTrack(track.name, track.times, values));
+      } else if (track.name.endsWith('.quaternion') && config.rotateY && track.name.includes('Hips')) {
+        const qRot = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), config.rotateY);
+        const values = new Float32Array(track.values.length);
+        const q = new THREE.Quaternion();
+        for (let i = 0; i < track.values.length; i += 4) {
+          q.set(track.values[i], track.values[i + 1], track.values[i + 2], track.values[i + 3]);
+          q.premultiply(qRot);
+          values[i] = q.x;
+          values[i + 1] = q.y;
+          values[i + 2] = q.z;
+          values[i + 3] = q.w;
+        }
+        newTracks.push(new THREE.QuaternionKeyframeTrack(track.name, track.times, values));
       } else {
         newTracks.push(track);
       }
