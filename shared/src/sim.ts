@@ -87,6 +87,7 @@ export interface MovementState {
    *  ground clamp) all produce an impact speed, which is exactly why fall
    *  damage used to feel random. Height fallen has one meaning. */
   lastFallHeight: number;
+  mantling: boolean;
 }
 
 /** Capsule height at the player's current stance. */
@@ -129,6 +130,7 @@ export function newMovementState(): MovementState {
     crouch: 0, sliding: false, slideLockout: 0, slideTime: 0, crouchHeld: false,
     sprinting: false, stamina: SPRINT_STAMINA_MAX, staminaIdle: 0,
     fallPeakY: 0, lastFallHeight: 0, bloom: 0,
+    mantling: false,
   };
 }
 
@@ -552,10 +554,11 @@ function moveAndCollide(
   if (reaching && input.moveZ > 0 && (input.buttons & BTN_JUMP) !== 0) {
     const ledge = findLedge(s, input);
     if (ledge !== null) {
+      s.mantling = true;
       s.y = Math.min(ledge.top + 0.02, s.y + MANTLE_SPEED * dt);
       s.vy = 0;
       s.grounded = false;
-      if (s.y >= ledge.top) { s.x = ledge.x; s.z = ledge.z; s.grounded = true; }
+      if (s.y >= ledge.top) { s.x = ledge.x; s.z = ledge.z; s.grounded = true; s.mantling = false; }
       // Pulling yourself onto a ledge is not a fall. Re-base the peak so the
       // climb cannot be charged as one on the tick it completes.
       s.fallPeakY = s.y;
@@ -563,6 +566,7 @@ function moveAndCollide(
       return;
     }
   }
+  s.mantling = false;
 
   // --- vertical ---
   const hitVertical = sweepAxis(s, 1, dy);

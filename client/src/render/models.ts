@@ -137,10 +137,14 @@ export class ModelLibrary {
       const size = box.getSize(new THREE.Vector3());
       const center = box.getCenter(new THREE.Vector3());
       if (id.startsWith("weapon_")) {
+        if (id === "weapon_ar" || id === "weapon_shotgun") {
+          object.rotation.y = Math.PI;
+        }
+        object.updateMatrixWorld(true);
         const length = id === "weapon_sniper" ? 1.1 : id === "weapon_ar" ? .86 : id === "weapon_shotgun" ? .72 : .55;
         const factor = length / Math.max(.001, size.z);
         object.scale.multiplyScalar(factor);
-        object.position.set(-center.x * factor, -center.y * factor, -box.min.z * factor - length * .3);
+        object.position.set(-center.x * factor, -center.y * factor, (id === "weapon_ar" || id === "weapon_shotgun" ? box.max.z : -box.min.z) * factor - length * .3);
       } else if (id === "rock" || id === "crate") {
         object.scale.set(1 / Math.max(.001,size.x), 1 / Math.max(.001,size.y), 1 / Math.max(.001,size.z));
         object.position.set(-center.x / size.x, -box.min.y / size.y, -center.z / size.z);

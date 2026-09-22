@@ -9,7 +9,7 @@ import { locationAt, SCENERY } from "@shared/map";
 import { SKINS } from "@shared/skins";
 import {
   EV_PIECE_DAMAGE, EV_SHOT, EV_HIT, EV_DEATH, EV_RESPAWN, EV_PIECE_ADD, EV_PIECE_REMOVE,
-  EV_FOLIAGE, EV_CRITTER, PF_ALIVE, PF_GROUNDED, PF_CROUCH,
+  EV_FOLIAGE, EV_CRITTER, PF_ALIVE, PF_GROUNDED, PF_CROUCH, PF_AIMING, PF_SLIDING,
 } from "@shared/protocol";
 import type { GameEvent } from "@shared/snapshot";
 
@@ -827,11 +827,15 @@ function frame(now: number): void {
     // players still see the full character, including while we use the scope.
     selfCharacter.root.visible = self.alive && view.camera.position.distanceTo(new THREE.Vector3(renderSelf.x,renderSelf.y+EYE_HEIGHT,renderSelf.z))>.85;
     selfCharacter.setWeapon(controls.inBuildMode?255:ARENA_LOADOUT[controls.slot]);
+    const aiming = controls.aiming && !controls.inBuildMode;
     selfCharacter.update(
       renderSelf.x, renderSelf.y, renderSelf.z,
       controls.yaw, controls.pitch,
       Math.hypot(self.vx, self.vz), self.grounded, dt,
       self.crouch,
+      self.sliding,
+      aiming,
+      self.mantling,
     );
     selfCharacter.aimAt(aimPoint);
     // No nameplate on your own body.
@@ -855,10 +859,15 @@ function frame(now: number): void {
     // so the walk cycle still plays.
     const moving = (pose.state.flags & 32) !== 0;
     const grounded = (pose.state.flags & PF_GROUNDED) !== 0;
+    const sliding = (pose.state.flags & PF_SLIDING) !== 0;
+    const aiming = (pose.state.flags & PF_AIMING) !== 0;
     ch.update(
       pose.x, pose.y, pose.z, pose.yaw, pose.pitch,
       moving ? 6 : 0, grounded, dt,
       (pose.state.flags & PF_CROUCH) !== 0 ? 1 : 0,
+      sliding,
+      aiming,
+      false,
     );
     if (alive) footsteps(pose.id, pose.x, pose.y, pose.z, grounded && moving);
   }

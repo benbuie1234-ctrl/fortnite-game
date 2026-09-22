@@ -66,6 +66,7 @@ export class Character {
   private gun: THREE.Group;
   private gunModel: THREE.Group | null = null;
   private pickaxe = new THREE.Group();
+  private blueprint = new THREE.Group();
   private weaponId = -1;
   private nameplate: THREE.Sprite;
   private nameCanvas: HTMLCanvasElement;
@@ -200,7 +201,37 @@ export class Character {
 
       if (isBlockRanger) {
         for (const name of names) (this as unknown as Record<string, THREE.Object3D>)[name] = art.getObjectByName(name)!;
+      } else {
+        const rightHand = art.getObjectByName("mixamorigRightHand") || art.getObjectByName("RightHand");
+        if (rightHand) {
+          this.root.remove(this.gun);
+          this.root.remove(this.pickaxe);
+          rightHand.add(this.gun);
+          rightHand.add(this.pickaxe);
+          this.gun.position.set(0.02, 0.08, 0.0);
+          this.gun.rotation.set(-1.626, -0.027, -1.690);
+          this.pickaxe.position.set(0.02, 0.08, 0.0);
+          this.pickaxe.rotation.set(-1.626, -0.027, -1.690);
+        }
+
+        const leftHand = art.getObjectByName("mixamorigLeftHand") || art.getObjectByName("LeftHand");
+        this.blueprint = createBlueprintModel();
+        this.blueprint.visible = false;
+        if (leftHand) {
+          leftHand.add(this.blueprint);
+          this.blueprint.position.set(-0.04, 0.12, 0.05);
+          this.blueprint.rotation.set(1.4, 0.2, -1.2);
+        } else {
+          this.root.add(this.blueprint);
+          this.blueprint.position.set(-0.25, 1.25, 0.35);
+        }
       }
+
+      const texLoader = new THREE.TextureLoader();
+      const bodyTex = texLoader.load('/textures/character/body_diffuse.jpg');
+      bodyTex.colorSpace = THREE.SRGBColorSpace;
+      const headTex = texLoader.load('/textures/character/head_diffuse.jpg');
+      headTex.colorSpace = THREE.SRGBColorSpace;
 
       art.traverse(node => {
         if (node instanceof THREE.SkinnedMesh) {
@@ -209,12 +240,16 @@ export class Character {
         if (!(node instanceof THREE.Mesh)) return;
         node.castShadow = true;
         node.receiveShadow = true;
-        for (const mat of Array.isArray(node.material) ? node.material : [node.material]) {
+        const mats = Array.isArray(node.material) ? node.material : [node.material];
+        mats.forEach((mat, idx) => {
           if (mat instanceof THREE.MeshStandardMaterial) {
-            if (mat.name === "Armor") mat.color.setHex(skin.colors.primary);
-            if (mat.name === "Accent" || mat.name === "Suit") mat.color.setHex(skin.colors.secondary);
+            mat.color.setHex(0xffffff);
+            mat.map = idx === 0 ? bodyTex : headTex;
+            mat.roughness = 0.78;
+            mat.metalness = 0.1;
+            mat.needsUpdate = true;
           }
-        }
+        });
       });
       this.root.add(art);
       this.mixer = new THREE.AnimationMixer(art);
@@ -228,26 +263,25 @@ export class Character {
     this.setNameplate(name);
   }
 
-  setWeapon(id:number):void {
-    if (this.weaponId === id && this.gunModel) return; // already holding it
-    this.weaponId=id;
+  setWeapon(id: number): void {
+    if (this.weaponId === id && this.gunModel) return;
+    this.weaponId = id;
 
-    // The old box-with-a-scale is gone; every weapon now has its own geometry,
-    // so a shotgun reads as a shotgun from across the map.
-    this.pickaxe.visible = false;
+    this.blueprint.visible = id === 255;
+    this.pickaxe.visible = id === W_PICKAXE;
+    this.gun.visible = id !== 255 && id !== W_PICKAXE;
+
     if (this.gunModel) {
       this.gun.remove(this.gunModel);
       disposeWeaponModel(this.gunModel);
       this.gunModel = null;
     }
 
-    // 255 means "in build mode, holding nothing".
-    this.gun.visible = id !== 255;
-    if (!this.gun.visible) return;
+    if (id === 255 || id === W_PICKAXE) return;
 
     const slots: Record<number, string> = { 0: "weapon_ar", 1: "weapon_shotgun", 2: "weapon_sniper", 3: "weapon_smg", 4: "weapon_pistol" };
     const imported = this.models?.get(slots[id] as import("./models").ModelId);
-    this.gunModel = imported as THREE.Group | null ?? createWeaponModel(id);
+    this.gunModel = (imported as THREE.Group | null) ?? createWeaponModel(id);
     this.gun.add(this.gunModel);
   }
   fire(): void {
@@ -257,11 +291,13 @@ export class Character {
       fireAction.reset().setLoop(THREE.LoopOnce, 1).play();
     }
   }
-  aimAt(worldPoint:THREE.Vector3):void {
-    if(!this.gun.visible)return;
-    this.root.updateMatrixWorld(true);
-    const local=this.root.worldToLocal(worldPoint.clone()).sub(this.gun.position).normalize();
-    this.gun.quaternion.setFromUnitVectors(new THREE.Vector3(0,0,1),local);
+  aimAt(worldPoint: THREE.Vector3): void {
+    if (!this.gun.visible) return;
+    if (!this.mixer) {
+      this.root.updateMatrixWorld(true);
+      const local = this.root.worldToLocal(worldPoint.clone()).sub(this.gun.position).normalize();
+      this.gun.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), local);
+    }
   }
   setSkin(skinId: string): void {
     const skin: SkinDef = skinById(skinId);
@@ -315,6 +351,9 @@ export class Character {
     yaw: number, pitch: number,
     speed: number, grounded: boolean, dt: number,
     crouchTarget = 0,
+    sliding = false,
+    aiming = false,
+    mantling = false,
   ): void {
     const moveClip = speed > 4.5 ? "run" : speed > 0.4 ? (this.actions.has("walk") ? "walk" : "run") : "idle";
     const next = this.actions.get(!grounded ? "jump" : moveClip);
@@ -328,17 +367,53 @@ export class Character {
     if (this.mixer) {
       this.crouch += (crouchTarget - this.crouch) * (1 - Math.exp(-14 * dt));
       const crouch = this.crouch < 0.001 ? 0 : this.crouch;
-      this.root.position.set(x, y + (CROUCH_HIP_Y - LEG_H) * crouch, z);
+      const slideOffsetY = sliding ? -0.42 : (CROUCH_HIP_Y - LEG_H) * crouch;
+      this.root.position.set(x, y + slideOffsetY, z);
       this.root.rotation.y = -yaw;
       this.kick = Math.max(0, this.kick - dt);
-      this.muzzle.visible = this.weaponId !== W_PICKAXE && this.kick > 0.045;
-      this.pickaxe.rotation.x = -pitch + (this.kick > 0 ? Math.sin((0.35 - this.kick) / 0.35 * Math.PI) * 1.6 : 0);
-      this.gun.position.set(-0.2, 1.28 - (CROUCH_HIP_Y - LEG_H) * crouch * 0.5, 0.25 - this.kick);
-      this.gun.rotation.x = -pitch - this.kick * 1.2;
+      this.muzzle.visible = this.weaponId !== W_PICKAXE && this.weaponId !== 255 && this.kick > 0.045;
+
       const spine = this.root.getObjectByName("mixamorigSpine1") || this.root.getObjectByName("mixamorigSpine");
-      if (spine) spine.rotation.x = -pitch * 0.45;
       const head = this.root.getObjectByName("mixamorigHead");
-      if (head) head.rotation.x = -pitch * 0.35;
+      const rightArm = this.root.getObjectByName("mixamorigRightArm");
+      const leftArm = this.root.getObjectByName("mixamorigLeftArm");
+      const rightForeArm = this.root.getObjectByName("mixamorigRightForeArm");
+      const leftForeArm = this.root.getObjectByName("mixamorigLeftForeArm");
+
+      // 1. Scoping vs Hipfire: lower arms to relaxed hip level when not scoping
+      if (!aiming && this.weaponId !== 255) {
+        if (rightArm) rightArm.rotation.x += 0.38;
+        if (leftArm) leftArm.rotation.x += 0.30;
+      }
+
+      // 2. Sliding: drop down onto knees and lean back
+      if (sliding) {
+        const hips = this.root.getObjectByName("mixamorigHips");
+        if (hips) hips.rotation.x = -0.45;
+        if (spine) spine.rotation.x = -0.35;
+        const leftUpLeg = this.root.getObjectByName("mixamorigLeftUpLeg");
+        const rightUpLeg = this.root.getObjectByName("mixamorigRightUpLeg");
+        const leftLeg = this.root.getObjectByName("mixamorigLeftLeg");
+        const rightLeg = this.root.getObjectByName("mixamorigRightLeg");
+        if (leftUpLeg) leftUpLeg.rotation.x = 0.75;
+        if (rightUpLeg) rightUpLeg.rotation.x = 0.75;
+        if (leftLeg) leftLeg.rotation.x = -1.35;
+        if (rightLeg) rightLeg.rotation.x = -1.35;
+      }
+
+      // 3. Mantling: climbing push-up motion
+      if (mantling) {
+        if (rightArm) rightArm.rotation.x = -1.55;
+        if (leftArm) leftArm.rotation.x = -1.55;
+        if (rightForeArm) rightForeArm.rotation.x = -0.8;
+        if (leftForeArm) leftForeArm.rotation.x = -0.8;
+        if (spine) spine.rotation.x = 0.45;
+      }
+
+      // 4. Spine & head pitch aiming with camera
+      if (spine && !sliding && !mantling) spine.rotation.x += -pitch * 0.65;
+      if (head && !sliding && !mantling) head.rotation.x += -pitch * 0.35;
+
       this.nameplate.position.y = PLAYER_HEIGHT + 0.42;
       return;
     }
@@ -503,4 +578,45 @@ function pivotBox(
   const geo = new THREE.CylinderGeometry(w * 0.55, w * 0.45, h, 6);
   geo.translate(0, -h / 2, 0);
   return new THREE.Mesh(geo, material);
+}
+
+function createBlueprintModel(): THREE.Group {
+  const g = new THREE.Group();
+  const boardMat = new THREE.MeshStandardMaterial({
+    color: 0x3e2723, roughness: 0.85, metalness: 0.1,
+  });
+  const board = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.012, 0.36), boardMat);
+  board.castShadow = true;
+  g.add(board);
+
+  const canvas = typeof document !== 'undefined' ? document.createElement("canvas") : null;
+  if (canvas) {
+    canvas.width = 256; canvas.height = 384;
+    const ctx = canvas.getContext("2d");
+    if (ctx) {
+      ctx.fillStyle = "#1565c0";
+      ctx.fillRect(0, 0, 256, 384);
+      ctx.strokeStyle = "rgba(255,255,255,0.3)";
+      ctx.lineWidth = 1;
+      for (let x = 0; x <= 256; x += 16) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 384); ctx.stroke(); }
+      for (let y = 0; y <= 384; y += 16) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(256, y); ctx.stroke(); }
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(32, 48, 192, 288);
+      ctx.strokeRect(48, 64, 80, 100);
+      ctx.strokeRect(144, 64, 64, 100);
+      ctx.strokeRect(48, 180, 160, 130);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 15px monospace";
+      ctx.fillText("CLUTCH ARCHITECT", 44, 34);
+    }
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const paperMat = new THREE.MeshStandardMaterial({ map: tex, roughness: 0.7, metalness: 0.05 });
+    const paper = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.34), paperMat);
+    paper.rotation.x = -Math.PI / 2;
+    paper.position.y = 0.007;
+    g.add(paper);
+  }
+  return g;
 }
