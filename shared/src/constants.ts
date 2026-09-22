@@ -104,8 +104,11 @@ export const SLIDE_BOOST_SPEED = 8.6;
 /** Speed a slide is kicked to when it comes out of a sprint. Sprinting into a
  *  slide is the version worth setting up, so it has to travel further. */
 export const SLIDE_SPRINT_BOOST_SPEED = 12.4;
-/** Friction during a slide. Much lower than walking, which is the whole point. */
-export const SLIDE_FRICTION = 1.7;
+/** Friction during a slide. Much lower than walking, which is the whole point.
+ *  Low enough that a flat slide runs for well over a second: a slide you can
+ *  see end before you have finished pressing the key is a stumble, not a
+ *  movement option, and nobody routes around the map with it. */
+export const SLIDE_FRICTION = 0.95;
 /** How fast a slide can be steered, in radians per second. Steering only
  *  redirects the momentum you already have; it cannot add any, or holding
  *  forward would balance the friction and the slide would never end. */
@@ -116,6 +119,40 @@ export const SLIDE_END_SPEED = 4.2;
 export const SLIDE_MAX_SPEED = 15.0;
 /** Seconds before another slide can be started, so it is not a hop-slide loop. */
 export const SLIDE_COOLDOWN = 0.75;
+
+/**
+ * How much of the height a slide loses is paid back as speed, 0-1.
+ *
+ * Gravity cannot do this on its own. Every grounding path in the solver zeroes
+ * the vertical velocity on contact, so without an explicit conversion a slide
+ * down a hillside decays at exactly the same rate as a slide across a car
+ * park -- which is the single biggest thing separating a slide here from the
+ * one people expect. Below 1 because a body on a slope loses something to the
+ * surface; at 1 a long descent would sit pinned to the cap.
+ */
+export const SLIDE_SLOPE_GAIN = 1.0;
+/**
+ * How far below the feet a slide will reach to stay on the ground, in metres.
+ *
+ * A slide has to hug the surface, and gravity is far too slow to make it do
+ * so: at 12 m/s down a half-grade the ground falls away 20 cm in a tick while
+ * free fall manages 3. Anything further down than this is a ledge rather than
+ * a slope, and is left as an honest fall.
+ */
+export const SLIDE_GROUND_SNAP = 0.6;
+/** Largest height change one tick may cash in, in metres. A step-up, a ramp
+ *  snap and a mantle all move the feet a long way in a single tick, and none
+ *  of them is a hill. */
+export const SLIDE_SLOPE_MAX_STEP = 0.35;
+/** Seconds a slide must actually run before it can be jumped out of. Without
+ *  it, crouch and jump on consecutive ticks pays the entire entry boost into a
+ *  jump -- and air has no friction, so that is faster than sprinting, costs
+ *  nothing and looks nothing like a slide. */
+export const SLIDE_JUMP_MIN_TIME = 0.2;
+/** Speed needed to land straight into a slide with crouch already held. Set
+ *  above a jog rather than at SLIDE_MIN_SPEED: dropping onto a roof while
+ *  shuffling sideways should not slide, running off one should. */
+export const SLIDE_LAND_MIN_SPEED = 6.0;
 
 // --- sprint ----------------------------------------------------------------
 

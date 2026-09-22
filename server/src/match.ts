@@ -490,6 +490,7 @@ export class MatchRoom implements DurableObject {
           bloom: Math.round(me.bloom * 255),
           slideLockout: me.slideLockout, crouchHeld: me.crouchHeld,
           fallPeakY: me.fallPeakY, staminaIdle: me.staminaIdle,
+          slideTime: me.slideTime,
         },
         others,
         events: this.events,

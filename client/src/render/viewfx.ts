@@ -22,6 +22,17 @@ const RECOIL_DAMPING = 21;
 const DIP_STIFFNESS = 120;
 const DIP_DAMPING = 15;
 
+/** Extra degrees of FOV while sliding, and the bank in radians that goes with
+ *  it. Both are small on purpose: a slide should read as speed at the edge of
+ *  vision, not as the camera doing a trick. */
+const SLIDE_FOV = 7;
+const SLIDE_ROLL = 0.05;
+const SLIDE_STEER_ROLL = 0.055;
+/** How fast the slide camera eases in and out, per second. Faster in than out,
+ *  so the entry has a snap to it and the recovery does not. */
+const SLIDE_EASE_IN = 9;
+const SLIDE_EASE_OUT = 5;
+
 export class ViewEffects {
   // Recoil, in radians, added on top of the player's aim.
   private punchPitch = 0;
@@ -40,6 +51,11 @@ export class ViewEffects {
 
   /** Extra degrees of field of view, for the brief widening when firing. */
   private fovPunch = 0;
+
+  // How present the slide camera is, 0 to 1, and which way it is banking.
+  private slide = 0;
+  private slideSteer = 0;
+  private wasSliding = false;
 
   /**
    * Fire a weapon. Kick is scaled by the weapon's own recoil rating, so the
@@ -66,6 +82,19 @@ export class ViewEffects {
     if (heavy < 0.08) return;
     this.dipVel -= heavy * 3.2;
     if (heavy > 0.5) this.shake = Math.min(1, this.shake + heavy * 0.25);
+  }
+
+  /**
+   * Sliding, and which way it is being steered (-1 left to 1 right).
+   *
+   * Called every frame rather than on the transition, because the bank has to
+   * follow the steering continuously. The entry kick is taken off the rising
+   * edge inside.
+   */
+  setSliding(on: boolean, steer: number): void {
+    if (on && !this.wasSliding) this.dipVel -= 1.6;
+    this.wasSliding = on;
+    if (on) this.slideSteer = Math.max(-1, Math.min(1, steer));
   }
 
   /** A nearby explosion or a piece being destroyed close by. */
@@ -96,12 +125,21 @@ export class ViewEffects {
     }
 
     this.fovPunch = Math.max(0, this.fovPunch - step * 14);
+
+    const target = this.wasSliding ? 1 : 0;
+    const ease = (target > this.slide ? SLIDE_EASE_IN : SLIDE_EASE_OUT) * step;
+    this.slide += (target - this.slide) * Math.min(1, ease);
+    if (this.slide < 1e-4) { this.slide = 0; this.slideSteer = 0; }
   }
 
   /** Aim offset in radians, added to the player's own look angles. */
   get pitchOffset(): number { return this.punchPitch * 0.045; }
   get yawOffset(): number { return this.punchYaw * 0.045; }
-  get fovOffset(): number { return this.fovPunch; }
+  get fovOffset(): number { return this.fovPunch + this.slide * SLIDE_FOV; }
+  /** Camera bank, in radians. Zero unless a slide is running. */
+  get rollOffset(): number {
+    return this.slide * (SLIDE_ROLL + this.slideSteer * SLIDE_STEER_ROLL);
+  }
 
   /** Positional offset applied in camera-local space. */
   applyShake(camera: THREE.PerspectiveCamera): void {

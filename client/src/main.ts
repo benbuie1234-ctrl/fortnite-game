@@ -693,7 +693,7 @@ function updateCamera(aiming: boolean, dt: number): void {
   view.camera.rotation.set(
     controls.pitch + viewfx.pitchOffset,
     Math.PI - (controls.yaw + viewfx.yawOffset),
-    0,
+    viewfx.rollOffset,
   );
   viewfx.applyShake(view.camera);
   const fov=(aiming&&!controls.inBuildMode?78/weapon.adsZoom:78)+viewfx.fovOffset;
@@ -707,6 +707,7 @@ function updateCamera(aiming: boolean, dt: number): void {
 let lastFrame = performance.now();
 let fps = 60;
 let prevGrounded = false;
+let prevSliding = false;
 let prevVy = 0;
 
 // Footsteps are driven by distance travelled rather than a timer, so they stay
@@ -801,7 +802,7 @@ function frame(now: number): void {
     hud.setBuildReason('');
   }
 
-  // --- local jump and landing, from grounded transitions ---
+  // --- local jump, landing and slide, from state transitions ---
   if (self.alive) {
     if (!prevGrounded && self.grounded) {
       sound.land(self.x, self.y, self.z, Math.abs(prevVy));
@@ -809,8 +810,14 @@ function frame(now: number): void {
     } else if (prevGrounded && !self.grounded && self.vy > 2) {
       sound.jump(self.x, self.y, self.z);
     }
-    footsteps(-1, self.x, self.y, self.z, self.grounded && Math.hypot(self.vx, self.vz) > 1);
+    if (self.sliding && !prevSliding) sound.slide(self.x, self.y, self.z);
+    // Sliding is not walking: the feet are not doing anything, so the footstep
+    // loop has to stop or a slide sounds like a very fast jog.
+    footsteps(-1, self.x, self.y, self.z,
+      self.grounded && !self.sliding && Math.hypot(self.vx, self.vz) > 1);
   }
+  viewfx.setSliding(self.alive && self.sliding, controls.strafe);
+  prevSliding = self.sliding;
   prevGrounded = self.grounded;
   prevVy = self.vy;
 

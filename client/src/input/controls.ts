@@ -156,6 +156,16 @@ export class Controls {
   get aiming(): boolean { return this.rightDown || this.touchAim; }
   get firing(): boolean { return this.mouseDown || this.touchFire || this.touchFireEdge; }
   get scoreboardOpen(): boolean { return this.scoreboard; }
+  /** Strafe input, -1 to 1, for the slide camera bank. Left deliberately
+   *  unquantised: sample() snaps this to -1/0/1 for the wire, which is the
+   *  right thing for the simulation and much too steppy for a camera. */
+  get strafe(): number {
+    let x = 0;
+    if (this.down("right")) x += 1;
+    if (this.down("left")) x -= 1;
+    x += this.touchMoveX;
+    return Math.max(-1, Math.min(1, x));
+  }
 
   // -------------------------------------------------------------------------
   // Key bindings

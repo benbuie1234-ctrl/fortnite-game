@@ -339,6 +339,7 @@ export class Connection {
     s.bloom = snap.self.bloom / 255;
     s.sliding = (snap.self.flags & PF_SLIDING) !== 0;
     s.slideLockout = snap.self.slideLockout ?? 0;
+    s.slideTime = snap.self.slideTime ?? 0;
     s.crouchHeld = snap.self.crouchHeld ?? false;
     s.fallPeakY = snap.self.fallPeakY ?? s.y;
     s.staminaIdle = snap.self.staminaIdle ?? 0;

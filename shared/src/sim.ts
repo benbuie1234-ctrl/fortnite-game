@@ -6,6 +6,8 @@ import {
   CROUCH_HEIGHT, CROUCH_EYE_HEIGHT, CROUCH_SPEED_MULT, CROUCH_TRANSITION_SPEED,
   SLIDE_MIN_SPEED, SLIDE_BOOST_SPEED, SLIDE_SPRINT_BOOST_SPEED, SLIDE_FRICTION,
   SLIDE_END_SPEED, SLIDE_MAX_SPEED, SLIDE_COOLDOWN, SLIDE_STEER_RATE,
+  SLIDE_SLOPE_GAIN, SLIDE_SLOPE_MAX_STEP, SLIDE_JUMP_MIN_TIME, SLIDE_LAND_MIN_SPEED,
+  SLIDE_GROUND_SNAP,
   SPRINT_STAMINA_MAX, SPRINT_REGEN_DELAY, SPRINT_REGEN_RATE, SPRINT_MIN_TO_START,
   MANTLE_REACH, MANTLE_FORWARD, MANTLE_SPEED,
   FALL_SAFE_HEIGHT, FALL_LETHAL_HEIGHT, FALL_MIN_IMPACT_SPEED,
@@ -57,6 +59,10 @@ export interface MovementState {
   sliding: boolean;
   /** Seconds left before another slide may be started. */
   slideLockout: number;
+  /** Seconds the current slide has been running, 0 when not sliding. A slide
+   *  has to exist for a moment before it can be jumped out of, or crouch and
+   *  jump on consecutive ticks becomes a free speed boost with no slide in it. */
+  slideTime: number;
   /** Whether crouch was down last tick. A slide needs a fresh PRESS: keyed off
    *  the held state instead, holding crouch while running re-entered a slide
    *  the instant each lockout expired, which is an infinite slide with a
@@ -120,7 +126,7 @@ export function newMovementState(): MovementState {
   return {
     x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
     yaw: 0, pitch: 0, grounded: false, lastLandingSpeed: 0,
-    crouch: 0, sliding: false, slideLockout: 0, crouchHeld: false,
+    crouch: 0, sliding: false, slideLockout: 0, slideTime: 0, crouchHeld: false,
     sprinting: false, stamina: SPRINT_STAMINA_MAX, staminaIdle: 0,
     fallPeakY: 0, lastFallHeight: 0, bloom: 0,
   };
@@ -175,7 +181,14 @@ export function stepPlayer(
   // off and one shove to start it, which is what makes it feel like momentum
   // rather than an animation you are locked into.
   if (s.sliding) {
-    if (!wantsCrouch || !s.grounded || planarSpeed < SLIDE_END_SPEED) {
+    if (!s.grounded) {
+      // Leaving the ground is a GAP in the slide, not the end of one. You keep
+      // the speed, you get your air control back, and landing with crouch
+      // still down drops you straight back into it -- so a kerb, a ledge or a
+      // staircase interrupts a slide instead of cancelling it. Deliberately no
+      // lockout: nothing about being briefly airborne says you are done.
+      s.sliding = false;
+    } else if (!wantsCrouch || planarSpeed < SLIDE_END_SPEED) {
       s.sliding = false;
       s.slideLockout = SLIDE_COOLDOWN;
     }
@@ -242,10 +255,21 @@ export function stepPlayer(
   // every single jump. That is the "jumping gives you a speed boost" bug, and
   // it read as a backwards boost because backpedalling had no speed cap of its
   // own to hide it.
-  const jumped = s.grounded && (input.buttons & BTN_JUMP) !== 0 && !s.sliding;
+  //
+  // A slide CAN be jumped out of, once it has actually run for a moment. That
+  // is the whole reason to slide into something: the horizontal speed is left
+  // completely alone, and air has no friction to eat it, so a slide-jump
+  // carries the boost as far as the arc goes. It does spend the slide, so the
+  // cooldown starts here -- you cannot hop along on a permanent one.
+  const canJump = !s.sliding || s.slideTime >= SLIDE_JUMP_MIN_TIME;
+  const jumped = s.grounded && (input.buttons & BTN_JUMP) !== 0 && canJump;
   if (jumped) {
     s.vy = JUMP_VELOCITY;
     s.grounded = false;
+    if (s.sliding) {
+      s.sliding = false;
+      s.slideLockout = SLIDE_COOLDOWN;
+    }
   }
 
   const accel = s.grounded ? GROUND_ACCEL : AIR_ACCEL;
@@ -301,8 +325,76 @@ export function stepPlayer(
   s.vy += GRAVITY * dt;
   if (s.vy < MAX_FALL_SPEED) s.vy = MAX_FALL_SPEED;
 
+  // Captured before the solver runs, because both of the rules below are about
+  // what the tick did to the feet rather than what the input asked for.
+  const groundedBefore = s.grounded;
+  const heightBefore = s.y;
+
   moveAndCollide(s, world, dt, input, previousCrouch);
+
+  s.slideTime = s.sliding ? s.slideTime + dt : 0;
+  applySlopeMomentum(s, groundedBefore, heightBefore);
+  resumeSlideOnLanding(s, groundedBefore, wantsCrouch);
   updateBloom(s, dt);
+}
+
+/**
+ * Pay a slide back for the height it just lost, and charge it for height gained.
+ *
+ * Downhill is the entire appeal of sliding, and until now the game did not
+ * have it: every grounding path in the solver zeroes s.vy on contact, so the
+ * gravity that should be turning a descent into speed was being thrown away
+ * thirty times a second. A slide down the side of a hill decayed on exactly
+ * the same curve as a slide across flat ground.
+ *
+ * Driven by the height the feet ACTUALLY moved rather than by a sampled
+ * surface normal, which means one rule covers terrain, ramps, stairs and
+ * anything added later, and it can never disagree with the surface the player
+ * is really standing on. Uphill falls out of the same line with no second
+ * case: climbing costs speed, so a slide up a slope dies in a couple of
+ * strides, which is what stops this being a way to travel everywhere.
+ *
+ * The conversion is by energy rather than by force -- v^2 += 2*g*drop -- so
+ * the payout depends on the height crossed and not on the tick rate.
+ */
+function applySlopeMomentum(
+  s: MovementState, groundedBefore: boolean, heightBefore: number,
+): void {
+  // Grounded at both ends: an airborne tick is a fall, and its height is
+  // already being paid out as vy by gravity.
+  if (!s.sliding || !s.grounded || !groundedBefore) return;
+  const speed = Math.hypot(s.vx, s.vz);
+  if (speed < 1e-4) return;
+  const drop = heightBefore - s.y;
+  if (Math.abs(drop) < 1e-5) return;
+  const useful = Math.max(-SLIDE_SLOPE_MAX_STEP, Math.min(SLIDE_SLOPE_MAX_STEP, drop));
+  const energy = speed * speed + 2 * -GRAVITY * useful * SLIDE_SLOPE_GAIN;
+  const next = Math.min(energy > 0 ? Math.sqrt(energy) : 0, SLIDE_MAX_SPEED);
+  s.vx *= next / speed;
+  s.vz *= next / speed;
+}
+
+/**
+ * Landing with crouch already down, at speed, drops you straight into a slide.
+ *
+ * This is the other half of letting a slide go airborne: the flight is an
+ * ordinary fall with ordinary air control, and the slide picks up again the
+ * moment the feet are back down. It is also the first thing anyone tries after
+ * running off a roof, and the reason a staircase can be taken in one slide.
+ *
+ * There is deliberately no entry boost here. The shove belongs to the crouch
+ * PRESS; paying it out again on every landing would make a route with ledges
+ * in it faster than the same route without one, and a slide down a flight of
+ * stairs would ratchet itself up to the cap a step at a time.
+ */
+function resumeSlideOnLanding(
+  s: MovementState, groundedBefore: boolean, wantsCrouch: boolean,
+): void {
+  if (s.sliding || groundedBefore || !s.grounded) return;
+  if (!wantsCrouch || s.slideLockout > 0) return;
+  if (Math.hypot(s.vx, s.vz) < SLIDE_LAND_MIN_SPEED) return;
+  s.sliding = true;
+  s.slideTime = 0;
 }
 
 /**
@@ -514,6 +606,35 @@ function moveAndCollide(
     s.y = ground;
     s.vy = 0;
     s.grounded = true;
+  }
+
+  // A slide follows the ground.
+  //
+  // Terrain descends much faster than gravity can pull the feet after it, so a
+  // slide down a hillside was leaving the surface on its very first tick and
+  // arriving as a string of small landings -- each of which zeroed the
+  // downward speed the hill had just handed it. That is the whole reason a
+  // hill used to be worth nothing: applySlopeMomentum only pays out while the
+  // player is grounded at both ends of the tick, and on a real slope they
+  // never were. Reaching down to the surface keeps the slide on it.
+  //
+  // The reach is what separates a slope from a ledge: a drop further than this
+  // is not snapped to, so running off something is still a fall. The collision
+  // test stops the reach pulling anyone down through a floor piece they happen
+  // to be sliding across.
+  if (s.sliding && !s.grounded && wasGrounded && s.vy <= 0) {
+    const surface = world.groundAt(s.x, s.z);
+    const drop = s.y - surface;
+    if (drop > 0 && drop <= SLIDE_GROUND_SNAP) {
+      const probeY = s.y;
+      s.y = surface;
+      if (collidesAt(s)) {
+        s.y = probeY;
+      } else {
+        s.vy = 0;
+        s.grounded = true;
+      }
+    }
   }
 
   // Grounded players get a small downward bias so they stick to slopes and

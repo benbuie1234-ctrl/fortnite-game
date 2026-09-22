@@ -26,6 +26,10 @@ export interface SelfState {
    *  the crosshair size and the actual spread disagreed. */
   bloom: number;
   slideLockout?: number;
+  /** Seconds the current slide has run. Reconciled like the lockout: it gates
+   *  the slide-jump, so a client guessing at it would predict a jump the
+   *  server refuses. */
+  slideTime?: number;
   crouchHeld?: boolean;
   fallPeakY?: number;
   staminaIdle?: number;
@@ -88,6 +92,7 @@ export function writeSnapshot(w: Writer, s: Snapshot): void {
   w.u8(self.crouchHeld ? 1 : 0);
   w.f32(self.fallPeakY ?? self.y);
   w.f32(self.staminaIdle ?? 0);
+  w.f32(self.slideTime ?? 0);
 
   w.u8(s.others.length);
   for (const o of s.others) {
@@ -159,7 +164,7 @@ export function readSnapshot(r: Reader): Snapshot {
     stamina: r.u8(),
     bloom: r.u8(),
     slideLockout: r.f32(), crouchHeld: r.u8() !== 0,
-    fallPeakY: r.f32(), staminaIdle: r.f32(),
+    fallPeakY: r.f32(), staminaIdle: r.f32(), slideTime: r.f32(),
   };
   if (self.ammo === 0xffff) self.ammo = Infinity;
 

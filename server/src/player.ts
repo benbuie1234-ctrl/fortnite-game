@@ -24,6 +24,7 @@ export class ServerPlayer implements MovementState {
   crouch = 0;
   sliding = false;
   slideLockout = 0;
+  slideTime = 0;
   crouchHeld = false;
   sprinting = false;
   stamina = SPRINT_STAMINA_MAX;

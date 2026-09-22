@@ -445,6 +445,14 @@ export class Sound {
     });
   }
 
+  /** Starting a slide: a long scrape rather than a hit. */
+  slide(x: number, y: number, z: number): void {
+    const r = this.route(x, y, z);
+    if (!r) return;
+    this.burst(r, { from: 2600, to: 420, decay: 0.55, volume: 0.15, rate: 0.7 });
+    this.burst(r, { from: 600, to: 150, decay: 0.4, volume: 0.1, delay: 0.04 });
+  }
+
   jump(x: number, y: number, z: number): void {
     const r = this.route(x, y, z);
     if (!r) return;
