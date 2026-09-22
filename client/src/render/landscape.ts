@@ -53,7 +53,8 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  // with the rocks turned every container into a boulder.
  const propGeo=new THREE.BoxGeometry(1,1,1);
  const leafGeo=new THREE.ConeGeometry(1,1,7);
- const detail=getTextures(1).detail;
+ const tex=getTextures(1);
+ const detail=tex.detail;
  const solidMaterial=new THREE.MeshStandardMaterial({color:0xffffff,map:detail,roughness:0.88,metalness:0,envMapIntensity:0.9});
  const treeList=SCENERY.filter(p=>p.kind==='tree'),rockList=SCENERY.filter(p=>p.kind==='rock');
  const foliageMaterial=makeFoliageMaterial(solidMaterial);
@@ -118,25 +119,72 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  for(const batch of [...(useProceduralTrees?[trunks,leaves]:[]),...(!rockInstances?.valid?[rocks]:[]),...(!crateInstances?.valid?[props]:[])]){batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;scene.add(batch);}
  const size=MAP_HALF*2;
  const ground=new THREE.PlaneGeometry(size,size,240,240);ground.rotateX(-Math.PI/2);
- const positions=ground.getAttribute('position');const colors=[];
+ const positions=ground.getAttribute('position');
  for(let i=0;i<positions.count;i++) {
   const x=positions.getX(i),z=positions.getZ(i),h=terrainHeight(x,z);
   const underFloor=BUILDINGS.some(b=>{const f=buildingFootprint(b);return x>=f.x0&&x<=f.x1&&z>=f.z0&&z<=f.z1;});
   positions.setY(i,h-(underFloor?.08:0));
-  const noise=(Math.sin(x*.13)*Math.cos(z*.17)+1)*.035;
-  const color=new THREE.Color(h<-.1?0xbfae7b:h>10?0x638957:0x80aa63);color.multiplyScalar(.94+noise);colors.push(color.r,color.g,color.b);
  }
- ground.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));ground.computeVertexNormals();
- // Project world-space UVs so the grain tiles at a fixed real-world size
- // rather than stretching once across the entire map.
- planarUVs(ground,7);
- const terrain=new THREE.Mesh(ground,new THREE.MeshStandardMaterial({vertexColors:true,map:detail,roughness:0.95,metalness:0,envMapIntensity:0.9}));terrain.receiveShadow=true;scene.add(terrain);
- const waterMaterial=new THREE.MeshStandardMaterial({color:0x3c929f,transparent:true,opacity:.88,roughness:.3,metalness:.08,envMapIntensity:.7});
+ ground.computeVertexNormals();
+ const normals=ground.getAttribute('normal');
+ const colors:number[]=[];
+ for(let i=0;i<positions.count;i++) {
+  const x=positions.getX(i),y=positions.getY(i),z=positions.getZ(i);
+  const ny=normals?normals.getY(i):1.0;
+  const noise=(Math.sin(x*.13)*Math.cos(z*.17)+Math.sin(x*.31+z*.27)*.5)*.04;
+  const color=new THREE.Color();
+  if(ny<0.72) {
+   color.setHex(y>15?0x6e7880:0x5a6369);
+   color.offsetHSL(0,0,noise*1.5);
+  } else if(ny<0.82) {
+   const t=(ny-0.72)/0.10;
+   const rock=new THREE.Color(0x626c72);
+   const grass=new THREE.Color(y>14?0x567b48:0x6e9f52);
+   color.copy(rock).lerp(grass,t);
+  } else if(y<0.6) {
+   color.setHex(y<-0.4?0xa8996e:0xd8c698);
+   color.multiplyScalar(0.96+noise);
+  } else if(y>20) {
+   color.setHex(0x526e46);
+   color.multiplyScalar(0.95+noise);
+  } else if(y>10) {
+   color.setHex(0x5c884c);
+   color.multiplyScalar(0.97+noise);
+  } else {
+   color.setHex(0x73a857);
+   color.multiplyScalar(0.96+noise);
+  }
+  colors.push(color.r,color.g,color.b);
+ }
+ ground.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+ planarUVs(ground,6);
+ const terrain=new THREE.Mesh(ground,new THREE.MeshStandardMaterial({
+  vertexColors:true,
+  map:tex.grass,
+  normalMap:tex.terrainNormal,
+  normalScale:new THREE.Vector2(0.85,0.85),
+  roughnessMap:tex.terrainRoughness,
+  roughness:0.88,
+  metalness:0.02,
+  envMapIntensity:0.85,
+ }));
+ terrain.receiveShadow=true;
+ scene.add(terrain);
+ const waterMaterial=new THREE.MeshStandardMaterial({
+  color:0x278da4,
+  transparent:true,
+  opacity:0.86,
+  roughness:0.12,
+  metalness:0.16,
+  normalMap:tex.waterNormal,
+  normalScale:new THREE.Vector2(0.65,0.65),
+  envMapIntensity:1.15,
+ });
  const waterTime={value:0};
  waterMaterial.onBeforeCompile=shader=>{
   shader.uniforms.uWaterTime=waterTime;
   shader.vertexShader='varying vec3 vWaterPosition;\n'+shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvWaterPosition=(modelMatrix*vec4(position,1.0)).xyz;');
-  shader.fragmentShader='uniform float uWaterTime; varying vec3 vWaterPosition;\n'+shader.fragmentShader.replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\nnormal = normalize(normal + vec3(sin(vWaterPosition.x*1.7+uWaterTime)*.08, cos(vWaterPosition.z*1.3+uWaterTime*.7)*.08,0.0));');
+  shader.fragmentShader='uniform float uWaterTime; varying vec3 vWaterPosition;\n'+shader.fragmentShader.replace('#include <normal_fragment_maps>','#include <normal_fragment_maps>\nnormal = normalize(normal + vec3(sin(vWaterPosition.x*1.7+uWaterTime)*.10, cos(vWaterPosition.z*1.3+uWaterTime*.7)*.10,0.0));');
  };
  const water=new THREE.Mesh(new THREE.CircleGeometry(1,64),waterMaterial);
  water.rotation.x=-Math.PI/2;water.scale.set(LAKE_SHAPE.rx,LAKE_SHAPE.rz,1);water.position.set(LAKE_SHAPE.x,LAKE_SURFACE,LAKE_SHAPE.z);scene.add(water);
@@ -167,7 +215,17 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
    indices.push(a,b,a+1,a+1,b,b+1);
   }
   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));g.setIndex(indices);g.computeVertexNormals();planarUVs(g,5);
-  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color,map:detail,roughness:.96,side:THREE.DoubleSide}));m.receiveShadow=true;scene.add(m);
+  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({
+   color:0xe0e6eb,
+   map:tex.roadTexture,
+   normalMap:tex.roadNormal,
+   normalScale:new THREE.Vector2(0.85,0.85),
+   roughnessMap:tex.roadRoughness,
+   roughness:0.82,
+   side:THREE.DoubleSide,
+  }));
+  m.receiveShadow=true;
+  scene.add(m);
  }
  // Exactly the corridors the map module declares, so the surface you can see
  // and the corridor the scenery generator keeps clear are the same thing. They

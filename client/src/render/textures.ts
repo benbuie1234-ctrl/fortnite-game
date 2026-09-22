@@ -279,6 +279,216 @@ function detailCanvas(): HTMLCanvasElement {
   return cv;
 }
 
+function heightToNormal(src: HTMLCanvasElement, strength = 2.0): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const sCtx = src.getContext("2d");
+  if (!sCtx) return cv;
+  const imgData = sCtx.getImageData(0, 0, SIZE, SIZE);
+  const srcBuf = imgData.data;
+  const outImg = ctx.createImageData(SIZE, SIZE);
+  const outBuf = outImg.data;
+
+  const getH = (x: number, y: number) => {
+    const px = (x + SIZE) % SIZE;
+    const py = (y + SIZE) % SIZE;
+    const idx = (py * SIZE + px) * 4;
+    return (srcBuf[idx] + srcBuf[idx + 1] + srcBuf[idx + 2]) / (3 * 255);
+  };
+
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const tl = getH(x - 1, y - 1);
+      const l = getH(x - 1, y);
+      const bl = getH(x - 1, y + 1);
+      const t = getH(x, y - 1);
+      const b = getH(x, y + 1);
+      const tr = getH(x + 1, y - 1);
+      const r = getH(x + 1, y);
+      const br = getH(x + 1, y + 1);
+
+      const dX = (tr + 2 * r + br) - (tl + 2 * l + bl);
+      const dY = (bl + 2 * b + br) - (tl + 2 * t + tr);
+      const dZ = 1.0 / strength;
+
+      const len = Math.hypot(dX, dY, dZ);
+      const nx = -dX / len;
+      const ny = -dY / len;
+      const nz = dZ / len;
+
+      const idx = (y * SIZE + x) * 4;
+      outBuf[idx] = Math.round((nx * 0.5 + 0.5) * 255);
+      outBuf[idx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+      outBuf[idx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+      outBuf[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(outImg, 0, 0);
+  return cv;
+}
+
+function heightToRoughness(src: HTMLCanvasElement, minR = 0.5, maxR = 0.95): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const sCtx = src.getContext("2d");
+  if (!sCtx) return cv;
+  const imgData = sCtx.getImageData(0, 0, SIZE, SIZE);
+  const srcBuf = imgData.data;
+  const outImg = ctx.createImageData(SIZE, SIZE);
+  const outBuf = outImg.data;
+
+  for (let i = 0; i < srcBuf.length; i += 4) {
+    const h = (srcBuf[i] + srcBuf[i + 1] + srcBuf[i + 2]) / (3 * 255);
+    const r = Math.round((minR + (1 - h) * (maxR - minR)) * 255);
+    outBuf[i] = r;
+    outBuf[i + 1] = r;
+    outBuf[i + 2] = r;
+    outBuf[i + 3] = 255;
+  }
+  ctx.putImageData(outImg, 0, 0);
+  return cv;
+}
+
+/** Stratified, chiseled rock cliff face with horizontal fault lines. */
+function cliffCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x5eed07);
+
+  ctx.fillStyle = "#687278";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Horizontal geological strata
+  const bands = 14;
+  for (let b = 0; b < bands; b++) {
+    const y0 = (b * SIZE) / bands;
+    const bandH = SIZE / bands;
+    const tone = 0.85 + rand() * 0.3;
+    ctx.fillStyle = tint(0x687278, tone, 0.45);
+    ctx.fillRect(0, y0, SIZE, bandH);
+
+    // Weathered fissures and cracks
+    for (let c = 0; c < 8; c++) {
+      ctx.strokeStyle = rand() > 0.5 ? "rgba(25,32,38,0.5)" : "rgba(180,195,205,0.3)";
+      ctx.lineWidth = 1 + rand() * 2;
+      ctx.beginPath();
+      const sx = rand() * SIZE;
+      ctx.moveTo(sx, y0 + rand() * bandH);
+      ctx.lineTo((sx + (rand() - 0.5) * 30 + SIZE) % SIZE, y0 + rand() * bandH);
+      ctx.stroke();
+    }
+  }
+
+  // Stone grain & flecks
+  for (let i = 0; i < 1800; i++) {
+    ctx.fillStyle = rand() > 0.5 ? "rgba(220,230,240,0.15)" : "rgba(20,25,30,0.2)";
+    wrapDot(ctx, rand() * SIZE, rand() * SIZE, 0.5 + rand() * 1.6);
+  }
+  return cv;
+}
+
+/** Rippled beach sand with delicate wave undulations. */
+function sandCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x5eed08);
+
+  ctx.fillStyle = "#d8c499";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Gentle wave wash patterns
+  for (let y = 0; y < SIZE; y += 16) {
+    ctx.fillStyle = tint(0xd8c499, 0.92 + Math.sin((y / SIZE) * Math.PI * 4) * 0.08, 0.4);
+    ctx.fillRect(0, y, SIZE, 16);
+  }
+
+  // Fine sand grains
+  for (let i = 0; i < 2200; i++) {
+    const light = rand() > 0.5;
+    ctx.fillStyle = light ? "rgba(255,248,225,0.2)" : "rgba(120,95,60,0.18)";
+    wrapDot(ctx, rand() * SIZE, rand() * SIZE, 0.5 + rand() * 1.4);
+  }
+  return cv;
+}
+
+/** Weathered cobblestone road with worn stone paving and mortar grooves. */
+function cobbleRoadCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x5eed09);
+
+  ctx.fillStyle = "#4a5359";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  // Cobble stones in staggered courses
+  const rows = 16;
+  const rowH = SIZE / rows;
+  for (let r = 0; r < rows; r++) {
+    const y = r * rowH;
+    const cols = 12;
+    const colW = SIZE / cols;
+    const xOffset = (r % 2) * (colW * 0.5);
+
+    for (let c = -1; c <= cols; c++) {
+      const x = c * colW + xOffset;
+      const shade = 0.8 + rand() * 0.4;
+      ctx.fillStyle = tint(0x606c74, shade, 0.85);
+
+      // Stone slab
+      const inset = 1.8;
+      ctx.fillRect(x + inset, y + inset, colW - inset * 2, rowH - inset * 2);
+
+      // Highlight top-left edge of stone
+      ctx.fillStyle = "rgba(220,235,245,0.18)";
+      ctx.fillRect(x + inset, y + inset, colW - inset * 2, 1);
+      ctx.fillRect(x + inset, y + inset, 1, rowH - inset * 2);
+
+      // Shadow bottom-right edge of stone (mortar)
+      ctx.fillStyle = "rgba(15,20,25,0.35)";
+      ctx.fillRect(x + inset, y + rowH - inset - 1, colW - inset * 2, 1);
+      ctx.fillRect(x + colW - inset - 1, y + inset, 1, rowH - inset * 2);
+    }
+  }
+
+  // Worn tire/foot tracks down the center
+  ctx.fillStyle = "rgba(40,48,54,0.3)";
+  ctx.fillRect(SIZE * 0.2, 0, SIZE * 0.25, SIZE);
+  ctx.fillRect(SIZE * 0.55, 0, SIZE * 0.25, SIZE);
+
+  // Gravel and wear particles
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = rand() > 0.5 ? "rgba(210,220,230,0.15)" : "rgba(20,25,30,0.25)";
+    wrapDot(ctx, rand() * SIZE, rand() * SIZE, 0.6 + rand() * 1.5);
+  }
+  return cv;
+}
+
+/** Fluid water wave normal map. */
+function waterNormalCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const img = ctx.createImageData(SIZE, SIZE);
+  const data = img.data;
+
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      const u = (x / SIZE) * Math.PI * 4;
+      const v = (y / SIZE) * Math.PI * 4;
+
+      const dX = Math.cos(u * 1.5 + v * 0.5) * 0.3 + Math.cos(u * 3.0 - v * 2.0) * 0.15;
+      const dY = Math.sin(v * 1.5 + u * 0.5) * 0.3 + Math.sin(v * 3.0 + u * 2.0) * 0.15;
+      const dZ = 1.0;
+
+      const len = Math.hypot(dX, dY, dZ);
+      const nx = -dX / len;
+      const ny = -dY / len;
+      const nz = dZ / len;
+
+      const idx = (y * SIZE + x) * 4;
+      data[idx] = Math.round((nx * 0.5 + 0.5) * 255);
+      data[idx + 1] = Math.round((ny * 0.5 + 0.5) * 255);
+      data[idx + 2] = Math.round((nz * 0.5 + 0.5) * 255);
+      data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
 export interface TextureSet {
   /** Indexed by material id: wood, brick, metal. */
   build: THREE.CanvasTexture[];
@@ -286,6 +496,17 @@ export interface TextureSet {
   concrete: THREE.CanvasTexture;
   /** Neutral grain, meant to multiply over an existing colour. */
   detail: THREE.CanvasTexture;
+  /** Substance-style PBR terrain textures & maps */
+  terrainNormal: THREE.CanvasTexture;
+  terrainRoughness: THREE.CanvasTexture;
+  cliffTexture: THREE.CanvasTexture;
+  cliffNormal: THREE.CanvasTexture;
+  sandTexture: THREE.CanvasTexture;
+  sandNormal: THREE.CanvasTexture;
+  roadTexture: THREE.CanvasTexture;
+  roadNormal: THREE.CanvasTexture;
+  roadRoughness: THREE.CanvasTexture;
+  waterNormal: THREE.CanvasTexture;
 }
 
 let cached: TextureSet | null = null;
@@ -293,15 +514,31 @@ let cached: TextureSet | null = null;
 /** Build (once) every texture the game uses. */
 export function getTextures(anisotropy: number): TextureSet {
   if (cached) return cached;
+  const grassCv = grassCanvas();
+  const cliffCv = cliffCanvas();
+  const sandCv = sandCanvas();
+  const roadCv = cobbleRoadCanvas();
+  const detailCv = detailCanvas();
+
   cached = {
     build: [
       finish(woodCanvas(), anisotropy),
       finish(brickCanvas(), anisotropy),
       finish(metalCanvas(), anisotropy),
     ],
-    grass: finish(grassCanvas(), anisotropy),
+    grass: finish(grassCv, anisotropy),
     concrete: finish(concreteCanvas(), anisotropy),
-    detail: finish(detailCanvas(), anisotropy),
+    detail: finish(detailCv, anisotropy),
+    terrainNormal: finish(heightToNormal(grassCv, 2.2), anisotropy),
+    terrainRoughness: finish(heightToRoughness(grassCv, 0.7, 0.95), anisotropy),
+    cliffTexture: finish(cliffCv, anisotropy),
+    cliffNormal: finish(heightToNormal(cliffCv, 3.0), anisotropy),
+    sandTexture: finish(sandCv, anisotropy),
+    sandNormal: finish(heightToNormal(sandCv, 1.4), anisotropy),
+    roadTexture: finish(roadCv, anisotropy),
+    roadNormal: finish(heightToNormal(roadCv, 2.6), anisotropy),
+    roadRoughness: finish(heightToRoughness(roadCv, 0.5, 0.88), anisotropy),
+    waterNormal: finish(waterNormalCanvas(), anisotropy),
   };
   return cached;
 }

@@ -109,6 +109,18 @@ export const LAKE_SURFACE = -1.4;
 export const LAKE_SHAPE = LAKE;
 
 export function locationAt(x:number,z:number):string {
+  // Named exploration landmarks and discovery zones
+  if (Math.hypot(x - 52, z - 148) < 32) return 'WHISPERING PINES';
+  if (Math.hypot(x - (-58), z - (-16)) < 26) return 'SHATTERED QUARRY';
+  if (Math.hypot(x - 60, z - 62) < 26) return 'RIDGE SAWMILL';
+  if (Math.hypot(x - (-62), z - (-62)) < 26) return 'FORGOTTEN RUINS';
+  if (Math.hypot(x - 58, z - (-60)) < 26) return 'SURVIVORS BUNKER';
+  if (Math.hypot(x - (-60), z - 58) < 26) return 'HERMITS LAGOON';
+  if (Math.hypot(x - 92, z - 0) < 26) return 'RADAR RELAY';
+  if (Math.hypot(x - 0, z - (-92)) < 26) return 'NORTH FUEL DEPOT';
+  if (Math.hypot(x - 0, z - 92) < 26) return 'VALLEY OVERLOOK';
+  if (Math.hypot((x - LAKE.x) / LAKE.rx, (z - LAKE.z) / LAKE.rz) < 1.0) return 'MISTY LAKE';
+
   const nearest=LOCATIONS.reduce((a,b)=>Math.hypot(x-a.x,z-a.z)<Math.hypot(x-b.x,z-b.z)?a:b);
   return Math.hypot(x-nearest.x,z-nearest.z)<72?nearest.name:'THE CROSSROADS';
 }

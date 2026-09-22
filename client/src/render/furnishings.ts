@@ -9,6 +9,7 @@ export interface Placement {
   y: number;
   z: number;
   yaw: number;
+  scale?: number;
 }
 
 export function createFurnishings(scene: THREE.Scene, models: ModelLibrary): number {
@@ -23,6 +24,9 @@ export function createFurnishings(scene: THREE.Scene, models: ModelLibrary): num
   dressIntermediateOutposts(placements);
   buildCemetery(placements);
   dressWildernessLandmarks(placements);
+  dressNaturalFoliage(placements);
+  dressExplorationSecrets(placements);
+  dressMountainTrails(placements);
   return instance(scene, models, placements);
 }
 
@@ -801,6 +805,236 @@ function dressWildernessLandmarks(out: Placement[]): void {
 }
 
 /**
+ * Dynamic biome-based natural flora & ground cover:
+ * Plants lush ferns, wildflowers, 3D grass clumps, mountain rocks, pumpkins,
+ * and fallen logs across the island, giving every area a distinct, lively feel.
+ */
+function dressNaturalFoliage(out: Placement[]): void {
+  let seed = 739182;
+  const rand = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  // 1. Lush 3D Grass Clumps and Wildflowers along roads, meadows, and clearings
+  for (let i = 0; i < 320; i++) {
+    const x = (rand() - 0.5) * 440;
+    const z = (rand() - 0.5) * 440;
+    if (insideBuilding(x, z, 5) || onRoad(x, z, 2.5) || inLake(x, z, 4)) continue;
+    const y = terrainHeight(x, z);
+    if (y < 0.2) continue;
+
+    // Grass clumps everywhere, flowers concentrated in Sunny Meadows & lowlands
+    const inMeadows = Math.hypot(x - 108, z - (-108)) < 70;
+    const id: ModelId = inMeadows && rand() > 0.4 ? 'flower' : rand() > 0.65 ? 'fern' : 'grass';
+    out.push({
+      id,
+      x,
+      y,
+      z,
+      yaw: rand() * Math.PI * 2,
+      scale: 0.8 + rand() * 0.4,
+    });
+  }
+
+  // 2. Bushes and Hedges along path borders and residential perimeters
+  for (let i = 0; i < 180; i++) {
+    const x = (rand() - 0.5) * 420;
+    const z = (rand() - 0.5) * 420;
+    if (insideBuilding(x, z, 4) || onRoad(x, z, 3) || inLake(x, z, 4)) continue;
+    const y = terrainHeight(x, z);
+    if (y < 0.2) continue;
+
+    out.push({
+      id: rand() > 0.3 ? 'bush' : 'plant_small',
+      x,
+      y,
+      z,
+      yaw: rand() * Math.PI * 2,
+      scale: 0.85 + rand() * 0.45,
+    });
+  }
+
+  // 3. Dense Highland Ferns & Mossy Timber in Pinewatch Ridge
+  for (let i = 0; i < 140; i++) {
+    const r = rand() * 75;
+    const theta = rand() * Math.PI * 2;
+    const x = 108 + Math.cos(theta) * r;
+    const z = 108 + Math.sin(theta) * r;
+    if (insideBuilding(x, z, 5) || onRoad(x, z, 3) || inLake(x, z, 4)) continue;
+    const y = terrainHeight(x, z);
+    if (y < 15) continue;
+
+    const fernOrLog: ModelId = rand() > 0.6 ? 'fern' : rand() > 0.3 ? 'log' : 'stump';
+    out.push({
+      id: fernOrLog,
+      x,
+      y,
+      z,
+      yaw: rand() * Math.PI * 2,
+      scale: 0.9 + rand() * 0.35,
+    });
+  }
+
+  // 4. Rugged Boulder Formations on Mountain Slopes & Ridge Shoulders
+  for (let i = 0; i < 110; i++) {
+    const x = (rand() - 0.5) * 440;
+    const z = (rand() - 0.5) * 440;
+    if (insideBuilding(x, z, 8) || onRoad(x, z, 5) || inLake(x, z, 6)) continue;
+    const y = terrainHeight(x, z);
+    if (y < 6) continue;
+
+    const rockId: ModelId = rand() > 0.66 ? 'rock_a' : rand() > 0.33 ? 'rock_b' : 'rock_c';
+    out.push({
+      id: rockId,
+      x,
+      y,
+      z,
+      yaw: rand() * Math.PI * 2,
+      scale: 0.8 + rand() * 0.6,
+    });
+  }
+
+  // 5. Pumpkin Patches near cabins and suburban yards
+  for (let p = 0; p < 45; p++) {
+    const x = (rand() - 0.5) * 380;
+    const z = (rand() - 0.5) * 380;
+    if (insideBuilding(x, z, 4) || onRoad(x, z, 3) || inLake(x, z, 4)) continue;
+    const y = terrainHeight(x, z);
+    if (y < 1.0) continue;
+
+    out.push({
+      id: 'pumpkin',
+      x,
+      y,
+      z,
+      yaw: rand() * Math.PI * 2,
+      scale: 0.8 + rand() * 0.5,
+    });
+  }
+}
+
+/**
+ * 12 Secret Exploration Caches:
+ * Rewarding exploration hotspots with golden supply chests hidden across high
+ * towers, deep crypts, crane scaffolds, and hidden cave clearings!
+ */
+function dressExplorationSecrets(out: Placement[]): void {
+  // 1. Skyline Penthouse Rooftop Vault (Tallest skyscraper in the city)
+  const skyTower = BUILDINGS.find(b => b.style === 'city' && b.floors >= 4);
+  if (skyTower) {
+    const f = buildingFootprint(skyTower);
+    const roofY = (skyTower.base + skyTower.floors) * TILE;
+    out.push({ id: 'chest', x: (f.x0 + f.x1) / 2, y: roofY, z: (f.z0 + f.z1) / 2, yaw: 0 });
+    out.push({ id: 'scaffold', x: f.x0 + 1.8, y: roofY, z: f.z0 + 1.8, yaw: 0 });
+    out.push({ id: 'radio', x: f.x0 + 1.8, y: roofY + 1.8, z: f.z0 + 1.8, yaw: 0.4 });
+    out.push({ id: 'barrier', x: f.x1 - 1.2, y: roofY, z: f.z0 + 1.2, yaw: Math.PI / 4 });
+  }
+
+  // 2. Whispering Pines Crypt Secret Inner Chamber (x: 52, z: 125)
+  out.push({ id: 'chest', x: 52, y: terrainHeight(52, 125), z: 125, yaw: 0 });
+  out.push({ id: 'books', x: 52.8, y: terrainHeight(52.8, 125) + 0.1, z: 125.4, yaw: 0.3 });
+  out.push({ id: 'pumpkin', x: 51.2, y: terrainHeight(51.2, 125.6), z: 125.6, yaw: 0.8 });
+
+  // 3. Tidal Works Harbor Crane Scaffold (x: -188, z: 108)
+  out.push({ id: 'chest', x: -188, y: 3.6, z: 108, yaw: Math.PI / 2 });
+  out.push({ id: 'scaffold', x: -188, y: 0, z: 108, yaw: 0 });
+  out.push({ id: 'scaffold', x: -188, y: 1.8, z: 108, yaw: 0 });
+  out.push({ id: 'barrel_open', x: -188, y: 3.6, z: 109.5, yaw: 0 });
+
+  // 4. Pinewatch Summit Peak Lookout (x: 135, z: 135)
+  const summitY = terrainHeight(135, 135);
+  out.push({ id: 'chest', x: 135, y: summitY, z: 135, yaw: -Math.PI / 4 });
+  out.push({ id: 'signpost', x: 133.5, y: summitY, z: 136.5, yaw: 0.8 });
+  out.push({ id: 'street_bench', x: 136.5, y: summitY, z: 133.5, yaw: -Math.PI / 4 });
+  out.push({ id: 'campfire', x: 133, y: summitY, z: 133, yaw: 0 });
+
+  // 5. Shattered Quarry Cave Cache (x: -56, z: -14)
+  const quarryY = terrainHeight(-56, -14);
+  out.push({ id: 'chest', x: -56, y: quarryY, z: -14, yaw: 1.2 });
+  out.push({ id: 'rock_c', x: -54.5, y: quarryY, z: -14, yaw: 0 });
+  out.push({ id: 'rock_a', x: -57.5, y: quarryY, z: -13.5, yaw: 1.5 });
+  out.push({ id: 'workbench', x: -56, y: quarryY, z: -16, yaw: 0 });
+
+  // 6. Survivor's Hidden Bunker Cache (x: 60, z: -58)
+  const bunkerY = terrainHeight(60, -58);
+  out.push({ id: 'chest', x: 60, y: bunkerY, z: -58, yaw: 0.5 });
+  out.push({ id: 'box_closed', x: 61, y: bunkerY, z: -57.5, yaw: 0.2 });
+  out.push({ id: 'crate_wood', x: 59.2, y: bunkerY, z: -58.5, yaw: 0 });
+
+  // 7. Hermit's Island Stash (x: -62, z: 60)
+  const hermitY = terrainHeight(-62, 60);
+  out.push({ id: 'chest', x: -62, y: hermitY, z: 60, yaw: -0.8 });
+  out.push({ id: 'barrel', x: -61, y: hermitY, z: 61, yaw: 0 });
+  out.push({ id: 'bucket', x: -62.5, y: hermitY, z: 61.2, yaw: 0 });
+
+  // 8. Forgotten Ruins Altar (x: -60, z: -64)
+  const ruinY = terrainHeight(-60, -64);
+  out.push({ id: 'chest', x: -60, y: ruinY, z: -64, yaw: 0 });
+  out.push({ id: 'gravestone_cross', x: -58.5, y: ruinY, z: -64, yaw: Math.PI });
+  out.push({ id: 'rock_b', x: -61.5, y: ruinY, z: -64, yaw: 2.1 });
+
+  // 9. Scenic Valley Overlook (x: 2, z: 94)
+  const overlookY = terrainHeight(2, 94);
+  out.push({ id: 'chest', x: 2, y: overlookY, z: 94, yaw: Math.PI });
+  out.push({ id: 'parasol', x: 0.5, y: overlookY, z: 94, yaw: 0 });
+  out.push({ id: 'chair_cushion', x: 0.5, y: overlookY, z: 93, yaw: Math.PI / 2 });
+
+  // 10. Sunny Meadows Attic Treasure (In northeastern residential manor)
+  const manor = BUILDINGS.find(b => b.style === 'house' && b.floors >= 2);
+  if (manor) {
+    const f = buildingFootprint(manor);
+    const atticY = (manor.base + manor.floors) * TILE;
+    out.push({ id: 'chest', x: f.x0 + 2.5, y: atticY, z: f.z0 + 2.5, yaw: 0.5 });
+    out.push({ id: 'box_closed', x: f.x0 + 1.5, y: atticY, z: f.z0 + 2.5, yaw: 0 });
+    out.push({ id: 'books', x: f.x0 + 2.5, y: atticY + 0.5, z: f.z0 + 1.8, yaw: 0.2 });
+  }
+
+  // 11. Docks Cargo Sea Container Rafters (x: -180, z: 116)
+  out.push({ id: 'chest', x: -180, y: 5.0, z: 116, yaw: 0 });
+  out.push({ id: 'pallet', x: -180, y: 5.0, z: 116, yaw: 0 });
+  out.push({ id: 'barrel_open', x: -181.5, y: 5.0, z: 116, yaw: 0 });
+
+  // 12. Deep Mountain Woods Hidden Stump (x: 125, z: 85)
+  const forestY = terrainHeight(125, 85);
+  out.push({ id: 'chest', x: 125, y: forestY, z: 85, yaw: 0.3 });
+  out.push({ id: 'stump', x: 125, y: forestY, z: 86.5, yaw: 0 });
+  out.push({ id: 'fern', x: 124, y: forestY, z: 84.5, yaw: 0.6 });
+}
+
+/**
+ * Mountain trails, scenic lookout points, and street lighting:
+ * Connects the map with recognizable guide lanterns, benches, and trail markers.
+ */
+function dressMountainTrails(out: Placement[]): void {
+  // Roadside street lights along central highways
+  for (let z = -160; z <= 160; z += 40) {
+    if (Math.abs(z) < 25) continue; // Leave central plaza open
+    out.push({ id: 'street_light_double', x: 7.5, y: terrainHeight(7.5, z), z, yaw: Math.PI / 2 });
+    out.push({ id: 'street_light_double', x: -7.5, y: terrainHeight(-7.5, z), z, yaw: -Math.PI / 2 });
+  }
+  for (let x = -160; x <= 160; x += 40) {
+    if (Math.abs(x) < 25) continue;
+    out.push({ id: 'street_light_double', x, y: terrainHeight(x, 7.5), z: 7.5, yaw: 0 });
+    out.push({ id: 'street_light_double', x, y: terrainHeight(x, -7.5), z: -7.5, yaw: Math.PI });
+  }
+
+  // Trail signposts and rest benches along hill ascents
+  const trailStops = [
+    { x: -50, z: -50, yaw: 0.78 },
+    { x: 50, z: -50, yaw: -0.78 },
+    { x: -50, z: 50, yaw: 2.35 },
+    { x: 50, z: 50, yaw: -2.35 },
+  ];
+  for (const { x, z, yaw } of trailStops) {
+    const y = terrainHeight(x, z);
+    out.push({ id: 'signpost', x, y, z, yaw });
+    out.push({ id: 'street_bench', x: x + Math.cos(yaw) * 3, y: terrainHeight(x + Math.cos(yaw) * 3, z + Math.sin(yaw) * 3), z: z + Math.sin(yaw) * 3, yaw: yaw + Math.PI / 2 });
+    out.push({ id: 'trashcan', x: x - Math.sin(yaw) * 2, y, z: z + Math.cos(yaw) * 2, yaw });
+  }
+}
+
+/**
  * GPU Instanced batching:
  * Efficiently aggregates hundreds of placed assets by model ID into single-draw-call
  * InstancedMesh batches for maximum 60fps+ rendering performance.
@@ -814,7 +1048,7 @@ function instance(scene: THREE.Scene, models: ModelLibrary, placements: Placemen
   const matrix = new THREE.Matrix4();
   const quaternion = new THREE.Quaternion();
   const position = new THREE.Vector3();
-  const one = new THREE.Vector3(1, 1, 1);
+  const scaleVec = new THREE.Vector3(1, 1, 1);
   let placed = 0;
 
   for (const [id, list] of byId) {
@@ -824,7 +1058,9 @@ function instance(scene: THREE.Scene, models: ModelLibrary, placements: Placemen
     if (!batch.valid) continue;
     list.forEach((p, i) => {
       quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.yaw);
-      batch.setMatrixAt(i, matrix.compose(position.set(p.x, p.y, p.z), quaternion, one));
+      const s = p.scale ?? 1;
+      scaleVec.set(s, s, s);
+      batch.setMatrixAt(i, matrix.compose(position.set(p.x, p.y, p.z), quaternion, scaleVec));
     });
     batch.addTo(scene);
     placed += list.length;
