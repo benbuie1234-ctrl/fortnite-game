@@ -760,11 +760,22 @@ function frame(now: number): void {
   else {
     renderSelf.x+=(self.x-renderSelf.x)*blend;
     renderSelf.z+=(self.z-renderSelf.z)*blend;
-    if (self.grounded) {
-      renderSelf.y = self.y;
-    } else {
-      renderSelf.y+=(self.y-renderSelf.y)*blend;
-    }
+    // Height is smoothed on exactly the same curve as the other two axes.
+    //
+    // It used to be assigned outright while grounded, and that is the hill
+    // judder: the simulation advances at a fixed 30 Hz while this runs at the
+    // display rate, so walking a slope held y still for three or four frames
+    // and then jumped it 20-40 cm, over and over, while x and z slid along
+    // smoothly underneath. The body (and the camera on it) visibly stair-
+    // stepped up and down the whole way. Flat ground hid it completely,
+    // because there y never changed.
+    //
+    // A real fall still snaps: past this threshold the tick moved the feet
+    // further than any slope at any speed the game allows could, so it is a
+    // drop or a mantle rather than ground, and smoothing it would leave the
+    // body floating behind the landing.
+    const dy = self.y - renderSelf.y;
+    renderSelf.y += Math.abs(dy) > 0.7 ? dy : dy * blend;
   }
   updateCamera(aiming, dt, self.sprinting);
   viewfx.update(dt);
@@ -933,6 +944,14 @@ setInterval(() => {
   }
   if (tickAccumulator > TICK_DT * 6) tickAccumulator = 0;
 }, 1000 / TICK_HZ);
+
+// Dev-only handle, so the running game can be inspected and driven from the
+// console -- and by a browser-automation harness, which cannot take the
+// pointer lock that keyboard input is gated behind. Stripped from production
+// builds by the `import.meta.env.DEV` constant.
+if (import.meta.env.DEV) {
+  (globalThis as unknown as Record<string, unknown>).clutch = { conn, controls, view, renderSelf };
+}
 
 requestAnimationFrame(frame);
 

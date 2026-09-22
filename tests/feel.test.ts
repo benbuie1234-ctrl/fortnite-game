@@ -11,7 +11,9 @@ import { makePiece, pieceBox, SLOT_FLOOR, SLOT_RAMP, rampHeightAt } from "../sha
 import {
   TILE, TICK_DT, MOVE_SPEED, PLAYER_MAX_HP, CROUCH_HEIGHT, PLAYER_HEIGHT,
   FALL_SAFE_HEIGHT, FALL_LETHAL_HEIGHT, MATERIALS,
+  SPRINT_SPEED_MULT, GROUND_ACCEL, GROUND_FRICTION, SLIDE_MIN_SPEED,
 } from "../shared/src/constants";
+import { terrainHeight } from "../shared/src/map";
 import { weaponById, spreadFor, pieceDamage, W_SNIPER, W_AR } from "../shared/src/weapons";
 
 let failures = 0;
@@ -162,6 +164,79 @@ console.log("sniper versus materials");
   const ar = weaponById(W_AR);
   check("an ordinary weapon uses its own build multiplier",
     Math.abs(pieceDamage(ar, wood.id) - ar.damage * ar.buildDamage) < 1e-9);
+}
+
+// ---------------------------------------------------------------------------
+console.log("sprinting is actually faster");
+{
+  // The multiplier only means anything if acceleration can beat the friction
+  // at the speed it asks for. It could not: friction sheds
+  // GROUND_FRICTION * TICK_DT of the current speed every tick while
+  // acceleration can only put back GROUND_ACCEL * TICK_DT, which pinned the
+  // real top speed at GROUND_ACCEL / GROUND_FRICTION however high the
+  // multiplier went -- 8.2 m/s against a claimed 11.2, so sprint was worth 17%
+  // instead of 60% and felt like nothing.
+  check("acceleration can sustain the sprint speed it advertises",
+    GROUND_ACCEL > MOVE_SPEED * SPRINT_SPEED_MULT * GROUND_FRICTION,
+    `${GROUND_ACCEL} vs ${(MOVE_SPEED * SPRINT_SPEED_MULT * GROUND_FRICTION).toFixed(0)} needed`);
+
+  const w = new World();
+  const walker = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
+  const sprinter = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
+  const walk = topSpeed(walker, w, input(0, 1), 60);
+  const sprint = topSpeed(sprinter, w, input(0, 1, BTN_SPRINT), 60);
+  check("walking reaches its own cap", Math.abs(walk - MOVE_SPEED) < 0.05, `${walk.toFixed(2)}`);
+  check("and sprinting reaches its own",
+    Math.abs(sprint - MOVE_SPEED * SPRINT_SPEED_MULT) < 0.05,
+    `${sprint.toFixed(2)} of ${(MOVE_SPEED * SPRINT_SPEED_MULT).toFixed(2)}`);
+  check("so a sprint is a real difference, not a nudge",
+    sprint > walk * 1.4, `walk ${walk.toFixed(1)} sprint ${sprint.toFixed(1)}`);
+}
+
+// ---------------------------------------------------------------------------
+console.log("crouch crouches; sliding is for speed and hills");
+{
+  // The rule a player actually holds in their head is "crouch unless I am
+  // going fast or going downhill". It used to be "crouch above 3.2 m/s", which
+  // is under half of walking pace -- so crouch slid whenever you were moving
+  // and the game had no working crouch at all.
+  check("the flat-ground slide threshold is above walking pace",
+    SLIDE_MIN_SPEED > MOVE_SPEED, `${SLIDE_MIN_SPEED} vs ${MOVE_SPEED}`);
+
+  const flat = new World();
+  function crouchAt(w: World, x: number, z: number, yaw: number, sprint: boolean): MovementState {
+    const s = { ...newMovementState(), x, y: w.groundAt(x, z), z, yaw, grounded: true };
+    const cmd: InputCommand = { seq: 0, moveX: 0, moveZ: 1, yaw, pitch: 0, buttons: sprint ? BTN_SPRINT : 0, slot: 2 };
+    for (let i = 0; i < 40; i++) stepPlayer(s, cmd, w, TICK_DT);
+    stepPlayer(s, { ...cmd, buttons: cmd.buttons | BTN_CROUCH }, w, TICK_DT);
+    return s;
+  }
+  check("a jog then crouch is a crouch", crouchAt(flat, 0, 0, 0, false).sliding === false);
+  check("a sprint then crouch is a slide", crouchAt(flat, 0, 0, 0, true).sliding === true);
+
+  const standing = { ...newMovementState(), x: 0, y: 0, z: 0, grounded: true };
+  stepPlayer(standing, input(0, 0, BTN_CROUCH), flat, TICK_DT);
+  check("and standing still then crouch is a crouch", standing.sliding === false);
+
+  // The hill is the exception, and it is measured off the surface rather than
+  // off the speed, so it holds for terrain and for built ramps alike.
+  const hills = new World();
+  hills.terrainEnabled = true;
+  let hill = { x: 0, z: 0, grade: 0 };
+  for (let x = -230; x < 230; x += 2) {
+    for (let z = -230; z < 230; z += 6) {
+      const grade = (terrainHeight(x + 1, z) - terrainHeight(x - 1, z)) / 2;
+      // Under 0.62 keeps this on a hillside rather than on a plateau edge,
+      // where running "downhill" means walking off a cliff.
+      if (grade > hill.grade && grade < 0.62) hill = { x, z, grade };
+    }
+  }
+  const WEST = Math.PI / 2, EAST = -Math.PI / 2;
+  check("a jog DOWNHILL then crouch is a slide",
+    crouchAt(hills, hill.x + 10, hill.z, WEST, false).sliding === true,
+    `grade ${hill.grade.toFixed(2)}`);
+  check("and the same jog uphill is a crouch",
+    crouchAt(hills, hill.x - 10, hill.z, EAST, false).sliding === false);
 }
 
 // ---------------------------------------------------------------------------

@@ -81,6 +81,45 @@ console.log("mantling");
 }
 
 // ---------------------------------------------------------------------------
+console.log("a ramp is walked up, never climbed");
+{
+  // A ramp is approximated by sixteen 37 cm stairs and rises at 45 degrees, so
+  // the stair a stride in front of the player is always about 75 cm above
+  // their feet -- a perfectly good ledge by every other test in findLedge.
+  // Holding forward and jump up one therefore used to grab a new "ledge" every
+  // tick and drag the player up the whole ramp at MANTLE_SPEED with vy pinned
+  // at zero, losing all horizontal speed to the stairs it flew into on the way.
+  // That is the uphill judder, and it is also why jump did nothing on a slope.
+  const w = new World();
+  for (let i = 0; i < 4; i++) w.set(makePiece(i, i, 0, SLOT_RAMP, 0, 0, 1, 0));
+
+  const climbing = { ...newMovementState(), x: 0.5, y: 0.5, z: TILE / 2, grounded: true };
+  let posed = 0, peakVy = 0;
+  for (let i = 0; i < 60; i++) {
+    stepPlayer(climbing, input(0, 1, BTN_JUMP), w, TICK_DT);
+    if (climbing.mantling || climbing.vaulting) posed++;
+    peakVy = Math.max(peakVy, climbing.vy);
+  }
+  check("holding jump up a ramp jumps", peakVy > 5, `peak vy ${peakVy.toFixed(1)}`);
+  check("and never grabs the ramp as a ledge", posed === 0, `${posed} climbing ticks`);
+
+  // The other half: a jump taken on a ramp flies into the next approximation
+  // stair, which is a lip a few centimetres above the feet. The sweep zeroed
+  // the whole horizontal velocity against it, so jumping uphill stopped you
+  // dead and dropped you on the spot.
+  const running = { ...newMovementState(), x: 0.5, y: 0.5, z: TILE / 2, grounded: true };
+  for (let i = 0; i < 30; i++) stepPlayer(running, input(0, 1, 0), w, TICK_DT);
+  const cruising = Math.hypot(running.vx, running.vz);
+  let slowest = cruising;
+  for (let i = 0; i < 30; i++) {
+    stepPlayer(running, input(0, 1, BTN_JUMP), w, TICK_DT);
+    slowest = Math.min(slowest, Math.hypot(running.vx, running.vz));
+  }
+  check("and a jump on a ramp keeps its momentum",
+    slowest > cruising * 0.8, `${cruising.toFixed(1)} down to ${slowest.toFixed(1)}`);
+}
+
+// ---------------------------------------------------------------------------
 console.log("ramp exits through the floor above");
 {
   // A ramp rises to exactly the surface of the floor in the cell above it, so
@@ -163,16 +202,21 @@ console.log("slide tiers");
   check("sliding out of a sprint goes further",
     sprintSlide > walkSlide + 1, `walk ${walkSlide.toFixed(2)} sprint ${sprintSlide.toFixed(2)}`);
 
-  // Holding crouch must not chain slides forever.
+  // Holding crouch must not chain slides forever. Counted as separate RUNS
+  // rather than as a tick budget: how long one slide lasts is a tuning
+  // question (it tracks the entry boost, which tracks sprint speed), but how
+  // many slides one held key is worth is the actual rule, and it is one.
   const p = { ...newMovementState(), x: TILE / 2, y: 0, z: TILE / 2, grounded: true };
   for (let i = 0; i < 40; i++) stepPlayer(p, input(0, 1, BTN_SPRINT), w, TICK_DT);
-  let slidingTicks = 0;
+  let runs = 0, slidingTicks = 0, wasSliding = false;
   for (let i = 0; i < 300; i++) {
     stepPlayer(p, input(0, 1, BTN_SPRINT | BTN_CROUCH), w, TICK_DT);
     if (p.sliding) slidingTicks++;
+    if (p.sliding && !wasSliding) runs++;
+    wasSliding = p.sliding;
   }
   check("holding crouch does not chain slides",
-    slidingTicks < 60, `${slidingTicks} ticks sliding out of 300`);
+    runs === 1, `${runs} slides, ${slidingTicks} ticks sliding out of 300`);
 }
 
 // ---------------------------------------------------------------------------

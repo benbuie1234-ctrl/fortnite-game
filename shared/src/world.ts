@@ -1,5 +1,5 @@
 import { terrainHeight } from "./map";
-import { TILE } from "./constants";
+import { TILE, STEP_HEIGHT } from "./constants";
 import {
   Piece, Box, Slot, SLOT_COUNT, SLOT_RAMP, SLOT_FLOOR,
   packKey, pieceBox, pieceBoxes, rampUnderBox, rampHeightAt, inGridBounds, currentHp,
@@ -108,8 +108,19 @@ export class World {
   private isRampExit(piece: Piece, feetY: number | undefined): boolean {
     if (piece.slot !== SLOT_FLOOR || feetY === undefined) return false;
     if (!this.pieces.has(packKey(piece.gx, piece.gy - 1, piece.gz, SLOT_RAMP))) return false;
-    // Solid once the feet reach the surface, so you land on it and stay there.
-    return feetY < piece.gy * TILE - 0.02;
+    // Solid once the feet are within a STEP of the surface, so the last stretch
+    // of the climb steps up onto it.
+    //
+    // This used to be 2 cm, which made getting onto the floor a coin toss: the
+    // ramp surface tracks the feet exactly, so the window in which the slab was
+    // solid was 2 cm wide while a walking player crosses 23 cm a tick and a
+    // sprinting one 41 cm. Miss it and you walked off the end of your own ramp
+    // into thin air and fell the whole height of the climb -- which is a fall
+    // whose cause is invisible, and the worst kind of bug to be on the wrong
+    // end of. A step's worth of window is crossed by every tick rate the game
+    // can produce, and the step-up solver is exactly the thing that knows how
+    // to get feet over a lip this size without losing speed.
+    return feetY < piece.gy * TILE - STEP_HEIGHT;
   }
 
   /** Highest ramp surface under a point, or -Infinity. */

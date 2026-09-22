@@ -5,6 +5,7 @@ import {
   BACKPEDAL_SPEED_MULT, BACKPEDAL_AIR_SPEED_MULT, STRAFE_SPEED_MULT, SPRINT_SPEED_MULT,
   CROUCH_HEIGHT, CROUCH_EYE_HEIGHT, CROUCH_SPEED_MULT, CROUCH_TRANSITION_SPEED,
   SLIDE_MIN_SPEED, SLIDE_BOOST_SPEED, SLIDE_SPRINT_BOOST_SPEED, SLIDE_FRICTION,
+  SLIDE_DOWNHILL_GRADE, SLIDE_DOWNHILL_MIN_SPEED,
   SLIDE_END_SPEED, SLIDE_MAX_SPEED, SLIDE_COOLDOWN, SLIDE_STEER_RATE,
   SLIDE_SLOPE_GAIN, SLIDE_SLOPE_MAX_STEP, SLIDE_JUMP_MIN_TIME, SLIDE_LAND_MIN_SPEED,
   SLIDE_GROUND_SNAP,
@@ -14,7 +15,7 @@ import {
   BLOOM_RISE_RATE, BLOOM_FALL_RATE, BLOOM_AIR_FLOOR, BLOOM_CROUCH_MULT,
   BLOOM_STILL_SPEED,
 } from "./constants";
-import type { Box, Piece } from "./build";
+import { rampHeightAt, type Box, type Piece } from "./build";
 import type { World } from "./world";
 
 // ---------------------------------------------------------------------------
@@ -197,8 +198,8 @@ export function stepPlayer(
       s.slideLockout = SLIDE_COOLDOWN;
     }
   } else if (
-    wantsCrouch && !s.crouchHeld && s.grounded &&
-    s.slideLockout <= 0 && planarSpeed >= SLIDE_MIN_SPEED
+    wantsCrouch && !s.crouchHeld && s.grounded && s.slideLockout <= 0 &&
+    canSlideAt(s, world, planarSpeed)
   ) {
     s.sliding = true;
     // s.sprinting still holds LAST tick's value here, which is the question
@@ -334,12 +335,57 @@ export function stepPlayer(
   const groundedBefore = s.grounded;
   const heightBefore = s.y;
 
-  moveAndCollide(s, world, dt, input, previousCrouch);
+  moveAndCollide(s, world, dt, input, previousCrouch, jumped);
 
   s.slideTime = s.sliding ? s.slideTime + dt : 0;
   applySlopeMomentum(s, groundedBefore, heightBefore);
   resumeSlideOnLanding(s, groundedBefore, wantsCrouch);
   updateBloom(s, dt);
+}
+
+/**
+ * Whether a crouch PRESS at this moment should start a slide or just crouch.
+ *
+ * Two ways in. On the flat it is a speed question and the bar is set above
+ * walking pace, so the only thing that clears it is a sprint -- which is what
+ * makes crouch a stance again rather than a slide button. The second way in is
+ * a hill: the ground falling away ahead of you is the other thing that earns a
+ * slide, and it does not need the speed because the slope supplies it.
+ *
+ * The slope is measured by sampling the surface at the feet and a stride ahead
+ * along the current direction of travel, which makes it a pure function of the
+ * world and the state -- so a client replaying its inputs after a snapshot
+ * reaches the same verdict the server did. Terrain and ramps both answer;
+ * a staircase built out of floor slabs does not, and is left as flat ground.
+ */
+function canSlideAt(s: MovementState, world: World, planarSpeed: number): boolean {
+  if (planarSpeed >= SLIDE_MIN_SPEED) return true;
+  if (planarSpeed < SLIDE_DOWNHILL_MIN_SPEED) return false;
+  return descentAhead(s, world, planarSpeed) >= SLIDE_DOWNHILL_GRADE;
+}
+
+/** Metres the surface drops per metre travelled, in the direction of travel. */
+function descentAhead(s: MovementState, world: World, planarSpeed: number): number {
+  const stride = 1.5;
+  const dx = (s.vx / planarSpeed) * stride;
+  const dz = (s.vz / planarSpeed) * stride;
+  queryAround(s, world, stride + 0.5);
+  const here = surfaceNear(s, world, s.x, s.z);
+  const ahead = surfaceNear(s, world, s.x + dx, s.z + dz);
+  if (here === -Infinity || ahead === -Infinity) return 0;
+  // Only the surface actually underfoot gets a say. Standing on a flat roof
+  // that happens to have a hillside beneath it is not standing on a hill, and
+  // without this the terrain under a building would hand out slides on it.
+  if (Math.abs(s.y - here) > STEP_HEIGHT) return 0;
+  return (here - ahead) / stride;
+}
+
+/** Highest walkable surface at an XZ that the player could be standing on. */
+function surfaceNear(s: MovementState, world: World, x: number, z: number): number {
+  const ramp = scratchRamps.length > 0
+    ? world.rampSurfaceAt(scratchRamps, x, z, s.y + STEP_HEIGHT)
+    : -Infinity;
+  return Math.max(world.groundAt(x, z), ramp);
 }
 
 /**
@@ -473,6 +519,7 @@ function queryAround(s: MovementState, world: World, pad: number): void {
 
 function moveAndCollide(
   s: MovementState, world: World, dt: number, input: InputCommand, previousCrouch: number,
+  jumped: boolean,
 ): void {
   const wasGrounded = s.grounded;
   s.grounded = false;
@@ -503,10 +550,18 @@ function moveAndCollide(
   const blockedX = sweepAxis(s, 0, dx);
   const blockedZ = sweepAxis(s, 2, dz);
 
-  // --- step up: if a horizontal move was blocked while grounded, try again
-  //     from STEP_HEIGHT higher and settle back down. Makes piece seams and
-  //     ramp bases walkable instead of sticky.
-  if ((blockedX || blockedZ) && wasGrounded) {
+  // --- step up: if a horizontal move was blocked, try again from STEP_HEIGHT
+  //     higher and settle back down. Makes piece seams and ramp bases walkable
+  //     instead of sticky.
+  //
+  // Airborne counts too, and deliberately so. It used to require being on the
+  // ground, which meant a jump taken while running up a ramp flew into the
+  // next 37 cm approximation stair -- a lip a few centimetres above the feet,
+  // that walking would have crossed without noticing -- and had its entire
+  // horizontal velocity zeroed by the sweep. Jumping uphill stopped you dead
+  // and dropped you on the spot. A tall wall is unaffected: the retry is still
+  // blocked from STEP_HEIGHT up, nothing is gained, and everything is put back.
+  if (blockedX || blockedZ) {
     const savedX = s.x, savedZ = s.z, savedVx = s.vx, savedVz = s.vz;
     s.x = startX; s.z = startZ; s.y = startY + STEP_HEIGHT;
 
@@ -515,16 +570,20 @@ function moveAndCollide(
       const stepBlockedZ = sweepAxis(s, 2, dz);
       // Settle back onto whatever we stepped onto.
       let drop = 0;
+      let landed = false;
       const maxDrop = STEP_HEIGHT + 0.02;
       while (drop < maxDrop) {
         s.y -= 0.02;
         drop += 0.02;
-        if (collidesAt(s)) { s.y += 0.02; break; }
+        if (collidesAt(s)) { s.y += 0.02; landed = true; break; }
       }
       const gainedGround = Math.hypot(s.x - startX, s.z - startZ) >
                            Math.hypot(savedX - startX, savedZ - startZ) + 1e-4;
       if (gainedGround) {
-        s.grounded = true;
+        // A step taken in mid-air only grounds the player if the settle
+        // actually found something to stand on; otherwise this was a nudge
+        // over a lip and the fall carries on.
+        if (wasGrounded || landed) s.grounded = true;
         // Stepping over something must not cost you your momentum.
         //
         // The sweep that failed had already zeroed the blocked axis, and that
@@ -552,7 +611,21 @@ function moveAndCollide(
   // against -- fine for a wall, useless for a tree, whose trunk is 56 cm
   // across and which you slide straight past. Jumping at a ledge and catching
   // it is also what "almost at the top of the block" should do.
-  const reaching = blockedX || blockedZ || !s.grounded;
+  //
+  // What it must NOT do is fire at something the player is already walking up.
+  // s.grounded is the test for that, and it is exact at this point in the
+  // solver: it was cleared at the top of the tick and nothing has set it again
+  // except a step-up that actually gained ground. So a ramp, a staircase and
+  // a kerb all report grounded here and are left to the step-up that just
+  // handled them -- which is the fix for holding W and space up a ramp
+  // climbing it as one continuous 31-tick vault, at MANTLE_SPEED, with the
+  // horizontal velocity zeroed on every other tick. That is the uphill
+  // judder, and it is also why jump did nothing on a slope.
+  //
+  // `jumped` excludes the tick a jump started for the same reason: a jump the
+  // player asked for from solid ground is a jump, not the opening frame of a
+  // climb.
+  const reaching = !s.grounded && !jumped && (blockedX || blockedZ || !wasGrounded);
   if (reaching && input.moveZ > 0 && (input.buttons & BTN_JUMP) !== 0) {
     const ledge = findLedge(s, input);
     if (ledge !== null) {
@@ -706,16 +779,36 @@ function findLedge(
   const tz = s.z + fz * MANTLE_FORWARD;
   const height = playerHeight(s.crouch);
 
+  // A ramp you are standing on is a floor, not a wall.
+  //
+  // It is approximated by sixteen 37 cm stairs, and because it climbs 45
+  // degrees the stair a stride in front of you is always about 75 cm above
+  // your feet -- a perfectly good ledge by every other test here. So holding
+  // forward and jump while running up a ramp used to climb the whole thing as
+  // one continuous vault at MANTLE_SPEED, with the horizontal velocity zeroed
+  // every other tick by the steps it flew into. Being INSIDE the ramp's own
+  // footprint is what says "this is the thing I am walking on"; walking at a
+  // ramp's back from outside it is a different question and still climbs.
+  let onRamp = false;
+  for (const r of scratchRamps) {
+    if (rampHeightAt(r, s.x, s.z) !== null) { onRamp = true; break; }
+  }
+
   ledgeHeights.length = 0;
   for (const b of scratchBoxes) {
+    if (onRamp && ownedByRamp(b)) continue;
     if (tx <= b[0] - PLAYER_RADIUS || tx >= b[3] + PLAYER_RADIUS) continue;
     if (tz <= b[2] - PLAYER_RADIUS || tz >= b[5] + PLAYER_RADIUS) continue;
     const surface = b[4];
-    if (surface <= s.y + 0.05 || surface - s.y > MANTLE_REACH) continue;
+    // Anything within a step of the feet is the step-up's job, not a climb.
+    // A ramp is approximated by 37 cm stairs and a floor slab has a 40 cm lip,
+    // so without this floor every one of them reads as a ledge and holding
+    // jump anywhere near a build turns into a mantle.
+    if (surface <= s.y + STEP_HEIGHT || surface - s.y > MANTLE_REACH) continue;
     // Only things the player is actually alongside. A box whose underside is
     // above your head is a ceiling, not a ledge -- without this, standing
     // under a floor and holding jump pulled you straight up through it.
-    if (b[1] >= s.y + height || b[4] <= s.y + 0.05) continue;
+    if (b[1] >= s.y + height) continue;
     if (!ledgeHeights.includes(surface)) ledgeHeights.push(surface);
   }
   if (ledgeHeights.length === 0) return null;
@@ -724,6 +817,7 @@ function findLedge(
   for (const top of ledgeHeights) {
     let clear = true;
     for (const b of scratchBoxes) {
+      if (onRamp && ownedByRamp(b)) continue;
       if (overlaps(
         tx - PLAYER_RADIUS, top + 0.02, tz - PLAYER_RADIUS,
         tx + PLAYER_RADIUS, top + height, tz + PLAYER_RADIUS, b,

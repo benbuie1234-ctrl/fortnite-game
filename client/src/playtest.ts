@@ -12,6 +12,14 @@ const camera=new THREE.PerspectiveCamera(38,innerWidth/innerHeight,.05,100);cons
 const pose=document.getElementById('pose') as unknown as HTMLSelectElement,angle=document.getElementById('angle') as unknown as HTMLSelectElement;
 let last=performance.now(),minFoot=Infinity,maxFoot=-Infinity;
 pose.onchange=()=>{minFoot=Infinity;maxFoot=-Infinity;};
-function frame(t:number){requestAnimationFrame(frame);const dt=Math.min(.05,(t-last)/1000);last=t;const c=pose.value.includes('crouch'),moving=pose.value==='run'||pose.value==='crouchwalk';ch.update(0,0,0,0,0,moving?(c?2:6):0,pose.value!=='jump',dt,c?1:0);ch.aimAt(new THREE.Vector3(0,1.2,20));ch.root.updateMatrixWorld(true);camera.position.set(angle.value==='side'?4:0,1.55,angle.value==='side'?2:angle.value==='front'?5:-5);camera.lookAt(target);renderer.render(scene,camera);
+function frame(t:number){requestAnimationFrame(frame);const dt=Math.min(.05,(t-last)/1000);last=t;const v=pose.value,c=v.includes('crouch'),moving=v==='run'||v==='crouchwalk'||v==='slide';const sliding=v==='slide';ch.update(0,0,0,0,0,moving?(c?2:sliding?12:6):0,v!=='jump'&&v!=='vault'&&v!=='mantle',dt,c||sliding?1:0,sliding,v==='aim',v==='mantle',v==='vault');ch.aimAt(new THREE.Vector3(0,1.2,20));
+// Dev bone tweaker. Set window.poseTune = {mixamorigSpine:[x,y,z], ...} from the
+// console to dial a pose in without an edit-reload cycle, and window.poseRootY
+// to shift the body. Applied after update(), so it wins for the frame.
+const tune=(globalThis as any).poseTune as Record<string,number[]>|undefined;
+if(tune)for(const[name,r]of Object.entries(tune)){const b=ch.root.getObjectByName(name);if(b){b.rotation.x+=r[0];b.rotation.y+=r[1];b.rotation.z+=r[2];}}
+if(typeof (globalThis as any).poseRootY==='number')ch.root.position.y=(globalThis as any).poseRootY;
+ch.root.updateMatrixWorld(true);camera.position.set(angle.value==='side'?4.2:0,angle.value==='side'?1.0:1.55,angle.value==='side'?0:angle.value==='front'?5:-5);camera.lookAt(angle.value==='side'?new THREE.Vector3(0,.7,0):target);renderer.render(scene,camera);
 const box=new THREE.Box3();for(const name of ['footL','footR']){const foot=ch.root.getObjectByName(name);if(foot){box.setFromObject(foot);minFoot=Math.min(minFoot,box.min.y);maxFoot=Math.max(maxFoot,box.min.y);}}document.getElementById('results')!.textContent=`Models: ${models.size} | Feet lowest: ${minFoot.toFixed(4)} m | lift: ${maxFoot.toFixed(3)} m | Draw calls: ${renderer.info.render.calls}\n${models.has('character')?'Compressed GLB ranger loaded':'Fallback character'}`;}
+(globalThis as any).ch=ch;
 requestAnimationFrame(frame);

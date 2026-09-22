@@ -65,7 +65,21 @@ export const PLAYER_MAX_SHIELD = 100;
 export const GRAVITY = -26.0;
 export const JUMP_VELOCITY = 8.5;
 export const MOVE_SPEED = 7.0;
-export const GROUND_ACCEL = 90.0;
+/**
+ * Ground acceleration, in m/s^2.
+ *
+ * Has to beat MOVE_SPEED * SPRINT_SPEED_MULT * GROUND_FRICTION or the top
+ * speed is a number the player can never actually reach. Friction is
+ * exponential and runs before acceleration, so every tick sheds
+ * GROUND_FRICTION * TICK_DT -- about a third -- of the current speed, while
+ * acceleration can only put back GROUND_ACCEL * TICK_DT. At 90 that was 3 m/s
+ * a tick, which balances the friction at 8.2 m/s: walking (7.0) reached its
+ * cap, sprinting (11.2) did not get near it, and sprint was worth 17% rather
+ * than the 60% the multiplier claims. That is the whole of "sprinting is
+ * barely faster than walking" -- the multiplier was never wrong, it was
+ * unreachable.
+ */
+export const GROUND_ACCEL = 170.0;
 export const AIR_ACCEL = 22.0;
 export const GROUND_FRICTION = 11.0;
 export const MAX_FALL_SPEED = -60.0;
@@ -86,7 +100,11 @@ export const STRAFE_SPEED_MULT = 0.92;
  * than a sideways shuffle.
  */
 export const BACKPEDAL_AIR_SPEED_MULT = 1.26;
-export const SPRINT_SPEED_MULT = 1.60;
+/**
+ * Sprint top speed, as a multiple of MOVE_SPEED. See GROUND_ACCEL: this is
+ * only honest because acceleration can now sustain it.
+ */
+export const SPRINT_SPEED_MULT = 1.75;
 
 // --- crouch and slide ------------------------------------------------------
 
@@ -97,13 +115,34 @@ export const CROUCH_SPEED_MULT = 0.52;
 /** How fast the capsule grows/shrinks between the two heights, in m/s. */
 export const CROUCH_TRANSITION_SPEED = 6.5;
 
-/** Crouching above this speed starts a slide at all. */
-export const SLIDE_MIN_SPEED = 3.2;
+/**
+ * Crouching above this speed slides on the flat; below it, crouch just crouches.
+ *
+ * Deliberately ABOVE the walking cap of MOVE_SPEED. It used to be 3.2 -- under
+ * half of walking pace -- so crouch slid whenever the player was moving at
+ * all, and a game with a crouch in it had no way to crouch. The line that
+ * matters to a player is "am I sprinting?", so that is where the threshold
+ * goes: a jog crouches, a sprint slides.
+ *
+ * Downhill is the exception and has its own pair of constants below, because a
+ * slope is the other thing that earns a slide and it does not need the speed.
+ */
+export const SLIDE_MIN_SPEED = 8.0;
+/**
+ * Slope, as metres of descent per metre travelled, that counts as a hill.
+ *
+ * 0.2 is about 11 degrees -- steep enough that you can see you are going
+ * downhill, shallow enough that most of the map's approaches qualify.
+ */
+export const SLIDE_DOWNHILL_GRADE = 0.2;
+/** Speed needed to slide when the ground ahead is falling away. Below the
+ *  flat-ground threshold on purpose: the hill is doing the work. */
+export const SLIDE_DOWNHILL_MIN_SPEED = 4.0;
 /** Speed a slide is kicked to from an ordinary run. */
-export const SLIDE_BOOST_SPEED = 8.6;
+export const SLIDE_BOOST_SPEED = 10.0;
 /** Speed a slide is kicked to when it comes out of a sprint. Sprinting into a
  *  slide is the version worth setting up, so it has to travel further. */
-export const SLIDE_SPRINT_BOOST_SPEED = 14.0;
+export const SLIDE_SPRINT_BOOST_SPEED = 16.0;
 /** Friction during a slide. Much lower than walking, which is the whole point.
  *  Low enough that a flat slide runs for well over a second: a slide you can
  *  see end before you have finished pressing the key is a stumble, not a
@@ -115,8 +154,16 @@ export const SLIDE_FRICTION = 0.65;
 export const SLIDE_STEER_RATE = 2.2;
 /** A slide ends once it decays below this, or when crouch is released. */
 export const SLIDE_END_SPEED = 4.2;
-/** Hard cap so a slide down a ramp cannot accelerate forever. */
-export const SLIDE_MAX_SPEED = 18.0;
+/**
+ * Hard cap so a slide down a ramp cannot accelerate forever.
+ *
+ * Has to sit well clear of SLIDE_SPRINT_BOOST_SPEED or a hill is worth
+ * nothing: at 18 with a 16 m/s entry there were 2 m/s of headroom left, so a
+ * sprint-slide arrived almost at the ceiling and a descent could only add a
+ * rounding error to it. The gap between the entry and the cap IS the reward
+ * for finding a slope.
+ */
+export const SLIDE_MAX_SPEED = 22.0;
 /** Seconds before another slide can be started, so it is not a hop-slide loop. */
 export const SLIDE_COOLDOWN = 0.75;
 

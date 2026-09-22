@@ -42,6 +42,104 @@ export const CROUCH_HIP_Y = Math.max(
 );
 
 /**
+ * A pose, as rotation OFFSETS in radians applied on top of the playing clip.
+ *
+ * Offsets, never assignments, and that distinction is the whole reason this
+ * type exists. A Mixamo bone carries its rest orientation in its own rotation
+ * (the exporter bakes each joint's preRotation into it), so `bone.rotation.x =
+ * v` does not "set the shoulder angle" -- it throws the skeleton's bind pose
+ * away and replaces it with a single Euler angle about an axis that has
+ * nothing to do with the joint. That is what the slide pose was doing, and it
+ * is why a player who pressed crouch at speed arched backwards over their own
+ * spine instead of dropping onto a knee. Adding leaves the rig, and whatever
+ * animation is playing through it, intact underneath.
+ *
+ * Every number below was measured against the rig rather than guessed: the
+ * dev fixture at /playtest.html reports each bone's world position, and these
+ * are the values that put the sliding knee and the crouching toes on the floor
+ * and keep the head inside the collision capsule.
+ */
+type BoneOffsets = ReadonlyArray<readonly [name: string, x: number, y: number, z: number]>;
+
+/**
+ * Seconds a climb pose is held after the simulation has finished with it.
+ *
+ * The solver's vault is one or two ticks -- it only has to move the feet over
+ * the obstacle -- so posing strictly on the flag showed the vault for 33 ms
+ * and the player saw their run cycle stutter. A vault is held longer than a
+ * mantle because it is the shorter event of the two; a mantle up a full wall
+ * already runs for a third of a second on its own.
+ */
+const VAULT_HOLD_S = 0.30;
+const MANTLE_HOLD_S = 0.14;
+
+/** How far the hip drops, in metres, at a full crouch and in a slide. Paired
+ *  with the poses: change one without the other and the feet leave the floor. */
+const CROUCH_DROP = -0.32;
+const SLIDE_DROP = -0.40;
+
+/** Knees bent, weight back, torso closed down over the weapon. Head lands at
+ *  about CROUCH_HEIGHT, so the silhouette matches the shrunken capsule. */
+const CROUCH_POSE: BoneOffsets = [
+  ["mixamorigLeftUpLeg", -0.85, 0, 0],
+  ["mixamorigLeftLeg", -1.10, 0, 0],
+  ["mixamorigLeftFoot", 0.75, 0, 0],
+  ["mixamorigRightUpLeg", -0.85, 0, 0],
+  ["mixamorigRightLeg", -1.10, 0, 0],
+  ["mixamorigRightFoot", 0.75, 0, 0],
+  ["mixamorigSpine1", 0.22, 0, 0],
+  ["mixamorigHead", -0.15, 0, 0],
+];
+
+/**
+ * A knee slide: trailing knee on the ground with the heel folded up behind it,
+ * leading leg stretched out in front with the foot planted, torso upright with
+ * only a slight lean back.
+ *
+ * The lean is deliberately small. The old pose put -0.45 into the hips AND
+ * -0.35 into the spine, both backwards, which is not a slide -- it is a spine
+ * bent the wrong way, and it read exactly like one.
+ */
+const SLIDE_POSE: BoneOffsets = [
+  ["mixamorigLeftUpLeg", -1.05, 0, 0],
+  ["mixamorigLeftLeg", -0.15, 0, 0],
+  ["mixamorigLeftFoot", -0.35, 0, 0],
+  ["mixamorigRightUpLeg", 0.45, 0, 0],
+  ["mixamorigRightLeg", -1.75, 0, 0],
+  ["mixamorigSpine1", -0.15, 0, 0],
+  ["mixamorigHead", 0.15, 0, 0],
+];
+
+/** Both arms overhead onto the lip, body hanging, knees drawn up. */
+const MANTLE_POSE: BoneOffsets = [
+  ["mixamorigLeftArm", -0.60, 0, 1.50],
+  ["mixamorigLeftForeArm", -0.50, 0, 0],
+  ["mixamorigRightArm", -0.60, 0, -1.50],
+  ["mixamorigRightForeArm", 0, 0.50, -0.30],
+  ["mixamorigSpine1", 0.30, 0, 0],
+  ["mixamorigHead", -0.30, 0, 0],
+  ["mixamorigLeftUpLeg", -0.70, 0, 0],
+  ["mixamorigLeftLeg", -1.00, 0, 0],
+  ["mixamorigRightUpLeg", -0.10, 0, 0],
+  ["mixamorigRightLeg", -0.45, 0, 0],
+];
+
+/** A hurdle: leading knee driven up and through, trailing leg tucked in
+ *  behind it, chest folded down over the obstacle, free hand pushed down to
+ *  where it would be planted on the top of it. */
+const VAULT_POSE: BoneOffsets = [
+  ["mixamorigSpine1", 0.55, 0, 0],
+  ["mixamorigHead", -0.35, 0, 0],
+  ["mixamorigLeftUpLeg", -1.25, 0, 0],
+  ["mixamorigLeftLeg", -0.60, 0, 0],
+  ["mixamorigRightUpLeg", 0.20, 0, 0],
+  ["mixamorigRightLeg", -1.60, 0, 0],
+  ["mixamorigLeftArm", 0.50, 0, -0.40],
+  ["mixamorigLeftForeArm", -0.30, 0, 0],
+  ["mixamorigRightArm", -0.30, 0, 0],
+];
+
+/**
  * One player's body. Built from boxes so there is no asset pipeline, no
  * loading, and no rig: the walk cycle is four rotations driven by speed.
  */
@@ -73,6 +171,16 @@ export class Character {
   private nameTexture: THREE.CanvasTexture;
 
   private phase = 0;
+  /** Blend weights for the three posed states, 0-1. */
+  private slideMix = 0;
+  private mantleMix = 0;
+  private vaultMix = 0;
+  /** Seconds left of the minimum hold on a climb pose. See VAULT_HOLD_S. */
+  private mantleHold = 0;
+  private vaultHold = 0;
+  /** getObjectByName walks the whole hierarchy; the rig has 67 bones and the
+   *  poses below ask for a dozen of them every frame, per character. */
+  private boneCache = new Map<string, THREE.Object3D | null>();
   /** Smoothed crouch, 0-1. Smoothed here rather than by the caller because
    *  remote players only send a crouch BIT, and a bit applied straight to the
    *  pose snaps. */
@@ -206,8 +314,9 @@ export class Character {
         if (rightHand) {
           this.root.remove(this.gun);
           this.root.remove(this.pickaxe);
-          rightHand.add(this.gun);
-          rightHand.add(this.pickaxe);
+          const hand = handSocket(art, rightHand);
+          hand.add(this.gun);
+          hand.add(this.pickaxe);
           this.gun.position.set(0.02, 0.08, 0.0);
           this.gun.rotation.set(-1.626, -0.027, -1.690);
           this.pickaxe.position.set(0.02, 0.08, 0.0);
@@ -218,7 +327,7 @@ export class Character {
         this.blueprint = createBlueprintModel();
         this.blueprint.visible = false;
         if (leftHand) {
-          leftHand.add(this.blueprint);
+          handSocket(art, leftHand).add(this.blueprint);
           this.blueprint.position.set(-0.04, 0.12, 0.05);
           this.blueprint.rotation.set(1.4, 0.2, -1.2);
         } else {
@@ -356,80 +465,78 @@ export class Character {
     mantling = false,
     vaulting = false,
   ): void {
+    // The three posed states are built by ADDING offsets to a clip, so the
+    // clip underneath has to be a still one or the legs keep running inside
+    // the pose. Idle is that clip for all three -- they were authored against
+    // it -- and the existing crossfade carries the transition.
+    //
+    // A vault is a tick or two of simulation: long enough to put the player on
+    // the other side of a crate, far too short to see at any frame rate. Both
+    // climbs are latched for a moment so the move reads as a move rather than
+    // as a flicker of the run cycle.
+    this.vaultHold = vaulting ? VAULT_HOLD_S : Math.max(0, this.vaultHold - dt);
+    this.mantleHold = mantling ? MANTLE_HOLD_S : Math.max(0, this.mantleHold - dt);
+    const showVault = vaulting || this.vaultHold > 0;
+    const showMantle = (mantling || this.mantleHold > 0) && !showVault;
+    const posed = sliding || showMantle || showVault;
     const moveClip = speed > 4.5 ? "run" : speed > 0.4 ? (this.actions.has("walk") ? "walk" : "run") : "idle";
-    const next = this.actions.get(!grounded ? "jump" : moveClip);
+    const next = this.actions.get(posed ? "idle" : !grounded ? "jump" : moveClip);
     if (next && next !== this.currentAction) {
       next.reset().fadeIn(.18).play();
       this.currentAction?.fadeOut(.18);
       this.currentAction = next;
+    }
+    if (this.currentAction) {
+      // The run clip was authored at one pace. Sprinting is over 70% faster
+      // than walking now, so playing it at 1x makes a sprint read as a jog
+      // with the ground sliding underneath it.
+      this.currentAction.timeScale = next === this.actions.get("run") && !posed
+        ? Math.max(0.7, Math.min(1.9, speed / 7)) : 1;
     }
     this.mixer?.update(dt);
 
     if (this.mixer) {
       this.crouch += (crouchTarget - this.crouch) * (1 - Math.exp(-14 * dt));
       const crouch = this.crouch < 0.001 ? 0 : this.crouch;
-      const slideOffsetY = sliding ? -0.42 : (CROUCH_HIP_Y - LEG_H) * crouch;
-      this.root.position.set(x, y + slideOffsetY, z);
+      // Each posed state gets its own blend, so entering and leaving one is a
+      // quick ease rather than the snap an if/else gives you.
+      const mixStep = 1 - Math.exp(-16 * dt);
+      this.slideMix += ((sliding ? 1 : 0) - this.slideMix) * mixStep;
+      this.mantleMix += ((showMantle ? 1 : 0) - this.mantleMix) * mixStep;
+      this.vaultMix += ((showVault ? 1 : 0) - this.vaultMix) * mixStep;
+      const slide = this.slideMix < 0.001 ? 0 : this.slideMix;
+      const mantle = this.mantleMix < 0.001 ? 0 : this.mantleMix;
+      const vault = this.vaultMix < 0.001 ? 0 : this.vaultMix;
+
+      // Both stances fold the legs rather than shrinking them, so the hip has
+      // to come down by the amount the fold actually costs. Sliding wins over
+      // crouching because a slide IS the crouch, taken lower.
+      const drop = SLIDE_DROP * slide + CROUCH_DROP * crouch * (1 - slide);
+      this.root.position.set(x, y + drop, z);
       this.root.rotation.y = -yaw;
       this.kick = Math.max(0, this.kick - dt);
       this.muzzle.visible = this.weaponId !== W_PICKAXE && this.weaponId !== 255 && this.kick > 0.045;
 
-      const spine = this.root.getObjectByName("mixamorigSpine1") || this.root.getObjectByName("mixamorigSpine");
-      const head = this.root.getObjectByName("mixamorigHead");
-      const rightArm = this.root.getObjectByName("mixamorigRightArm");
-      const leftArm = this.root.getObjectByName("mixamorigLeftArm");
-      const rightForeArm = this.root.getObjectByName("mixamorigRightForeArm");
-      const leftForeArm = this.root.getObjectByName("mixamorigLeftForeArm");
-
-      // 1. Scoping vs Hipfire: lower arms to relaxed hip level when not scoping
+      // Weapon down at the hip unless actually aiming.
       if (!aiming && this.weaponId !== 255) {
-        if (rightArm) rightArm.rotation.x += 0.38;
-        if (leftArm) leftArm.rotation.x += 0.30;
+        this.bend("mixamorigRightArm", 0.38);
+        this.bend("mixamorigLeftArm", 0.30);
       }
 
-      // 2. Sliding: drop down onto knees and lean back
-      if (sliding) {
-        const hips = this.root.getObjectByName("mixamorigHips");
-        if (hips) hips.rotation.x = -0.45;
-        if (spine) spine.rotation.x = -0.35;
-        const leftUpLeg = this.root.getObjectByName("mixamorigLeftUpLeg");
-        const rightUpLeg = this.root.getObjectByName("mixamorigRightUpLeg");
-        const leftLeg = this.root.getObjectByName("mixamorigLeftLeg");
-        const rightLeg = this.root.getObjectByName("mixamorigRightLeg");
-        if (leftUpLeg) leftUpLeg.rotation.x = 0.75;
-        if (rightUpLeg) rightUpLeg.rotation.x = 0.75;
-        if (leftLeg) leftLeg.rotation.x = -1.35;
-        if (rightLeg) rightLeg.rotation.x = -1.35;
-      }
+      this.applyPose(CROUCH_POSE, crouch * (1 - slide) * (1 - mantle) * (1 - vault));
+      this.applyPose(SLIDE_POSE, slide);
+      this.applyPose(MANTLE_POSE, mantle);
+      this.applyPose(VAULT_POSE, vault);
 
-      // 3. Mantling: climbing push-up motion
-      if (mantling) {
-        if (rightArm) rightArm.rotation.x = -1.55;
-        if (leftArm) leftArm.rotation.x = -1.55;
-        if (rightForeArm) rightForeArm.rotation.x = -0.8;
-        if (leftForeArm) leftForeArm.rotation.x = -0.8;
-        if (spine) spine.rotation.x = 0.45;
+      // Spine and head follow the camera, but only as far as the pose leaves
+      // room for: a climb is already looking up at the ledge and a slide is
+      // already leaning back, and adding the view pitch on top of either is
+      // what used to bend the character double.
+      const look = (1 - slide) * (1 - mantle) * (1 - vault);
+      if (look > 0.001) {
+        this.bend("mixamorigSpine1", -pitch * 0.65 * look);
+        this.bend("mixamorigHead", -pitch * 0.35 * look);
       }
-
-      // 4. Vaulting: parkour hurdle over waist-high obstacles
-      if (vaulting) {
-        if (leftArm) leftArm.rotation.set(0.35, -0.2, -0.4);
-        if (leftForeArm) leftForeArm.rotation.set(-0.6, 0, 0);
-        if (rightArm) rightArm.rotation.set(-0.7, 0.3, 0.4);
-        if (spine) spine.rotation.set(0.35, 0, 0.25);
-        const leftUpLeg = this.root.getObjectByName("mixamorigLeftUpLeg");
-        const rightUpLeg = this.root.getObjectByName("mixamorigRightUpLeg");
-        const leftLeg = this.root.getObjectByName("mixamorigLeftLeg");
-        const rightLeg = this.root.getObjectByName("mixamorigRightLeg");
-        if (leftUpLeg) leftUpLeg.rotation.set(1.1, 0, -0.35);
-        if (rightUpLeg) rightUpLeg.rotation.set(0.85, 0, -0.35);
-        if (leftLeg) leftLeg.rotation.set(-1.25, 0, 0);
-        if (rightLeg) rightLeg.rotation.set(-0.95, 0, 0);
-      }
-
-      // 5. Spine & head pitch aiming with camera
-      if (spine && !sliding && !mantling && !vaulting) spine.rotation.x += -pitch * 0.65;
-      if (head && !sliding && !mantling && !vaulting) head.rotation.x += -pitch * 0.35;
 
       this.nameplate.position.y = PLAYER_HEIGHT + 0.42;
       return;
@@ -525,6 +632,30 @@ export class Character {
     this.nameplate.position.y = shoulderY + HEAD_H + 0.45;
   }
 
+  private bone(name: string): THREE.Object3D | null {
+    let found = this.boneCache.get(name);
+    if (found === undefined) {
+      found = this.root.getObjectByName(name) ?? null;
+      this.boneCache.set(name, found);
+    }
+    return found;
+  }
+
+  /** Add to a bone's rotation. Never assign: see BoneOffsets. */
+  private bend(name: string, x: number, y = 0, z = 0): void {
+    const bone = this.bone(name);
+    if (!bone) return;
+    bone.rotation.x += x;
+    bone.rotation.y += y;
+    bone.rotation.z += z;
+  }
+
+  /** Lay a pose over the playing clip at `mix` strength. */
+  private applyPose(pose: BoneOffsets, mix: number): void {
+    if (mix < 0.001) return;
+    for (const [name, x, y, z] of pose) this.bend(name, x * mix, y * mix, z * mix);
+  }
+
   /** Cancel the leg's accumulated pitch at the ankle, so the sole stays
    *  parallel to the ground however far the knee has folded. */
   private levelFeet(): void {
@@ -541,6 +672,28 @@ export class Character {
     for (const m of this.materials) m.dispose();
     this.nameTexture.dispose();
   }
+}
+
+/**
+ * A child of `bone` that props are parented to, in METRES.
+ *
+ * The Mixamo rig is authored in centimetres and carries a 0.01 scale on its
+ * root, so every bone inherits it. Parenting a weapon straight onto the hand
+ * bone therefore drew it at a hundredth of its size -- a 0.86 m rifle became
+ * 8.6 mm, which is why the guns "disappeared" the moment they were moved into
+ * the character's hand: they were in exactly the right place, and about as big
+ * as a grain of rice. This cancels the inherited scale, so everything hung off
+ * it can be positioned and sized in the same units as the rest of the game.
+ */
+function handSocket(art: THREE.Object3D, bone: THREE.Object3D): THREE.Object3D {
+  art.updateMatrixWorld(true);
+  const scale = bone.getWorldScale(new THREE.Vector3());
+  const socket = new THREE.Group();
+  socket.name = `${bone.name}_socket`;
+  // Uniform in practice; guard a zero so a malformed rig cannot produce NaN.
+  socket.scale.setScalar(1 / (Math.abs(scale.x) > 1e-9 ? scale.x : 1));
+  bone.add(socket);
+  return socket;
 }
 
 /**
