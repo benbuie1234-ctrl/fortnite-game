@@ -86,7 +86,7 @@ export const STRAFE_SPEED_MULT = 0.92;
  * than a sideways shuffle.
  */
 export const BACKPEDAL_AIR_SPEED_MULT = 1.26;
-export const SPRINT_SPEED_MULT = 1.28;
+export const SPRINT_SPEED_MULT = 1.60;
 
 // --- crouch and slide ------------------------------------------------------
 
@@ -103,12 +103,12 @@ export const SLIDE_MIN_SPEED = 3.2;
 export const SLIDE_BOOST_SPEED = 8.6;
 /** Speed a slide is kicked to when it comes out of a sprint. Sprinting into a
  *  slide is the version worth setting up, so it has to travel further. */
-export const SLIDE_SPRINT_BOOST_SPEED = 12.4;
+export const SLIDE_SPRINT_BOOST_SPEED = 14.0;
 /** Friction during a slide. Much lower than walking, which is the whole point.
  *  Low enough that a flat slide runs for well over a second: a slide you can
  *  see end before you have finished pressing the key is a stumble, not a
  *  movement option, and nobody routes around the map with it. */
-export const SLIDE_FRICTION = 0.95;
+export const SLIDE_FRICTION = 0.65;
 /** How fast a slide can be steered, in radians per second. Steering only
  *  redirects the momentum you already have; it cannot add any, or holding
  *  forward would balance the friction and the slide would never end. */
@@ -116,7 +116,7 @@ export const SLIDE_STEER_RATE = 2.2;
 /** A slide ends once it decays below this, or when crouch is released. */
 export const SLIDE_END_SPEED = 4.2;
 /** Hard cap so a slide down a ramp cannot accelerate forever. */
-export const SLIDE_MAX_SPEED = 15.0;
+export const SLIDE_MAX_SPEED = 18.0;
 /** Seconds before another slide can be started, so it is not a hop-slide loop. */
 export const SLIDE_COOLDOWN = 0.75;
 

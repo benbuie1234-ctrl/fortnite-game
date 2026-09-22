@@ -33,6 +33,7 @@ export class ServerPlayer implements MovementState {
   lastFallHeight = 0;
   bloom = 0;
   mantling = false;
+  vaulting = false;
 
 
   /** Wins across rounds, for the leaderboard. Survives endRound, unlike kills. */

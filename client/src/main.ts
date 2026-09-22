@@ -666,17 +666,8 @@ function updateTreeCover(aiming: boolean, x: number, y: number, z: number): void
 // ---------------------------------------------------------------------------
 
 let cameraDistance=0;
-function updateCamera(aiming: boolean, dt: number): void {
+function updateCamera(aiming: boolean, dt: number, sprinting = false): void {
   const weapon=weaponById(ARENA_LOADOUT[controls.slot]??0);
-  // Always the smoothed position, never the raw authoritative one.
-  //
-  // Aiming used to switch the camera over to conn.self, which is snapped to
-  // the server every snapshot and then replayed: perfectly fine as simulation
-  // state, and visibly steppy as a camera anchor. So the moment you pressed
-  // aim the camera jumped from a smoothed anchor to a jittering one, and back
-  // again when you released -- that is the "ADS is glitchy with the character
-  // movement" bug. The boom easing below is now unconditional for the same
-  // reason: it used to be skipped while aiming, so every aim snapped.
   const pose = cameraPose(
     {...renderSelf, yaw:controls.yaw, pitch:controls.pitch, crouch:conn.self.crouch},
     aiming, conn.world, Date.now()/1000, weapon.id===W_SNIPER,
@@ -696,7 +687,8 @@ function updateCamera(aiming: boolean, dt: number): void {
     viewfx.rollOffset,
   );
   viewfx.applyShake(view.camera);
-  const fov=(aiming&&!controls.inBuildMode?78/weapon.adsZoom:78)+viewfx.fovOffset;
+  const sprintZoom = sprinting && !aiming ? 7 : 0;
+  const fov=(aiming&&!controls.inBuildMode?78/weapon.adsZoom:78)+sprintZoom+viewfx.fovOffset;
   view.setFov(view.camera.fov+(fov-view.camera.fov)*(1-Math.exp(-18*dt)));
 }
 
@@ -765,8 +757,16 @@ function frame(now: number): void {
   const distance=Math.hypot(self.x-renderSelf.x,self.y-renderSelf.y,self.z-renderSelf.z);
   const blend=1-Math.exp(-24*dt);
   if(!renderReady || distance>3) { Object.assign(renderSelf,{x:self.x,y:self.y,z:self.z});renderReady=true; }
-  else { renderSelf.x+=(self.x-renderSelf.x)*blend;renderSelf.y+=(self.y-renderSelf.y)*blend;renderSelf.z+=(self.z-renderSelf.z)*blend; }
-  updateCamera(aiming, dt);
+  else {
+    renderSelf.x+=(self.x-renderSelf.x)*blend;
+    renderSelf.z+=(self.z-renderSelf.z)*blend;
+    if (self.grounded) {
+      renderSelf.y = self.y;
+    } else {
+      renderSelf.y+=(self.y-renderSelf.y)*blend;
+    }
+  }
+  updateCamera(aiming, dt, self.sprinting);
   viewfx.update(dt);
   sound.setListener(self.x, self.y + eyeHeightFor(self.crouch), self.z, controls.yaw);
   pieces.sync(conn.world, nowSec);
@@ -836,6 +836,7 @@ function frame(now: number): void {
       self.sliding,
       aiming,
       self.mantling,
+      self.vaulting,
     );
     selfCharacter.aimAt(aimPoint);
     // No nameplate on your own body.

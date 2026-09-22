@@ -88,6 +88,7 @@ export interface MovementState {
    *  damage used to feel random. Height fallen has one meaning. */
   lastFallHeight: number;
   mantling: boolean;
+  vaulting: boolean;
 }
 
 /** Capsule height at the player's current stance. */
@@ -131,6 +132,7 @@ export function newMovementState(): MovementState {
     sprinting: false, stamina: SPRINT_STAMINA_MAX, staminaIdle: 0,
     fallPeakY: 0, lastFallHeight: 0, bloom: 0,
     mantling: false,
+    vaulting: false,
   };
 }
 
@@ -554,11 +556,27 @@ function moveAndCollide(
   if (reaching && input.moveZ > 0 && (input.buttons & BTN_JUMP) !== 0) {
     const ledge = findLedge(s, input);
     if (ledge !== null) {
-      s.mantling = true;
-      s.y = Math.min(ledge.top + 0.02, s.y + MANTLE_SPEED * dt);
+      const obstacleHeight = ledge.top - startY;
+      const isVault = obstacleHeight <= 1.45;
+      if (isVault) {
+        s.vaulting = true;
+        s.mantling = false;
+        // Vault quickly over waist-high obstacles with forward speed
+        s.y = Math.min(ledge.top + 0.02, s.y + MANTLE_SPEED * 1.4 * dt);
+        s.x += (ledge.x - s.x) * Math.min(1, 12 * dt);
+        s.z += (ledge.z - s.z) * Math.min(1, 12 * dt);
+      } else {
+        s.mantling = true;
+        s.vaulting = false;
+        s.y = Math.min(ledge.top + 0.02, s.y + MANTLE_SPEED * dt);
+      }
       s.vy = 0;
       s.grounded = false;
-      if (s.y >= ledge.top) { s.x = ledge.x; s.z = ledge.z; s.grounded = true; s.mantling = false; }
+      if (s.y >= ledge.top) {
+        s.x = ledge.x; s.z = ledge.z; s.grounded = true;
+        s.mantling = false;
+        s.vaulting = false;
+      }
       // Pulling yourself onto a ledge is not a fall. Re-base the peak so the
       // climb cannot be charged as one on the tick it completes.
       s.fallPeakY = s.y;
@@ -567,6 +585,7 @@ function moveAndCollide(
     }
   }
   s.mantling = false;
+  s.vaulting = false;
 
   // --- vertical ---
   const hitVertical = sweepAxis(s, 1, dy);
@@ -595,7 +614,7 @@ function moveAndCollide(
     if (surface > -Infinity && s.y <= surface + reach && Math.max(startY, s.y) >= surface - reach) {
       const wouldSink = s.y > surface + EPS && restingOnBox(s);
       if (s.vy <= 0.001 && !wouldSink) {
-        if (!s.grounded && s.vy < 0) s.lastLandingSpeed = Math.abs(s.vy);
+        if (!wasGrounded && s.vy < 0) s.lastLandingSpeed = Math.abs(s.vy);
         s.y = surface;
         s.vy = 0;
         s.grounded = true;
@@ -606,52 +625,42 @@ function moveAndCollide(
   // --- arena floor ---
   const ground = world.groundAt(s.x,s.z);
   if (s.y <= ground) {
-    if (!s.grounded && s.vy < 0) s.lastLandingSpeed = Math.abs(s.vy);
+    if (!wasGrounded && s.vy < 0) s.lastLandingSpeed = Math.abs(s.vy);
     s.y = ground;
     s.vy = 0;
     s.grounded = true;
   }
 
-  // A slide follows the ground.
-  //
-  // Terrain descends much faster than gravity can pull the feet after it, so a
-  // slide down a hillside was leaving the surface on its very first tick and
-  // arriving as a string of small landings -- each of which zeroed the
-  // downward speed the hill had just handed it. That is the whole reason a
-  // hill used to be worth nothing: applySlopeMomentum only pays out while the
-  // player is grounded at both ends of the tick, and on a real slope they
-  // never were. Reaching down to the surface keeps the slide on it.
-  //
-  // The reach is what separates a slope from a ledge: a drop further than this
-  // is not snapped to, so running off something is still a fall. The collision
-  // test stops the reach pulling anyone down through a floor piece they happen
-  // to be sliding across.
-  if (s.sliding && !s.grounded && wasGrounded && s.vy <= 0) {
-    const surface = world.groundAt(s.x, s.z);
-    const drop = s.y - surface;
+  // Grounded players stick to slopes (terrain and ramps) when moving downhill.
+  // Downhill slopes drop away faster than gravity pulls feet during horizontal movement,
+  // which previously caused stuttering micro-falls, false landing impacts, and camera jitter.
+  if (!s.grounded && wasGrounded && s.vy <= 0) {
+    const groundSurface = world.groundAt(s.x, s.z);
+    const rampReach = STEP_HEIGHT;
+    const rampSurface = scratchRamps.length > 0
+      ? world.rampSurfaceAt(scratchRamps, s.x, s.z, Math.max(startY, s.y) + rampReach)
+      : -Infinity;
+    const bestSlopeSurface = Math.max(groundSurface, rampSurface);
+    const drop = s.y - bestSlopeSurface;
     if (drop > 0 && drop <= SLIDE_GROUND_SNAP) {
       const probeY = s.y;
-      s.y = surface;
+      s.y = bestSlopeSurface;
       if (collidesAt(s)) {
         s.y = probeY;
       } else {
         s.vy = 0;
         s.grounded = true;
       }
-    }
-  }
-
-  // Grounded players get a small downward bias so they stick to slopes and
-  // do not bunny-hop off every seam.
-  if (!s.grounded && wasGrounded && s.vy <= 0) {
-    const probeY = s.y;
-    s.y -= STEP_HEIGHT * 0.5;
-    if (collidesAt(s)) {
-      s.y = probeY;
-      s.grounded = true;
-      s.vy = 0;
     } else {
-      s.y = probeY;
+      const probeY = s.y;
+      s.y -= STEP_HEIGHT * 0.5;
+      if (collidesAt(s)) {
+        s.y = probeY;
+        s.grounded = true;
+        s.vy = 0;
+      } else {
+        s.y = probeY;
+      }
     }
   }
 

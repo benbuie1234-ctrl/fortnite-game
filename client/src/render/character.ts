@@ -354,6 +354,7 @@ export class Character {
     sliding = false,
     aiming = false,
     mantling = false,
+    vaulting = false,
   ): void {
     const moveClip = speed > 4.5 ? "run" : speed > 0.4 ? (this.actions.has("walk") ? "walk" : "run") : "idle";
     const next = this.actions.get(!grounded ? "jump" : moveClip);
@@ -410,9 +411,25 @@ export class Character {
         if (spine) spine.rotation.x = 0.45;
       }
 
-      // 4. Spine & head pitch aiming with camera
-      if (spine && !sliding && !mantling) spine.rotation.x += -pitch * 0.65;
-      if (head && !sliding && !mantling) head.rotation.x += -pitch * 0.35;
+      // 4. Vaulting: parkour hurdle over waist-high obstacles
+      if (vaulting) {
+        if (leftArm) leftArm.rotation.set(0.35, -0.2, -0.4);
+        if (leftForeArm) leftForeArm.rotation.set(-0.6, 0, 0);
+        if (rightArm) rightArm.rotation.set(-0.7, 0.3, 0.4);
+        if (spine) spine.rotation.set(0.35, 0, 0.25);
+        const leftUpLeg = this.root.getObjectByName("mixamorigLeftUpLeg");
+        const rightUpLeg = this.root.getObjectByName("mixamorigRightUpLeg");
+        const leftLeg = this.root.getObjectByName("mixamorigLeftLeg");
+        const rightLeg = this.root.getObjectByName("mixamorigRightLeg");
+        if (leftUpLeg) leftUpLeg.rotation.set(1.1, 0, -0.35);
+        if (rightUpLeg) rightUpLeg.rotation.set(0.85, 0, -0.35);
+        if (leftLeg) leftLeg.rotation.set(-1.25, 0, 0);
+        if (rightLeg) rightLeg.rotation.set(-0.95, 0, 0);
+      }
+
+      // 5. Spine & head pitch aiming with camera
+      if (spine && !sliding && !mantling && !vaulting) spine.rotation.x += -pitch * 0.65;
+      if (head && !sliding && !mantling && !vaulting) head.rotation.x += -pitch * 0.35;
 
       this.nameplate.position.y = PLAYER_HEIGHT + 0.42;
       return;
