@@ -4,14 +4,22 @@
     {
       "name": "clutch",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["wrangler", "dev", "--port", "8787"],
+      "runtimeArgs": [
+        "wrangler",
+        "dev",
+        "--port",
+        "8787"
+      ],
       "port": 8787
     },
     {
       "name": "clutch-vite",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--port", "5173"],
-      "port": 5173
+      "runtimeArgs": [
+        "vite"
+      ],
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }

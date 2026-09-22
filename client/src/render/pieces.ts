@@ -1,9 +1,8 @@
-import { buildingAt } from "@shared/map";
 import * as THREE from "three";
 import { TILE, PIECE_THICKNESS, MATERIALS } from "@shared/constants";
 import {
   SLOT_FLOOR, SLOT_RAMP, SLOT_WALL_X, SLOT_WALL_Z, SLOT_SHIELD,
-  Slot, Facing, currentHp, type Piece,
+  Slot, Facing, currentHp,
 } from "@shared/build";
 import type { World } from "@shared/world";
 import { ARENA_OWNER } from "@shared/arena";
@@ -344,41 +343,20 @@ export class PieceRenderer {
     scene.add(this.group);
   }
 
-  private buildStatic(world:World):void {
-    const batches=new Map<string,Piece[]>();
-    for(const p of world.pieces.values()) {
-      if(p.ownerId!==ARENA_OWNER)continue;
-      const key=`${Math.floor(p.gx/16)},${Math.floor(p.gz/16)},${p.slot}`;
-      const list=batches.get(key)??[];list.push(p);batches.set(key,list);
-    }
-    const transform=new THREE.Object3D();
-    // Physical, not Lambert. Lambert takes no light from the environment map,
-    // so every map building was lit by the hemisphere term alone and any face
-    // turned away from the sun crushed to black.
-    // Neutral grain over the per-instance colour. The map buildings were flat
-    // untextured boxes, which no amount of lighting can rescue; this gives
-    // every surface something for the light to grab without touching the
-    // colours the map data defines.
-    const material=new THREE.MeshStandardMaterial({
-      color:0xffffff, roughness:0.9, metalness:0, envMapIntensity:0.95,
-      map:this.pool.detail,
-    });
-    for(const list of batches.values()) {
-      const batch=new THREE.InstancedMesh(geometryFor(list[0].slot),material,list.length);
-      list.forEach((p,i)=>{
-        transform.rotation.set(0,0,0);placeMesh(transform,p);transform.updateMatrix();batch.setMatrixAt(i,transform.matrix);
-        const building=buildingAt(p.gx,p.gz);
-        let color=building?.color??0x648e91;
-        if(p.slot===SLOT_FLOOR)color=0xd5cfb8;
-        if(p.slot===SLOT_RAMP)color=building&&(building.style==='house'||building.style==='cabin')&&p.gy>=building.base+building.floors?0x985943:0x9a9d98;
-        batch.setColorAt(i,new THREE.Color(color));
-      });
-      batch.instanceMatrix.needsUpdate=true;
-      batch.computeBoundingSphere();batch.receiveShadow=true;batch.castShadow=true;
-      const chunk=new THREE.Group();chunk.add(batch);this.staticChunks.push(chunk);this.group.add(chunk);
-    }
-    this.staticReady=true;
+  /**
+   * The map's own structure is not drawn here any more.
+   *
+   * It used to be: every arena floor, wall and ramp came out of this renderer
+   * as an untextured box tinted by building. The environment builder now draws
+   * all of it from the same blueprints the colliders are generated from --
+   * clapboard, window frames, sills, shingles, stair treads and all -- and two
+   * systems drawing the same wall is one wall too many. This renderer is for
+   * what PLAYERS build, which is the thing it was always actually good at.
+   */
+  private buildStatic(_world: World): void {
+    this.staticReady = true;
   }
+
   updateVisibility(x:number,z:number):void {
     for(const chunk of this.staticChunks) {
       const mesh=chunk.children[0] as THREE.InstancedMesh;

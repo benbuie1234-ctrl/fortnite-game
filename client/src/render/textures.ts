@@ -489,6 +489,309 @@ function waterNormalCanvas(): HTMLCanvasElement {
   return cv;
 }
 
+
+// ---------------------------------------------------------------------------
+// Architectural materials
+//
+// Every one of these is authored close to neutral grey, because the map data
+// supplies the colour: a building's paint is a per-instance tint multiplied
+// over the texture. That is what lets one clapboard texture serve a white
+// farmhouse, a red barn and a teal cannery without three copies of it.
+//
+// They all tile seamlessly, and all of them carry a little grain so that a
+// large flat wall has something for the light to catch instead of reading as
+// a single painted polygon.
+// ---------------------------------------------------------------------------
+
+/** Fine-grained speckle, drawn wrapped so the seam never shows. */
+function grain(ctx: CanvasRenderingContext2D, rand: () => number, count: number, alpha: number, size = 2): void {
+  for (let i = 0; i < count; i++) {
+    const shade = rand() < 0.5 ? 0 : 255;
+    ctx.fillStyle = `rgba(${shade},${shade},${shade},${alpha * (0.4 + rand() * 0.6)})`;
+    wrapDot(ctx, rand() * SIZE, rand() * SIZE, size * (0.4 + rand()));
+  }
+}
+
+/** Rendered stucco: the plainest wall on the island, so it lives on grain. */
+function plasterCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x91a57e);
+  ctx.fillStyle = "#e6e2da";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  grain(ctx, rand, 2600, 0.10, 2.4);
+  // Trowel sweeps, so the surface has a direction to it.
+  for (let i = 0; i < 90; i++) {
+    ctx.strokeStyle = `rgba(255,255,255,${0.05 + rand() * 0.07})`;
+    ctx.lineWidth = 3 + rand() * 7;
+    const y = rand() * SIZE, len = 40 + rand() * 90, x = rand() * SIZE;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + len, y + (rand() - 0.5) * 14);
+    ctx.stroke();
+  }
+  return cv;
+}
+
+/** Painted horizontal clapboard: houses, cabins, the barn, the cannery. */
+function sidingCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x5ad1c8);
+  ctx.fillStyle = "#e0dcd4";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  // Eight boards across the tile, each with its own shade so the wall is not
+  // one flat colour, and a shadow line under each lap.
+  const boards = 8, h = SIZE / boards;
+  for (let i = 0; i < boards; i++) {
+    const y = i * h;
+    ctx.fillStyle = tint(0xe0dcd4, 0.93 + rand() * 0.12);
+    ctx.fillRect(0, y, SIZE, h);
+    // The lap shadow, and the highlight just under it.
+    ctx.fillStyle = "rgba(40,34,28,.30)";
+    ctx.fillRect(0, y, SIZE, 2.5);
+    ctx.fillStyle = "rgba(255,255,255,.16)";
+    ctx.fillRect(0, y + 2.5, SIZE, 1.5);
+    // Grain along the board.
+    for (let g = 0; g < 10; g++) {
+      ctx.strokeStyle = `rgba(90,78,64,${0.05 + rand() * 0.06})`;
+      ctx.lineWidth = 0.8;
+      const gy = y + 3 + rand() * (h - 5);
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      for (let x = 0; x <= SIZE; x += 16) ctx.lineTo(x, gy + Math.sin(x / SIZE * Math.PI * 2) * 0.8);
+      ctx.stroke();
+    }
+  }
+  grain(ctx, rand, 700, 0.06, 1.6);
+  return cv;
+}
+
+/** Stacked log courses, for the cabins. */
+function logCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x10c5b2);
+  ctx.fillStyle = "#c9b295";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  const logs = 5, h = SIZE / logs;
+  for (let i = 0; i < logs; i++) {
+    const y = i * h;
+    // Round the log with a vertical gradient: dark at the chink, bright at the
+    // belly. That single gradient is what makes a flat wall read as timber.
+    const g = ctx.createLinearGradient(0, y, 0, y + h);
+    g.addColorStop(0, tint(0xc9b295, 0.55));
+    g.addColorStop(0.32, tint(0xc9b295, 1.06));
+    g.addColorStop(0.7, tint(0xc9b295, 0.92));
+    g.addColorStop(1, tint(0xc9b295, 0.5));
+    ctx.fillStyle = g;
+    ctx.fillRect(0, y, SIZE, h);
+    for (let k = 0; k < 14; k++) {
+      ctx.strokeStyle = `rgba(96,72,48,${0.06 + rand() * 0.08})`;
+      ctx.lineWidth = 0.9 + rand();
+      const gy = y + 4 + rand() * (h - 8);
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      for (let x = 0; x <= SIZE; x += 20) ctx.lineTo(x, gy + Math.sin(x / SIZE * Math.PI * 2 + k) * 1.6);
+      ctx.stroke();
+    }
+  }
+  return cv;
+}
+
+/** Rubble stone, for the chapel, the mill and the ruins. */
+function rubbleCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x57012a);
+  ctx.fillStyle = "#8d8880";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  // Courses of irregular blocks, offset row to row.
+  const rows = 7, h = SIZE / rows;
+  for (let r = 0; r < rows; r++) {
+    let x = -rand() * 30;
+    while (x < SIZE) {
+      const w = 22 + rand() * 40;
+      ctx.fillStyle = tint(0xa9a49a, 0.78 + rand() * 0.38);
+      ctx.fillRect(x + 1.5, r * h + 1.5, w - 3, h - 3);
+      // A lit top edge and a shaded bottom, so each block has relief.
+      ctx.fillStyle = "rgba(255,255,255,.14)";
+      ctx.fillRect(x + 1.5, r * h + 1.5, w - 3, 1.6);
+      ctx.fillStyle = "rgba(30,26,22,.22)";
+      ctx.fillRect(x + 1.5, r * h + h - 3, w - 3, 1.6);
+      x += w;
+    }
+  }
+  grain(ctx, rand, 1800, 0.11, 2.2);
+  return cv;
+}
+
+/** Corrugated sheeting, for the sheds and the industrial district. */
+function corrugatedCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0xc0e4ed);
+  ctx.fillStyle = "#c8ccce";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  const ribs = 16, w = SIZE / ribs;
+  for (let i = 0; i < ribs; i++) {
+    const g = ctx.createLinearGradient(i * w, 0, (i + 1) * w, 0);
+    g.addColorStop(0, tint(0xc8ccce, 0.62));
+    g.addColorStop(0.45, tint(0xc8ccce, 1.14));
+    g.addColorStop(1, tint(0xc8ccce, 0.62));
+    ctx.fillStyle = g;
+    ctx.fillRect(i * w, 0, w, SIZE);
+  }
+  // Rust blooms and fixings, so the sheets read as used.
+  for (let i = 0; i < 70; i++) {
+    ctx.fillStyle = `rgba(148,86,44,${0.05 + rand() * 0.16})`;
+    wrapDot(ctx, rand() * SIZE, rand() * SIZE, 2 + rand() * 9);
+  }
+  for (let i = 0; i < ribs; i++) {
+    for (let y = 8; y < SIZE; y += 64) {
+      ctx.fillStyle = "rgba(60,60,64,.5)";
+      wrapDot(ctx, i * w + w / 2, y, 1.4);
+    }
+  }
+  return cv;
+}
+
+/** Asphalt shingles, for the pitched roofs. */
+function shingleCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x5417a0);
+  ctx.fillStyle = "#b9b4ac";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  const rows = 8, h = SIZE / rows;
+  for (let r = 0; r < rows; r++) {
+    const y = r * h;
+    const offset = (r % 2) * (SIZE / 12);
+    for (let i = 0; i < 6; i++) {
+      const x = offset + i * (SIZE / 6);
+      ctx.fillStyle = tint(0xb9b4ac, 0.8 + rand() * 0.34);
+      ctx.fillRect(x + 1, y + 1, SIZE / 6 - 2, h - 1);
+    }
+    // The shadow under the course above: shingles are all about that line.
+    ctx.fillStyle = "rgba(24,20,18,.34)";
+    ctx.fillRect(0, y, SIZE, 2.6);
+  }
+  grain(ctx, rand, 2200, 0.13, 1.8);
+  return cv;
+}
+
+/** Ribbed tin roofing, for the barn, the sheds and the lookout. */
+function tinCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x71bb31);
+  ctx.fillStyle = "#c2c6c8";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  for (let i = 0; i < 10; i++) {
+    const x = i * (SIZE / 10);
+    ctx.fillStyle = tint(0xc2c6c8, 0.7);
+    ctx.fillRect(x, 0, 3, SIZE);
+    ctx.fillStyle = tint(0xc2c6c8, 1.12);
+    ctx.fillRect(x + 3, 0, 3, SIZE);
+  }
+  for (let i = 0; i < 120; i++) {
+    ctx.fillStyle = `rgba(150,92,50,${0.05 + rand() * 0.2})`;
+    wrapDot(ctx, rand() * SIZE, rand() * SIZE, 1.5 + rand() * 7);
+  }
+  // Seam lines across the sheets.
+  for (let y = 0; y < SIZE; y += SIZE / 4) {
+    ctx.fillStyle = "rgba(50,52,54,.3)";
+    ctx.fillRect(0, y, SIZE, 1.6);
+  }
+  return cv;
+}
+
+/** Clay pantiles, for the town roofs. */
+function pantileCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x9d3311);
+  ctx.fillStyle = "#c0a294";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  const cols = 8, w = SIZE / cols;
+  for (let c = 0; c < cols; c++) {
+    const g = ctx.createLinearGradient(c * w, 0, (c + 1) * w, 0);
+    g.addColorStop(0, tint(0xc0a294, 0.6));
+    g.addColorStop(0.5, tint(0xc0a294, 1.16));
+    g.addColorStop(1, tint(0xc0a294, 0.6));
+    ctx.fillStyle = g;
+    ctx.fillRect(c * w, 0, w, SIZE);
+  }
+  for (let y = 0; y < SIZE; y += SIZE / 5) {
+    ctx.fillStyle = "rgba(60,32,22,.32)";
+    ctx.fillRect(0, y, SIZE, 3);
+    ctx.fillStyle = "rgba(255,240,230,.10)";
+    ctx.fillRect(0, y + 3, SIZE, 1.5);
+  }
+  grain(ctx, rand, 1400, 0.09, 2);
+  return cv;
+}
+
+/** Floorboards, for interiors. */
+function floorboardCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0xf100a5);
+  ctx.fillStyle = "#d3c3ab";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  const boards = 6, h = SIZE / boards;
+  for (let i = 0; i < boards; i++) {
+    const y = i * h;
+    ctx.fillStyle = tint(0xd3c3ab, 0.86 + rand() * 0.26);
+    ctx.fillRect(0, y, SIZE, h - 1);
+    ctx.fillStyle = "rgba(60,44,28,.35)";
+    ctx.fillRect(0, y + h - 1.5, SIZE, 1.5);
+    // End joints, staggered, so the floor is boards and not stripes.
+    const joint = rand() * SIZE;
+    ctx.fillStyle = "rgba(60,44,28,.3)";
+    ctx.fillRect(joint, y, 1.5, h - 1);
+    for (let g = 0; g < 8; g++) {
+      ctx.strokeStyle = `rgba(90,64,38,${0.05 + rand() * 0.07})`;
+      ctx.lineWidth = 0.8;
+      const gy = y + 2 + rand() * (h - 5);
+      ctx.beginPath();
+      ctx.moveTo(0, gy);
+      for (let x = 0; x <= SIZE; x += 24) ctx.lineTo(x, gy + Math.sin(x / SIZE * Math.PI * 2 + g) * 1.2);
+      ctx.stroke();
+    }
+  }
+  return cv;
+}
+
+/** Square floor tiles with grout, for kitchens, bathrooms and shops. */
+function floorTileCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0x71135e);
+  ctx.fillStyle = "#b8b6b0";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  const n = 4, s = SIZE / n;
+  for (let x = 0; x < n; x++) {
+    for (let z = 0; z < n; z++) {
+      ctx.fillStyle = tint(0xe4e2dc, 0.9 + rand() * 0.18);
+      ctx.fillRect(x * s + 2, z * s + 2, s - 4, s - 4);
+      ctx.fillStyle = "rgba(255,255,255,.12)";
+      ctx.fillRect(x * s + 2, z * s + 2, s - 4, 2);
+    }
+  }
+  grain(ctx, rand, 900, 0.06, 1.6);
+  return cv;
+}
+
+/** Cut-pile carpet, for bedrooms and offices. */
+function carpetCanvas(): HTMLCanvasElement {
+  const { cv, ctx } = canvas();
+  const rand = rng(0xca8f00);
+  ctx.fillStyle = "#cfc7bb";
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  for (let i = 0; i < 9000; i++) {
+    const shade = rand() < 0.5 ? 0 : 255;
+    ctx.strokeStyle = `rgba(${shade},${shade},${shade},${0.03 + rand() * 0.07})`;
+    ctx.lineWidth = 1;
+    const x = rand() * SIZE, y = rand() * SIZE, a = rand() * Math.PI;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * 3, y + Math.sin(a) * 3);
+    ctx.stroke();
+  }
+  return cv;
+}
+
 export interface TextureSet {
   /** Indexed by material id: wood, brick, metal. */
   build: THREE.CanvasTexture[];
@@ -507,6 +810,23 @@ export interface TextureSet {
   roadNormal: THREE.CanvasTexture;
   roadRoughness: THREE.CanvasTexture;
   waterNormal: THREE.CanvasTexture;
+  /** Architectural materials. Authored neutral; the map supplies the colour. */
+  plaster: THREE.CanvasTexture;
+  siding: THREE.CanvasTexture;
+  log: THREE.CanvasTexture;
+  rubble: THREE.CanvasTexture;
+  corrugated: THREE.CanvasTexture;
+  shingle: THREE.CanvasTexture;
+  tin: THREE.CanvasTexture;
+  pantile: THREE.CanvasTexture;
+  floorboard: THREE.CanvasTexture;
+  floorTile: THREE.CanvasTexture;
+  carpet: THREE.CanvasTexture;
+  /** Normal maps for the surfaces whose relief actually reads. */
+  sidingNormal: THREE.CanvasTexture;
+  rubbleNormal: THREE.CanvasTexture;
+  corrugatedNormal: THREE.CanvasTexture;
+  shingleNormal: THREE.CanvasTexture;
 }
 
 let cached: TextureSet | null = null;
@@ -519,6 +839,11 @@ export function getTextures(anisotropy: number): TextureSet {
   const sandCv = sandCanvas();
   const roadCv = cobbleRoadCanvas();
   const detailCv = detailCanvas();
+  const plasterCv = plasterCanvas();
+  const sidingCv = sidingCanvas();
+  const rubbleCv = rubbleCanvas();
+  const corrugatedCv = corrugatedCanvas();
+  const shingleCv = shingleCanvas();
 
   cached = {
     build: [
@@ -539,6 +864,21 @@ export function getTextures(anisotropy: number): TextureSet {
     roadNormal: finish(heightToNormal(roadCv, 2.6), anisotropy),
     roadRoughness: finish(heightToRoughness(roadCv, 0.5, 0.88), anisotropy),
     waterNormal: finish(waterNormalCanvas(), anisotropy),
+    plaster: finish(plasterCv, anisotropy),
+    siding: finish(sidingCv, anisotropy),
+    log: finish(logCanvas(), anisotropy),
+    rubble: finish(rubbleCv, anisotropy),
+    corrugated: finish(corrugatedCv, anisotropy),
+    shingle: finish(shingleCv, anisotropy),
+    tin: finish(tinCanvas(), anisotropy),
+    pantile: finish(pantileCanvas(), anisotropy),
+    floorboard: finish(floorboardCanvas(), anisotropy),
+    floorTile: finish(floorTileCanvas(), anisotropy),
+    carpet: finish(carpetCanvas(), anisotropy),
+    sidingNormal: finish(heightToNormal(sidingCv, 1.8), anisotropy),
+    rubbleNormal: finish(heightToNormal(rubbleCv, 2.4), anisotropy),
+    corrugatedNormal: finish(heightToNormal(corrugatedCv, 2.6), anisotropy),
+    shingleNormal: finish(heightToNormal(shingleCv, 2.0), anisotropy),
   };
   return cached;
 }

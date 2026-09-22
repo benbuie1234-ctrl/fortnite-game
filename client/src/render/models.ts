@@ -168,7 +168,7 @@ export class ModelLibrary {
       // looking pasted on, so convert it.
       const mat = node.material as THREE.Material | THREE.Material[];
       node.material = Array.isArray(mat) ? mat.map(m => toPhysical(m.clone())) : toPhysical(mat.clone());
-      if (id === 'rock') for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
+      if (id === 'rock' || id.startsWith('rock_')) for (const material of Array.isArray(node.material) ? node.material : [node.material]) {
         const m=material as THREE.MeshStandardMaterial;
         m.color.setHex(/grass|moss/i.test(m.name)?0x7b9054:0x93968d);m.roughness=.95;
       }

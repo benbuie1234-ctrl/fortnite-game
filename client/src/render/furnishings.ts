@@ -1,7 +1,24 @@
 import * as THREE from 'three';
-import { BUILDINGS, ROADS, SCENERY, DOCK, LAKE_SHAPE, terrainHeight, buildingFootprint, onRoad } from '@shared/map';
+import {
+  BLUEPRINTS, BUILDINGS, DECKS, BRIDGES, LAKE, WATERFALL, SCENERY,
+  terrainHeight, onRoad, insideBuilding, blocksEntrance, riverDistance, riverWidth,
+  type Blueprint, type Room,
+} from '@shared/map';
 import { TILE } from '@shared/constants';
 import { InstancedModel, type ModelLibrary, type ModelId } from './models';
+
+/**
+ * Everything that makes the island look lived in.
+ *
+ * The interiors are driven by the blueprint's ROOMS. A kitchen knows it is a
+ * kitchen, knows which of its four walls have doorways in them and knows where
+ * the stairwell is, so the fridge goes against a blank wall and not across the
+ * door. That is the whole difference between a furnished building and a
+ * building with furniture pushed into its corners.
+ *
+ * Nothing here collides. It is all decoration, instanced by model, and the
+ * cover players actually take shelter behind lives in the map's PROPS instead.
+ */
 
 export interface Placement {
   id: ModelId;
@@ -12,1142 +29,624 @@ export interface Placement {
   scale?: number;
 }
 
-export function createFurnishings(scene: THREE.Scene, models: ModelLibrary): number {
-  const placements: Placement[] = [];
-  furnishKeyPoints(placements);
-  dressStreets(placements);
-  dressYards(placements);
-  dressSkylineCity(placements);
-  dressTidalWorksHarbor(placements);
-  dressPinewatchRidge(placements);
-  dressTheCitadel(placements);
-  dressIntermediateOutposts(placements);
-  buildCemetery(placements);
-  dressWildernessLandmarks(placements);
-  dressNaturalFoliage(placements);
-  dressExplorationSecrets(placements);
-  dressMountainTrails(placements);
-  dressLandmarkPoiInteriors(placements);
-  return instance(scene, models, placements);
+/** Deterministic, so every player's island is dressed identically. */
+function seeded(seed: number): () => number {
+  let s = (seed * 2246822519) >>> 0 || 7;
+  return () => {
+    s ^= s << 13; s >>>= 0;
+    s ^= s >> 17;
+    s ^= s << 5; s >>>= 0;
+    return s / 4294967296;
+  };
 }
 
-/** Check if a point falls within any building footprint with an optional padding. */
-function insideBuilding(x: number, z: number, pad = 0): boolean {
-  return BUILDINGS.some(b => {
-    const f = buildingFootprint(b, pad);
-    return x > f.x0 && x < f.x1 && z > f.z0 && z < f.z1;
-  });
-}
+// ---------------------------------------------------------------------------
+// Placing things in a room
+// ---------------------------------------------------------------------------
 
-/** Keep door approaches clear so navigation and player movement are never obstructed. */
-function nearDoorway(x: number, z: number, pad = 2.4): boolean {
-  return BUILDINGS.some(b => {
-    const doorX = (b.x + Math.floor(b.w / 2) + 0.5) * TILE;
-    const f = buildingFootprint(b);
-    return Math.abs(x - doorX) < pad && (Math.abs(z - f.z0) < pad || Math.abs(z - f.z1) < pad);
-  });
-}
-
-/** Check if a point is within the lake boundary. */
-function inLake(x: number, z: number, pad = 0): boolean {
-  const dx = (x - LAKE_SHAPE.x) / (LAKE_SHAPE.rx + pad);
-  const dz = (z - LAKE_SHAPE.z) / (LAKE_SHAPE.rz + pad);
-  return dx * dx + dz * dz < 1;
-}
+/** 0 = -Z wall, 1 = +Z, 2 = -X, 3 = +X. */
+type Side = 0 | 1 | 2 | 3;
 
 /**
- * Detailed, lived-in indoor furnishings and rooftops.
- * Items are placed strictly against interior walls and in corners, keeping
- * the central doorway corridors and stairwells completely open for fluid combat.
+ * A room, and what is still free in it.
+ *
+ * Each wall is a line of free spans. Placing something against a wall consumes
+ * a span, so a kitchen run comes out as a run rather than as six things in the
+ * same corner. Doorways, windows at floor level and the stairwell are taken out
+ * of the spans before anything is placed.
  */
-function furnishKeyPoints(out: Placement[]): void {
-  BUILDINGS.forEach((b, bIdx) => {
-    const x0 = b.x * TILE, z0 = b.z * TILE;
-    const wM = b.w * TILE, dM = b.d * TILE;
-    const y0 = b.base * TILE;
+class RoomSpace {
+  /** Free stretches along each wall, in metres from the wall's low corner. */
+  private free: Array<Array<[number, number]>> = [[], [], [], []];
+  /** Rectangles in the middle of the floor that are already taken. */
+  private taken: Array<[number, number, number, number]> = [];
 
-    if (b.style === 'house') {
-      // --- Ground Floor: Living Room & Kitchen ---
-      // Living room zone in the far corner (+X, +Z)
-      out.push({ id: bIdx % 2 === 0 ? 'sofa_long' : 'sofa', x: x0 + wM - 1.4, y: y0, z: z0 + dM - 1.2, yaw: Math.PI });
-      out.push({ id: bIdx % 2 === 0 ? 'coffee_table_glass' : 'coffee_table', x: x0 + wM - 1.4, y: y0, z: z0 + dM - 2.5, yaw: Math.PI });
-      out.push({ id: 'rug', x: x0 + wM - 1.4, y: y0 + 0.01, z: z0 + dM - 2.5, yaw: 0 });
-      out.push({ id: 'tv_cabinet', x: x0 + wM - 0.6, y: y0, z: z0 + dM - 2.5, yaw: -Math.PI / 2 });
-      out.push({ id: bIdx % 2 === 0 ? 'tv' : 'tv_vintage', x: x0 + wM - 0.6, y: y0 + 0.62, z: z0 + dM - 2.5, yaw: -Math.PI / 2 });
-      out.push({ id: 'floor_lamp', x: x0 + wM - 0.6, y: y0, z: z0 + dM - 0.8, yaw: 0 });
-      out.push({ id: 'bookcase', x: x0 + wM - 0.6, y: y0, z: z0 + 1.6, yaw: -Math.PI / 2 });
-      out.push({ id: 'books', x: x0 + wM - 0.6, y: y0 + 0.88, z: z0 + 1.6, yaw: -Math.PI / 2 });
-      out.push({ id: bIdx % 2 === 0 ? 'speaker' : 'radio', x: x0 + wM - 0.6, y: y0, z: z0 + dM - 3.8, yaw: -Math.PI / 2 });
+  constructor(
+    readonly room: Room,
+    readonly bp: Blueprint,
+    private rand: () => number,
+  ) {
+    const { x0, z0, x1, z1 } = room;
+    this.free[0] = [[x0, x1]];
+    this.free[1] = [[x0, x1]];
+    this.free[2] = [[z0, z1]];
+    this.free[3] = [[z0, z1]];
 
-      // Kitchen zone near side (-X, +Z)
-      out.push({ id: 'fridge_large', x: x0 + 1.2, y: y0, z: z0 + dM - 1.0, yaw: 0 });
-      out.push({ id: 'kitchen_sink', x: x0 + 2.4, y: y0, z: z0 + dM - 0.8, yaw: 0 });
-      out.push({ id: 'stove', x: x0 + 3.6, y: y0, z: z0 + dM - 0.8, yaw: 0 });
-      out.push({ id: 'coffee_machine', x: x0 + 2.4, y: y0 + 0.98, z: z0 + dM - 0.8, yaw: 0 });
-      out.push({ id: 'cabinet_upper', x: x0 + 3.6, y: y0 + 2.0, z: z0 + dM - 0.4, yaw: 0 });
-
-      // --- Second Floor (Bedrooms & Bathrooms) ---
-      if (b.floors > 1) {
-        const y1 = (b.base + 1) * TILE;
-        // Master Bedroom
-        out.push({ id: 'bed_double', x: x0 + 1.8, y: y1, z: z0 + dM - 1.6, yaw: 0 });
-        out.push({ id: 'nightstand', x: x0 + 0.6, y: y1, z: z0 + dM - 1.6, yaw: Math.PI / 2 });
-        out.push({ id: 'table_lamp', x: x0 + 0.6, y: y1 + 0.77, z: z0 + dM - 1.6, yaw: 0 });
-        out.push({ id: 'rug_round', x: x0 + 1.8, y: y1 + 0.01, z: z0 + dM - 3.2, yaw: 0 });
-        out.push({ id: 'coat_rack', x: x0 + 0.6, y: y1, z: z0 + dM - 3.2, yaw: 0 });
-
-        // Kids / Guest Room or Study
-        out.push({ id: 'desk', x: x0 + wM - 1.4, y: y1, z: z0 + 1.6, yaw: 0 });
-        out.push({ id: 'desk_chair', x: x0 + wM - 1.4, y: y1, z: z0 + 2.4, yaw: Math.PI });
-        out.push({ id: 'laptop', x: x0 + wM - 1.4, y: y1 + 0.77, z: z0 + 1.6, yaw: 0 });
-        out.push({ id: 'chest', x: x0 + wM - 1.2, y: y1, z: z0 + dM - 1.2, yaw: -Math.PI / 4 });
-
-        // Bathroom fixtures
-        out.push({ id: 'bathtub', x: x0 + 1.4, y: y1, z: z0 + 2.0, yaw: Math.PI / 2 });
-        out.push({ id: 'toilet', x: x0 + 2.8, y: y1, z: z0 + 1.0, yaw: 0 });
-        out.push({ id: 'bath_sink', x: x0 + 4.0, y: y1, z: z0 + 1.0, yaw: 0 });
-        out.push({ id: 'washer', x: x0 + wM - 1.2, y: y1, z: z0 + dM - 3.0, yaw: -Math.PI / 2 });
-      }
-    } else if (b.style === 'city') {
-      // --- Skyline City High-Rise Interiors & Rooftops ---
-      // Ground Floor: Corporate reception & lobby
-      out.push({ id: 'desk', x: x0 + 1.6, y: y0, z: z0 + dM / 2, yaw: Math.PI / 2 });
-      out.push({ id: 'desk_chair', x: x0 + 0.9, y: y0, z: z0 + dM / 2, yaw: Math.PI / 2 });
-      out.push({ id: 'monitor', x: x0 + 1.6, y: y0 + 0.77, z: z0 + dM / 2, yaw: Math.PI / 2 });
-      out.push({ id: 'laptop', x: x0 + 1.6, y: y0 + 0.77, z: z0 + dM / 2 + 0.45, yaw: Math.PI / 2 });
-      out.push({ id: 'potted_plant', x: x0 + 0.8, y: y0, z: z0 + dM - 1.0, yaw: 0 });
-
-      // Waiting lounge in lobby
-      out.push({ id: 'sofa_corner', x: x0 + wM - 1.8, y: y0, z: z0 + dM - 1.8, yaw: Math.PI });
-      out.push({ id: 'coffee_table_glass', x: x0 + wM - 2.2, y: y0, z: z0 + dM - 2.8, yaw: Math.PI });
-      out.push({ id: 'bookcase_closed', x: x0 + wM - 0.7, y: y0, z: z0 + 1.8, yaw: -Math.PI / 2 });
-      out.push({ id: 'books', x: x0 + wM - 0.7, y: y0 + 0.9, z: z0 + 1.8, yaw: -Math.PI / 2 });
-      out.push({ id: 'trashcan', x: x0 + 0.6, y: y0, z: z0 + 1.2, yaw: 0 });
-
-      // Middle floors: Office work desks
-      for (let floor = 1; floor < b.floors; floor++) {
-        const yF = (b.base + floor) * TILE;
-        out.push({ id: 'desk', x: x0 + 1.6, y: yF, z: z0 + dM - 2.0, yaw: 0 });
-        out.push({ id: 'desk_chair', x: x0 + 1.6, y: yF, z: z0 + dM - 2.8, yaw: Math.PI });
-        out.push({ id: 'monitor', x: x0 + 1.6, y: yF + 0.77, z: z0 + dM - 2.0, yaw: 0 });
-        out.push({ id: 'cabinet_drawer', x: x0 + 0.6, y: yF, z: z0 + dM - 2.0, yaw: Math.PI / 2 });
-        out.push({ id: 'armchair', x: x0 + wM - 1.4, y: yF, z: z0 + dM - 1.4, yaw: Math.PI });
-        out.push({ id: 'coffee_machine', x: x0 + wM - 0.7, y: yF + 0.9, z: z0 + 2.0, yaw: -Math.PI / 2 });
-        out.push({ id: 'fridge', x: x0 + wM - 0.7, y: yF, z: z0 + 2.0, yaw: -Math.PI / 2 });
-        out.push({ id: 'chest', x: x0 + wM - 1.2, y: yF, z: z0 + 1.2, yaw: -Math.PI / 4 });
-      }
-
-      // --- High-Rise Rooftop Terraces (The Ultimate High-Ground Arena) ---
-      const roofY = (b.base + b.floors) * TILE;
-      // Rooftop Penthouse Chill Zone
-      out.push({ id: 'sofa_long', x: x0 + 2.2, y: roofY, z: z0 + dM - 2.0, yaw: Math.PI });
-      out.push({ id: 'coffee_table_glass', x: x0 + 2.2, y: roofY, z: z0 + dM - 3.2, yaw: Math.PI });
-      out.push({ id: 'parasol', x: x0 + 2.2, y: roofY, z: z0 + dM - 3.2, yaw: 0 });
-      out.push({ id: 'chair_cushion', x: x0 + 1.0, y: roofY, z: z0 + dM - 3.2, yaw: Math.PI / 2 });
-      out.push({ id: 'chair_cushion', x: x0 + 3.4, y: roofY, z: z0 + dM - 3.2, yaw: -Math.PI / 2 });
-      out.push({ id: 'potted_plant', x: x0 + 0.8, y: roofY, z: z0 + dM - 0.8, yaw: 0 });
-      out.push({ id: 'speaker', x: x0 + 3.8, y: roofY, z: z0 + dM - 0.8, yaw: 0 });
-
-      // Rooftop staging / sniper nest
-      out.push({ id: 'scaffold', x: x0 + wM - 2.2, y: roofY, z: z0 + 2.2, yaw: 0 });
-      out.push({ id: 'planks', x: x0 + wM - 3.8, y: roofY + 0.1, z: z0 + 2.0, yaw: 0.2 });
-      out.push({ id: 'pallet', x: x0 + wM - 3.8, y: roofY, z: z0 + 2.0, yaw: 0 });
-      out.push({ id: 'barrier', x: x0 + wM - 1.2, y: roofY, z: z0 + dM / 2, yaw: Math.PI / 2 });
-      out.push({ id: 'chest', x: x0 + wM - 1.4, y: roofY, z: z0 + 1.2, yaw: -Math.PI / 4 });
-      out.push({ id: 'radio', x: x0 + wM - 2.2, y: roofY + 2.0, z: z0 + 2.2, yaw: 0 });
-    } else if (b.style === 'warehouse') {
-      // --- Tidal Works Industrial Warehouses ---
-      out.push({ id: 'pallet', x: x0 + 1.6, y: y0, z: z0 + dM - 1.6, yaw: 0 });
-      out.push({ id: 'crate_large', x: x0 + 1.6, y: y0, z: z0 + dM - 1.6, yaw: 0 });
-      out.push({ id: 'crate_wood', x: x0 + 1.6, y: y0 + 1.0, z: z0 + dM - 1.6, yaw: 0.1 });
-      out.push({ id: 'pallet_small', x: x0 + 3.2, y: y0, z: z0 + dM - 1.6, yaw: 0.4 });
-      out.push({ id: 'planks', x: x0 + 3.2, y: y0 + 0.2, z: z0 + dM - 1.6, yaw: 0.4 });
-
-      // Heavy workshop bay
-      out.push({ id: 'workbench', x: x0 + wM - 1.8, y: y0, z: z0 + 1.8, yaw: -Math.PI / 2 });
-      out.push({ id: 'bucket', x: x0 + wM - 1.0, y: y0, z: z0 + 2.8, yaw: 0 });
-      out.push({ id: 'barrel_open', x: x0 + wM - 1.2, y: y0, z: z0 + dM - 1.2, yaw: 0 });
-      out.push({ id: 'barrel', x: x0 + wM - 2.0, y: y0, z: z0 + dM - 1.2, yaw: 0 });
-      out.push({ id: 'chest', x: x0 + wM - 1.2, y: y0, z: z0 + dM - 2.2, yaw: 0 });
-      out.push({ id: 'radio', x: x0 + wM - 1.8, y: y0 + 1.28, z: z0 + 1.8, yaw: -Math.PI / 2 });
-
-      // Warehouse break room corner
-      out.push({ id: 'desk', x: x0 + 1.6, y: y0, z: z0 + 1.6, yaw: 0 });
-      out.push({ id: 'desk_chair', x: x0 + 1.6, y: y0, z: z0 + 2.4, yaw: Math.PI });
-      out.push({ id: 'coffee_machine', x: x0 + 1.6, y: y0 + 0.77, z: z0 + 1.6, yaw: 0 });
-      out.push({ id: 'fridge', x: x0 + 0.7, y: y0, z: z0 + 3.2, yaw: Math.PI / 2 });
-      out.push({ id: 'trashcan', x: x0 + 2.8, y: y0, z: z0 + 1.2, yaw: 0 });
-    } else if (b.style === 'cabin') {
-      // --- Alpine & Intermediate Cabins ---
-      out.push({ id: 'bed_bunk', x: x0 + 1.4, y: y0, z: z0 + dM - 1.6, yaw: 0 });
-      out.push({ id: 'nightstand', x: x0 + 0.6, y: y0, z: z0 + dM - 1.6, yaw: Math.PI / 2 });
-      out.push({ id: 'table_lamp', x: x0 + 0.6, y: y0 + 0.77, z: z0 + dM - 1.6, yaw: 0 });
-
-      // Hearth / rustic study corner
-      out.push({ id: 'log', x: x0 + wM - 1.4, y: y0, z: z0 + dM - 1.6, yaw: Math.PI / 2 });
-      out.push({ id: 'stump', x: x0 + wM - 1.4, y: y0, z: z0 + dM - 2.8, yaw: 0 });
-      out.push({ id: 'chest', x: x0 + wM - 1.2, y: y0, z: z0 + 1.4, yaw: -Math.PI / 4 });
-      out.push({ id: 'workbench', x: x0 + 1.6, y: y0, z: z0 + 1.6, yaw: 0 });
-      out.push({ id: 'radio', x: x0 + 1.6, y: y0 + 1.28, z: z0 + 1.6, yaw: 0 });
-      out.push({ id: 'bucket', x: x0 + 0.6, y: y0, z: z0 + 2.8, yaw: 0 });
-    }
-  });
-}
-
-/**
- * Street furniture along every road, with boulevard lighting, traffic signals,
- * pedestrian benches, trash cans, and dumpster stations.
- */
-function dressStreets(out: Placement[]): void {
-  ROADS.forEach((road, index) => {
-    const dx = road.x2 - road.x1, dz = road.z2 - road.z1;
-    const length = Math.hypot(dx, dz);
-    if (length < 1) return;
-    const ux = dx / length, uz = dz / length;
-    const px = -uz, pz = ux;
-    const spacing = 18; // Denser and richer roadside streetscape
-
-    for (let t = spacing * 0.4; t < length - 6; t += spacing) {
-      for (const side of [-1, 1]) {
-        const kerb = road.width / 2 + 1.6;
-        const x = road.x1 + ux * t + px * kerb * side;
-        const z = road.z1 + uz * t + pz * kerb * side;
-        if (insideBuilding(x, z, 2.5) || nearDoorway(x, z, 3.0) || inLake(x, z, 1.0)) continue;
-        const y = terrainHeight(x, z);
-        if (y < 0.05) continue;
-
-        const across = Math.atan2(-px * side, -pz * side);
-        const alongYaw = Math.atan2(ux, uz);
-        const step = Math.floor(t / spacing);
-
-        if (step % 6 === 0) {
-          out.push({ id: index < 2 ? 'street_light_double' : 'street_light', x, y, z, yaw: across });
-        } else if (step % 6 === 1) {
-          out.push({ id: 'street_bench', x, y, z, yaw: across });
-        } else if (step % 6 === 2) {
-          out.push({ id: 'trashcan', x, y, z, yaw: across });
-          out.push({ id: 'plant_small', x: x + px * 0.8 * side, y, z: z + pz * 0.8 * side, yaw: 0 });
-        } else if (step % 6 === 3) {
-          out.push({ id: step % 2 === 0 ? 'dumpster' : 'dumpster_open', x, y, z, yaw: alongYaw });
-        } else if (step % 6 === 4) {
-          out.push({ id: 'signpost', x, y, z, yaw: across });
+    // Doorways: nothing goes in front of one, on either side of the wall.
+    for (const run of bp.walls) {
+      if (run.parapet) continue;
+      if (run.y !== room.y) continue;
+      for (const o of run.openings) {
+        if (o.kind !== 'door' && o.kind !== 'garage' && o.kind !== 'arch') continue;
+        const pad = o.w / 2 + 0.9;
+        if (run.axis === 'z') {
+          if (Math.abs(run.at - z0) < 0.6) this.block(0, o.u - pad, o.u + pad);
+          if (Math.abs(run.at - z1) < 0.6) this.block(1, o.u - pad, o.u + pad);
+          // A door in a wall that crosses this room blocks the floor too.
+          if (run.at > z0 + 0.6 && run.at < z1 - 0.6) this.reserve(o.u - pad, run.at - 1.4, o.u + pad, run.at + 1.4);
         } else {
-          // Roadside barrier / guard rail on steep or open segments
-          out.push({ id: 'barrier_strong', x, y, z, yaw: alongYaw });
+          if (Math.abs(run.at - x0) < 0.6) this.block(2, o.u - pad, o.u + pad);
+          if (Math.abs(run.at - x1) < 0.6) this.block(3, o.u - pad, o.u + pad);
+          if (run.at > x0 + 0.6 && run.at < x1 - 0.6) this.reserve(run.at - 1.4, o.u - pad, run.at + 1.4, o.u + pad);
         }
       }
     }
-  });
 
-  // Major road intersections get traffic lights
-  const intersections = [
-    { x: 0, z: 0 },
-    { x: -108, z: -108 },
-    { x: 108, z: -108 },
-    { x: -108, z: 108 },
-    { x: 108, z: 108 },
-    { x: 0, z: -108 },
-    { x: 0, z: 108 },
-    { x: -108, z: 0 },
-    { x: 108, z: 0 },
+    // The stairwell, and a step of landing round it.
+    if (bp.shaft) {
+      const s = bp.shaft;
+      this.reserve(s.x0 - 0.6, s.z0 - 0.6, s.x1 + 0.6, s.z1 + 0.6);
+      this.block(0, s.x0 - 0.6, s.x1 + 0.6);
+      this.block(1, s.x0 - 0.6, s.x1 + 0.6);
+      this.block(2, s.z0 - 0.6, s.z1 + 0.6);
+      this.block(3, s.z0 - 0.6, s.z1 + 0.6);
+    }
+  }
+
+  private block(side: Side, from: number, to: number): void {
+    const out: Array<[number, number]> = [];
+    for (const [a, b] of this.free[side]) {
+      if (to <= a || from >= b) { out.push([a, b]); continue; }
+      if (from > a) out.push([a, from]);
+      if (to < b) out.push([to, b]);
+    }
+    this.free[side] = out;
+  }
+
+  private reserve(x0: number, z0: number, x1: number, z1: number): void {
+    this.taken.push([x0, z0, x1, z1]);
+  }
+
+  private clear(x0: number, z0: number, x1: number, z1: number): boolean {
+    return !this.taken.some(t => x0 < t[2] && x1 > t[0] && z0 < t[3] && z1 > t[1]);
+  }
+
+  get width(): number { return this.room.x1 - this.room.x0; }
+  get depth(): number { return this.room.z1 - this.room.z0; }
+  get area(): number { return this.width * this.depth; }
+
+  /**
+   * Put something with its back to a wall.
+   *
+   * `w` is how much wall it takes up and `d` how far it sticks out. Returns
+   * the placement, or null when nothing will fit anywhere.
+   */
+  against(w: number, d: number, sides: Side[] = [0, 1, 2, 3], gap = 0.12): Placement | null {
+    const order = sides.slice().sort(() => this.rand() - 0.5);
+    for (const side of order) {
+      const spans = this.free[side].filter(([a, b]) => b - a >= w + 0.2);
+      if (!spans.length) continue;
+      const [a, b] = spans[Math.floor(this.rand() * spans.length * 0.999)];
+      // Nudge along the span rather than always hugging the corner.
+      const slack = (b - a) - w;
+      const at = a + Math.min(slack, slack * (0.15 + this.rand() * 0.7)) + w / 2;
+      const { x0, z0, x1, z1 } = this.room;
+      let x: number, z: number, yaw: number;
+      if (side === 0) { x = at; z = z0 + d / 2 + gap; yaw = 0; }
+      else if (side === 1) { x = at; z = z1 - d / 2 - gap; yaw = Math.PI; }
+      else if (side === 2) { x = x0 + d / 2 + gap; z = at; yaw = Math.PI / 2; }
+      else { x = x1 - d / 2 - gap; z = at; yaw = -Math.PI / 2; }
+      const half = [side < 2 ? w / 2 : d / 2, side < 2 ? d / 2 : w / 2];
+      if (!this.clear(x - half[0], z - half[1], x + half[0], z + half[1])) { this.block(side, at - w / 2, at + w / 2); continue; }
+      this.block(side, at - w / 2 - 0.15, at + w / 2 + 0.15);
+      this.reserve(x - half[0], z - half[1], x + half[0], z + half[1]);
+      return { id: 'crate', x, y: this.room.y, z, yaw };
+    }
+    return null;
+  }
+
+  /** Put something out in the middle of the floor. */
+  middle(w: number, d: number, yaw = 0): Placement | null {
+    const { x0, z0, x1, z1 } = this.room;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const x = x0 + 1.0 + w / 2 + this.rand() * Math.max(0, (x1 - x0) - w - 2.0);
+      const z = z0 + 1.0 + d / 2 + this.rand() * Math.max(0, (z1 - z0) - d - 2.0);
+      if (x + w / 2 > x1 - 0.4 || z + d / 2 > z1 - 0.4) continue;
+      if (!this.clear(x - w / 2, z - d / 2, x + w / 2, z + d / 2)) continue;
+      this.reserve(x - w / 2, z - d / 2, x + w / 2, z + d / 2);
+      return { id: 'crate', x, y: this.room.y, z, yaw };
+    }
+    return null;
+  }
+
+  /** The middle of the room, for a ceiling fitting. Always available. */
+  get centre(): [number, number] {
+    return [(this.room.x0 + this.room.x1) / 2, (this.room.z0 + this.room.z1) / 2];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Room recipes
+// ---------------------------------------------------------------------------
+
+/** Footprint of a model, from the measured sizes in the manifest. */
+function extentOf(models: ModelLibrary, id: ModelId): [number, number, number] {
+  return models.extent(id) ?? [0.8, 0.8, 0.8];
+}
+
+interface Ctx {
+  out: Placement[];
+  models: ModelLibrary;
+  rand: () => number;
+}
+
+/** Place one model against a wall, sized from its own measurements. */
+function wall(ctx: Ctx, space: RoomSpace, id: ModelId, sides?: Side[], lift = 0): Placement | null {
+  const [w, , d] = extentOf(ctx.models, id);
+  const p = space.against(w, d, sides);
+  if (!p) return null;
+  p.id = id;
+  p.y += lift;
+  ctx.out.push(p);
+  return p;
+}
+
+/** Place one model out on the floor. */
+function floor(ctx: Ctx, space: RoomSpace, id: ModelId, yaw = 0, lift = 0): Placement | null {
+  const [w, , d] = extentOf(ctx.models, id);
+  const p = space.middle(w, d, yaw);
+  if (!p) return null;
+  p.id = id;
+  p.y += lift;
+  ctx.out.push(p);
+  return p;
+}
+
+/** Put something on top of something else already placed. */
+function on(ctx: Ctx, base: Placement | null, id: ModelId, dx = 0, dz = 0): void {
+  if (!base) return;
+  const [, h] = extentOf(ctx.models, base.id);
+  ctx.out.push({ id, x: base.x + dx, y: base.y + h, z: base.z + dz, yaw: base.yaw });
+}
+
+function ceiling(ctx: Ctx, space: RoomSpace, id: ModelId): void {
+  const [x, z] = space.centre;
+  const drop = id === 'ceiling_fan' ? 0.45 : 0.6;
+  ctx.out.push({ id, x, y: space.room.y + TILE - drop, z, yaw: ctx.rand() * 6.28 });
+}
+
+function furnishRoom(ctx: Ctx, bp: Blueprint, room: Room): void {
+  const space = new RoomSpace(room, bp, ctx.rand);
+  const big = space.area > 46;
+  const r = ctx.rand;
+
+  switch (room.kind) {
+    case 'living': {
+      wall(ctx, space, big && r() < 0.6 ? 'sofa_long' : 'sofa');
+      const table = floor(ctx, space, r() < 0.5 ? 'coffee_table' : 'coffee_table_glass');
+      if (table) ctx.out.push({ id: r() < 0.5 ? 'rug' : 'rug_round', x: table.x, y: room.y + 0.01, z: table.z, yaw: r() * 6.28 });
+      const cab = wall(ctx, space, 'tv_cabinet');
+      on(ctx, cab, r() < 0.7 ? 'tv' : 'tv_vintage');
+      if (big) wall(ctx, space, 'armchair');
+      wall(ctx, space, 'bookcase');
+      wall(ctx, space, 'floor_lamp');
+      wall(ctx, space, r() < 0.5 ? 'speaker' : 'radio');
+      if (r() < 0.6) wall(ctx, space, 'potted_plant');
+      ceiling(ctx, space, r() < 0.4 ? 'ceiling_fan' : 'ceiling_lamp');
+      break;
+    }
+    case 'kitchen': {
+      // A worktop run along one wall, with the appliances in it.
+      const side: Side[] = [[0], [1], [2], [3]][Math.floor(r() * 4)] as Side[];
+      wall(ctx, space, r() < 0.5 ? 'fridge_large' : 'fridge', side);
+      const sink = wall(ctx, space, 'kitchen_sink', side);
+      wall(ctx, space, 'stove', side);
+      const cab = wall(ctx, space, r() < 0.5 ? 'cabinet' : 'cabinet_drawer', side);
+      on(ctx, cab, 'microwave');
+      on(ctx, sink, 'coffee_machine');
+      wall(ctx, space, 'cabinet_upper', side, 2.0);
+      if (big) {
+        const bar = floor(ctx, space, 'kitchen_bar', Math.PI / 2);
+        if (bar) for (const dz of [-0.7, 0.7]) ctx.out.push({ id: 'bar_stool', x: bar.x + 1.0, y: room.y, z: bar.z + dz, yaw: -Math.PI / 2 });
+      }
+      wall(ctx, space, 'trashcan');
+      ceiling(ctx, space, 'ceiling_lamp');
+      break;
+    }
+    case 'dining': {
+      const table = floor(ctx, space, r() < 0.5 ? 'dining_table' : 'round_table');
+      if (table) {
+        for (const [dx, dz, yaw] of [[-1.2, 0, Math.PI / 2], [1.2, 0, -Math.PI / 2], [0, -1.0, 0], [0, 1.0, Math.PI]] as const) {
+          ctx.out.push({ id: r() < 0.5 ? 'chair' : 'chair_cushion', x: table.x + dx, y: room.y, z: table.z + dz, yaw });
+        }
+      }
+      wall(ctx, space, 'bookcase_closed');
+      wall(ctx, space, 'potted_plant');
+      ceiling(ctx, space, 'ceiling_lamp');
+      break;
+    }
+    case 'bed': {
+      const bed = wall(ctx, space, big ? 'bed_double' : r() < 0.5 ? 'bed_single' : 'bed_double');
+      if (bed) {
+        const night = wall(ctx, space, 'nightstand');
+        on(ctx, night, 'table_lamp');
+        ctx.out.push({ id: 'rug_round', x: bed.x, y: room.y + 0.01, z: bed.z + Math.cos(bed.yaw) * -1.8, yaw: r() * 6.28 });
+      }
+      wall(ctx, space, 'coat_rack');
+      wall(ctx, space, 'chest');
+      if (big) { const d = wall(ctx, space, 'desk'); on(ctx, d, 'laptop'); }
+      wall(ctx, space, 'bookcase');
+      ceiling(ctx, space, 'ceiling_lamp');
+      break;
+    }
+    case 'bath': {
+      wall(ctx, space, 'bathtub');
+      wall(ctx, space, 'toilet');
+      wall(ctx, space, 'bath_sink');
+      if (big) wall(ctx, space, 'shower');
+      if (r() < 0.5) wall(ctx, space, 'washer');
+      if (r() < 0.4) wall(ctx, space, 'dryer');
+      ceiling(ctx, space, 'ceiling_lamp');
+      break;
+    }
+    case 'hall':
+    case 'lobby': {
+      wall(ctx, space, 'coat_rack');
+      wall(ctx, space, room.kind === 'lobby' ? 'sofa_corner' : 'bench_cushion');
+      if (room.kind === 'lobby') {
+        const desk = wall(ctx, space, 'desk');
+        on(ctx, desk, 'monitor');
+        if (desk) ctx.out.push({ id: 'desk_chair', x: desk.x - Math.sin(desk.yaw) * 0.9, y: room.y, z: desk.z - Math.cos(desk.yaw) * 0.9, yaw: desk.yaw + Math.PI });
+      }
+      wall(ctx, space, 'potted_plant');
+      ctx.out.push({ id: 'rug', x: space.centre[0], y: room.y + 0.01, z: space.centre[1], yaw: r() < 0.5 ? 0 : Math.PI / 2 });
+      ceiling(ctx, space, 'ceiling_lamp');
+      break;
+    }
+    case 'office': {
+      const desk = wall(ctx, space, 'desk');
+      on(ctx, desk, r() < 0.6 ? 'monitor' : 'laptop');
+      if (desk) ctx.out.push({ id: 'desk_chair', x: desk.x - Math.sin(desk.yaw) * 0.9, y: room.y, z: desk.z - Math.cos(desk.yaw) * 0.9, yaw: desk.yaw + Math.PI });
+      wall(ctx, space, 'bookcase_closed');
+      const shelf = wall(ctx, space, 'bookcase');
+      on(ctx, shelf, 'books');
+      wall(ctx, space, 'cabinet_drawer');
+      wall(ctx, space, 'trashcan');
+      if (r() < 0.5) wall(ctx, space, 'potted_plant');
+      ceiling(ctx, space, 'ceiling_lamp');
+      break;
+    }
+    case 'shop': {
+      // A counter facing the door, shelving down the walls, stock behind.
+      const counter = floor(ctx, space, 'kitchen_bar', r() < 0.5 ? 0 : Math.PI / 2);
+      on(ctx, counter, 'laptop');
+      wall(ctx, space, 'fridge_large');
+      for (let i = 0; i < 3; i++) wall(ctx, space, r() < 0.5 ? 'bookcase' : 'bookcase_closed');
+      wall(ctx, space, 'coffee_machine', undefined, 0.9);
+      floor(ctx, space, 'box_open', r() * 6.28);
+      floor(ctx, space, 'box_closed', r() * 6.28);
+      wall(ctx, space, 'trashcan');
+      ceiling(ctx, space, 'ceiling_lamp');
+      break;
+    }
+    case 'storage': {
+      for (let i = 0; i < (big ? 5 : 3); i++) {
+        const id: ModelId = ['crate_wood', 'crate_large', 'box_closed', 'box_open', 'barrel'][Math.floor(r() * 5)] as ModelId;
+        const p = wall(ctx, space, id);
+        // Stack a second one on the first, sometimes.
+        if (p && r() < 0.45) on(ctx, p, r() < 0.5 ? 'box_closed' : 'crate_wood');
+      }
+      const pallet = floor(ctx, space, 'pallet', r() * 6.28);
+      on(ctx, pallet, 'crate_wood');
+      wall(ctx, space, 'bookcase');
+      if (r() < 0.5) wall(ctx, space, 'chest');
+      break;
+    }
+    case 'workshop':
+    case 'garage': {
+      const bench = wall(ctx, space, 'workbench');
+      on(ctx, bench, 'radio');
+      wall(ctx, space, 'barrel');
+      wall(ctx, space, 'barrel_open');
+      wall(ctx, space, 'crate_large');
+      floor(ctx, space, 'pallet_small', r() * 6.28);
+      floor(ctx, space, 'planks', r() * 6.28);
+      wall(ctx, space, 'bucket');
+      if (r() < 0.5) wall(ctx, space, 'scaffold');
+      break;
+    }
+    case 'attic': {
+      // Somebody's forgotten things, which is what an attic is for.
+      for (let i = 0; i < 4; i++) {
+        const p = wall(ctx, space, ['box_closed', 'crate_wood', 'chest', 'box_open'][Math.floor(r() * 4)] as ModelId);
+        if (p && r() < 0.4) on(ctx, p, 'books');
+      }
+      if (r() < 0.6) wall(ctx, space, 'armchair');
+      wall(ctx, space, 'table_lamp');
+      floor(ctx, space, 'rug', r() * 6.28);
+      break;
+    }
+    case 'cellar':
+    case 'bunk': {
+      wall(ctx, space, 'bed_bunk');
+      if (big) wall(ctx, space, 'bed_single');
+      const night = wall(ctx, space, 'nightstand');
+      on(ctx, night, 'table_lamp');
+      wall(ctx, space, 'chest');
+      wall(ctx, space, 'coat_rack');
+      break;
+    }
+    case 'bar': {
+      const bar = floor(ctx, space, 'kitchen_bar', Math.PI / 2);
+      if (bar) for (const dz of [-1.2, 0, 1.2]) ctx.out.push({ id: 'bar_stool', x: bar.x + 1.1, y: room.y, z: bar.z + dz, yaw: -Math.PI / 2 });
+      wall(ctx, space, 'fridge');
+      floor(ctx, space, 'round_table');
+      ceiling(ctx, space, 'ceiling_lamp');
+      break;
+    }
+    case 'stall': {
+      // A barn stall: straw, a trough, tools.
+      for (let i = 0; i < 4; i++) floor(ctx, space, 'log', r() * 6.28);
+      wall(ctx, space, 'bucket');
+      wall(ctx, space, 'workbench');
+      wall(ctx, space, 'crate_wood');
+      break;
+    }
+    case 'nave': {
+      // Pews in rows down the nave.
+      const rows = Math.max(2, Math.floor(space.depth / 2.4));
+      for (let i = 0; i < rows; i++) {
+        const z = room.z0 + 1.6 + i * 2.2;
+        if (z > room.z1 - 1.2) break;
+        for (const dx of [-1.9, 1.9]) {
+          ctx.out.push({ id: 'bench_cushion', x: (room.x0 + room.x1) / 2 + dx, y: room.y, z, yaw: 0, scale: 1.6 });
+        }
+      }
+      break;
+    }
+    default: {
+      // Ruins and anything unclassified: a little rubble and nothing else.
+      if (r() < 0.6) floor(ctx, space, 'crate_wood', r() * 6.28);
+      if (r() < 0.4) floor(ctx, space, 'barrel', r() * 6.28);
+      break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Outside
+// ---------------------------------------------------------------------------
+
+/** Is this spot free of the things a player has to be able to walk through? */
+function open(x: number, z: number, pad = 1.2): boolean {
+  return !insideBuilding(x, z, pad) && !onRoad(x, z, pad) && !blocksEntrance(x, z, pad, pad);
+}
+
+function scatter(
+  ctx: Ctx, cx: number, cz: number, radius: number, count: number,
+  pick: (r: number) => ModelId, lift = 0,
+): void {
+  for (let i = 0; i < count; i++) {
+    const a = ctx.rand() * Math.PI * 2;
+    const d = Math.sqrt(ctx.rand()) * radius;
+    const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+    if (!open(x, z)) continue;
+    ctx.out.push({ id: pick(ctx.rand()), x, y: terrainHeight(x, z) + lift, z, yaw: ctx.rand() * 6.28 });
+  }
+}
+
+/** Yards, forecourts and the ground immediately round each building. */
+function dressYards(ctx: Ctx): void {
+  for (const bp of BLUEPRINTS) {
+    const b = bp.b;
+    const y = b.base * TILE;
+    const r = ctx.rand;
+    const corners: Array<[number, number]> = [
+      [bp.x0 - 2.2, bp.z0 - 2.2], [bp.x1 + 2.2, bp.z0 - 2.2],
+      [bp.x0 - 2.2, bp.z1 + 2.2], [bp.x1 + 2.2, bp.z1 + 2.2],
+    ];
+    for (const [x, z] of corners) {
+      if (!open(x, z, 0.8)) continue;
+      const roll = r();
+      const id: ModelId = b.style === 'house' ? (roll < 0.35 ? 'potted_plant' : roll < 0.6 ? 'plant_small' : roll < 0.8 ? 'trashcan' : 'bucket')
+        : b.style === 'warehouse' ? (roll < 0.4 ? 'barrel' : roll < 0.7 ? 'pallet' : 'crate_large')
+          : b.style === 'cabin' ? (roll < 0.5 ? 'log' : roll < 0.8 ? 'stump' : 'bucket')
+            : (roll < 0.4 ? 'trashcan' : roll < 0.7 ? 'dumpster' : 'crate_wood');
+      ctx.out.push({ id, x, y: Math.max(y, terrainHeight(x, z)), z, yaw: r() * 6.28 });
+    }
+    // Something beside the front door: a bench, a plant, a pile of firewood.
+    const s = bp.entrance.side;
+    const out: [number, number] = s === 0 ? [0, -1] : s === 1 ? [0, 1] : s === 2 ? [-1, 0] : [1, 0];
+    const along: [number, number] = [out[1], -out[0]];
+    for (const dir of [-1, 1]) {
+      const x = bp.entrance.x + out[0] * 1.6 + along[0] * dir * 2.6;
+      const z = bp.entrance.z + out[1] * 1.6 + along[1] * dir * 2.6;
+      if (!open(x, z, 0.6)) continue;
+      const roll = r();
+      const id: ModelId = b.style === 'house' ? (roll < 0.4 ? 'potted_plant' : roll < 0.7 ? 'bench_cushion' : 'plant_small')
+        : b.style === 'cabin' ? (roll < 0.5 ? 'log' : 'stump')
+          : (roll < 0.5 ? 'barrel' : 'crate_wood');
+      ctx.out.push({ id, x, y: Math.max(y, terrainHeight(x, z)), z, yaw: Math.atan2(-out[0], -out[1]) });
+    }
+  }
+}
+
+/** Street furniture through the towns, and along the roads between them. */
+function dressStreets(ctx: Ctx): void {
+  const towns: Array<[number, number, number]> = [
+    [96, -144, 40], [-4, -14, 34], [-134, -150, 30], [74, 124, 30], [-164, -50, 30],
   ];
-  for (const { x, z } of intersections) {
-    for (const [ox, oz, yaw] of [[-7, -7, 0.8], [7, -7, -0.8], [-7, 7, 2.4], [7, 7, -2.4]]) {
-      const ix = x + ox, iz = z + oz;
-      if (!insideBuilding(ix, iz, 2.5) && !nearDoorway(ix, iz, 3.0) && !inLake(ix, iz, 1.0)) {
-        const iy = terrainHeight(ix, iz);
-        if (iy > 0.05) out.push({ id: 'traffic_light', x: ix, y: iy, z: iz, yaw });
-      }
+  for (const [cx, cz, radius] of towns) {
+    for (let i = 0; i < 34; i++) {
+      const a = (i / 34) * Math.PI * 2 + ctx.rand();
+      const d = radius * (0.5 + ctx.rand() * 0.6);
+      const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+      // Street furniture belongs at the KERB: just off the road, not on it.
+      if (!onRoad(x, z, 5) || onRoad(x, z, 1.2)) continue;
+      if (insideBuilding(x, z, 2) || blocksEntrance(x, z, 1.5, 1.5)) continue;
+      const roll = ctx.rand();
+      const id: ModelId = roll < 0.3 ? 'street_light' : roll < 0.45 ? 'street_bench'
+        : roll < 0.6 ? 'trashcan' : roll < 0.7 ? 'signpost' : roll < 0.8 ? 'lamp_post'
+          : roll < 0.9 ? 'potted_plant' : 'barrier';
+      ctx.out.push({ id, x, y: terrainHeight(x, z), z, yaw: ctx.rand() * 6.28 });
     }
+  }
+  // A traffic light at the crossroads the two highways make.
+  for (const [x, z] of [[6, -6], [-10, -20], [6, -22], [-10, -6]] as const) {
+    ctx.out.push({ id: 'traffic_light', x, y: terrainHeight(x, z), z, yaw: Math.atan2(-x, -z) });
   }
 }
 
-/**
- * Sunny Meadows suburban yards, front porches, garden fences and back patios.
- */
-function dressYards(out: Placement[]): void {
-  BUILDINGS.filter(b => b.style === 'house').forEach((b, idx) => {
-    const f = buildingFootprint(b);
-    const y = b.base * TILE;
-    const doorX = (b.x + Math.floor(b.w / 2) + 0.5) * TILE;
-
-    // --- Front Porch & Entrance Garden ---
-    out.push({ id: 'potted_plant', x: doorX - 2.4, y: y + 0.36, z: f.z0 - 1.2, yaw: 0 });
-    out.push({ id: 'potted_plant', x: doorX + 2.4, y: y + 0.36, z: f.z0 - 1.2, yaw: 0 });
-    out.push({ id: 'bench_cushion', x: doorX - 3.4, y, z: f.z0 - 1.2, yaw: 0 });
-    out.push({ id: 'pumpkin', x: doorX + 1.8, y, z: f.z0 - 1.0, yaw: 0.4 });
-    out.push({ id: 'awning', x: doorX, y: y + 3.0, z: f.z0 - 0.2, yaw: 0 });
-
-    // Front yard decorative iron fence running along the flank
-    for (let s = -2; s <= 2; s += 2.0) {
-      const fx = doorX - 4.5;
-      const fz = f.z0 - 2.5 + s;
-      if (!nearDoorway(fx, fz, 2.0) && !onRoad(fx, fz, 1.5)) {
-        out.push({ id: 'iron_fence', x: fx, y: terrainHeight(fx, fz), z: fz, yaw: Math.PI / 2 });
-      }
-    }
-
-    // --- Backyard Patio, BBQ, and Dining ---
-    const patioX = (f.x0 + f.x1) / 2 + (idx % 2 === 0 ? 1.5 : -1.5);
-    const patioZ = f.z1 + 3.5;
-    if (!onRoad(patioX, patioZ, 2.0) && !nearDoorway(patioX, patioZ, 2.2)) {
-      out.push({ id: 'dining_table', x: patioX, y, z: patioZ, yaw: 0 });
-      out.push({ id: 'parasol', x: patioX, y, z: patioZ, yaw: 0 });
-      out.push({ id: 'chair_cushion', x: patioX - 1.2, y, z: patioZ, yaw: Math.PI / 2 });
-      out.push({ id: 'chair_cushion', x: patioX + 1.2, y, z: patioZ, yaw: -Math.PI / 2 });
-
-      // Backyard campfire / firepit & log benches
-      const fireX = patioX + 3.2;
-      const fireZ = patioZ + 1.2;
-      if (!onRoad(fireX, fireZ, 1.5)) {
-        out.push({ id: 'campfire', x: fireX, y, z: fireZ, yaw: 0 });
-        out.push({ id: 'log', x: fireX - 1.4, y, z: fireZ, yaw: Math.PI / 2 });
-        out.push({ id: 'log', x: fireX + 1.4, y, z: fireZ, yaw: -Math.PI / 2 });
-        out.push({ id: 'stump', x: fireX, y, z: fireZ + 1.4, yaw: 0 });
-      }
-    }
-  });
-}
-
-/**
- * Skyline City: Storefront cafes, urban back alleys, construction scaffolds,
- * dumpsters, and modern streetscapes.
- */
-function dressSkylineCity(out: Placement[]): void {
-  BUILDINGS.filter(b => b.style === 'city' && b.x < 0).forEach((b) => {
-    const f = buildingFootprint(b);
-    const y = b.base * TILE;
-    const doorX = (b.x + Math.floor(b.w / 2) + 0.5) * TILE;
-
-    // --- Sidewalk Cafe & Storefront ---
-    const cafeX = f.x1 + 2.4;
-    const cafeZ = (f.z0 + f.z1) / 2;
-    if (!onRoad(cafeX, cafeZ, 1.0) && !nearDoorway(cafeX, cafeZ, 2.4)) {
-      out.push({ id: 'round_table', x: cafeX, y, z: cafeZ, yaw: 0 });
-      out.push({ id: 'parasol', x: cafeX, y, z: cafeZ, yaw: 0 });
-      out.push({ id: 'chair_cushion', x: cafeX - 0.9, y, z: cafeZ, yaw: Math.PI / 2 });
-      out.push({ id: 'chair_cushion', x: cafeX + 0.9, y, z: cafeZ, yaw: -Math.PI / 2 });
-      out.push({ id: 'potted_plant', x: cafeX, y, z: cafeZ - 1.8, yaw: 0 });
-      out.push({ id: 'awning_wide', x: f.x1 + 0.2, y: y + 3.2, z: cafeZ, yaw: Math.PI / 2 });
-    }
-
-    // --- Service Alley & Backlot ---
-    const alleyX = f.x0 - 2.8;
-    const alleyZ = (f.z0 + f.z1) / 2;
-    if (!nearDoorway(alleyX, alleyZ, 2.4)) {
-      out.push({ id: 'dumpster_open', x: alleyX, y, z: alleyZ - 2.0, yaw: Math.PI / 2 });
-      out.push({ id: 'dumpster', x: alleyX, y, z: alleyZ + 2.0, yaw: Math.PI / 2 });
-      out.push({ id: 'trashcan', x: alleyX + 0.8, y, z: alleyZ, yaw: 0 });
-      out.push({ id: 'pallet', x: alleyX, y, z: alleyZ, yaw: 0 });
-      out.push({ id: 'pallet_small', x: alleyX, y: y + 0.2, z: alleyZ, yaw: 0.3 });
-      out.push({ id: 'box_closed', x: alleyX + 0.6, y: y + 0.4, z: alleyZ, yaw: 0.2 });
-      out.push({ id: 'box_open', x: alleyX - 0.4, y: y + 0.4, z: alleyZ, yaw: -0.3 });
-      out.push({ id: 'scaffold', x: alleyX + 0.5, y, z: f.z1 - 1.5, yaw: 0 });
-      out.push({ id: 'planks', x: alleyX + 0.5, y: y + 0.1, z: f.z1 - 3.5, yaw: 0.4 });
-      out.push({ id: 'barrel', x: alleyX + 1.2, y, z: f.z0 + 1.5, yaw: 0 });
-    }
-
-    // Avenues flanking the buildings
-    const avenueZ = f.z0 - 3.2;
-    if (!nearDoorway(doorX, avenueZ, 2.5) && !onRoad(f.x0 + 1.5, avenueZ, 0.5)) {
-      out.push({ id: 'street_bench', x: f.x0 + 2.0, y, z: avenueZ, yaw: 0 });
-      out.push({ id: 'street_light_double', x: f.x1 - 1.5, y, z: avenueZ, yaw: 0 });
-      out.push({ id: 'barrier_strong', x: f.x1 + 1.5, y, z: avenueZ, yaw: Math.PI / 2 });
-    }
-  });
-}
-
-/**
- * Tidal Works Harbor & Lake Docks: Cargo shipping containers, pallets,
- * industrial workshops, fuel depots, and fishermen's wharves.
- */
-function dressTidalWorksHarbor(out: Placement[]): void {
-  // --- The Great Wooden Docks & Wharves (DOCK) ---
-  // Length runs from DOCK.x0 (-198m) to DOCK.x1 (-144m), z between 102m and 114m, deck height y=0.05
-  const deckY = 0.05;
-  const midZ = (DOCK.z0 + DOCK.z1) / 2;
-
-  // Stacks of freight crates and pallets along the dock spine
-  for (let x = DOCK.x0 + 6; x <= DOCK.x1 - 6; x += 9) {
-    const side = (x % 2 === 0 ? 1 : -1);
-    const z = midZ + side * 2.8;
-
-    out.push({ id: 'crate_large', x, y: deckY, z, yaw: (x * 0.1) % Math.PI });
-    out.push({ id: 'crate_wood', x: x + 0.8, y: deckY + 1.0, z, yaw: (x * 0.2) % Math.PI });
-    out.push({ id: 'pallet', x: x - 1.6, y: deckY, z, yaw: 0 });
-    out.push({ id: 'pallet_small', x: x - 1.6, y: deckY + 0.2, z, yaw: 0.3 });
-    out.push({ id: 'planks', x: x - 1.6, y: deckY + 0.45, z, yaw: 0.3 });
-
-    // Fueling barrels and maintenance
-    out.push({ id: 'barrel', x: x + 2.4, y: deckY, z, yaw: 0 });
-    out.push({ id: 'barrel_open', x: x + 3.2, y: deckY, z, yaw: 0 });
-    out.push({ id: 'bucket', x: x + 2.4, y: deckY, z: z - side * 1.2, yaw: 0 });
-  }
-
-  // Fishermen's spots and dock lighting along the outer water edge
-  for (let x = DOCK.x0 + 8; x <= DOCK.x1 - 8; x += 12) {
-    out.push({ id: 'lamp_post', x, y: deckY, z: DOCK.z0 + 0.6, yaw: 0 });
-    out.push({ id: 'street_bench', x: x + 3, y: deckY, z: DOCK.z0 + 0.8, yaw: 0 });
-    out.push({ id: 'lamp_post', x: x + 6, y: deckY, z: DOCK.z1 - 0.6, yaw: Math.PI });
-    out.push({ id: 'chair', x: x + 4, y: deckY, z: DOCK.z1 - 0.8, yaw: Math.PI });
-    out.push({ id: 'bucket', x: x + 4.8, y: deckY, z: DOCK.z1 - 0.8, yaw: 0 });
-  }
-
-  // Harbor crane / scaffold staging on the dockhead
-  out.push({ id: 'scaffold', x: DOCK.x0 + 4, y: deckY, z: midZ, yaw: 0 });
-  out.push({ id: 'workbench', x: DOCK.x0 + 4, y: deckY, z: midZ - 2.8, yaw: Math.PI / 2 });
-  out.push({ id: 'chest', x: DOCK.x0 + 4, y: deckY, z: midZ + 2.8, yaw: -Math.PI / 2 });
-
-  // --- Warehouse Yards & Perimeter Security ---
-  BUILDINGS.filter(b => b.style === 'warehouse').forEach((b) => {
-    const f = buildingFootprint(b);
-    const y = b.base * TILE;
-
-    // Loading bay staging in front
-    const bayZ = f.z0 - 3.2;
-    if (!nearDoorway((f.x0 + f.x1) / 2, bayZ, 2.5)) {
-      out.push({ id: 'pallet', x: f.x0 + 1.8, y, z: bayZ, yaw: 0 });
-      out.push({ id: 'crate_large', x: f.x0 + 1.8, y, z: bayZ, yaw: 0 });
-      out.push({ id: 'planks', x: f.x0 + 3.8, y: y + 0.1, z: bayZ, yaw: 0.2 });
-      out.push({ id: 'dumpster_open', x: f.x1 - 2.2, y, z: bayZ, yaw: 0 });
-      out.push({ id: 'barrier_strong', x: f.x1 + 1.2, y, z: bayZ + 1.5, yaw: Math.PI / 2 });
-    }
-
-    // Industrial scrap side yard
-    const scrapX = f.x1 + 2.5;
-    const scrapZ = (f.z0 + f.z1) / 2;
-    if (!onRoad(scrapX, scrapZ, 1.5)) {
-      out.push({ id: 'barrel', x: scrapX, y, z: scrapZ - 1.4, yaw: 0 });
-      out.push({ id: 'barrel_open', x: scrapX, y, z: scrapZ - 0.6, yaw: 0 });
-      out.push({ id: 'workbench', x: scrapX, y, z: scrapZ + 1.2, yaw: Math.PI / 2 });
-      out.push({ id: 'scaffold', x: scrapX, y, z: scrapZ + 3.5, yaw: 0 });
-      out.push({ id: 'dumpster', x: scrapX + 1.5, y, z: scrapZ - 1.0, yaw: 0 });
-    }
-  });
-}
-
-/**
- * Pinewatch Ridge: High alpine trails, lookout camps, loggers' caches,
- * survival tents, campfires, and mountain boulders.
- */
-function dressPinewatchRidge(out: Placement[]): void {
-  // Summit Campsites & Wilderness Cabins
-  BUILDINGS.filter(b => b.style === 'cabin' && b.x > 0 && b.z > 0).forEach((b, idx) => {
-    const f = buildingFootprint(b);
-    const y = b.base * TILE;
-
-    const campX = f.x0 - 4.8;
-    const campZ = (f.z0 + f.z1) / 2;
-    if (!onRoad(campX, campZ, 2.0) && !nearDoorway(campX, campZ, 2.2)) {
-      out.push({ id: 'campfire', x: campX, y, z: campZ, yaw: 0 });
-      out.push({ id: 'tent', x: campX - 3.8, y, z: campZ + 1.8, yaw: 0.8 + idx * 0.4 });
-      out.push({ id: 'log', x: campX - 1.6, y, z: campZ, yaw: Math.PI / 2 });
-      out.push({ id: 'log', x: campX + 1.6, y, z: campZ, yaw: -Math.PI / 2 });
-      out.push({ id: 'stump', x: campX, y, z: campZ + 1.6, yaw: 0 });
-      out.push({ id: 'bucket', x: campX + 1.8, y, z: campZ + 1.6, yaw: 0 });
-      out.push({ id: 'chest', x: campX - 2.8, y, z: campZ - 1.6, yaw: 0.3 });
-      out.push({ id: 'workbench', x: campX - 1.2, y, z: campZ - 2.8, yaw: 0 });
-      out.push({ id: 'rock_a', x: campX - 5.5, y, z: campZ - 3.0, yaw: 1.2 });
-      out.push({ id: 'rock_b', x: campX + 4.2, y, z: campZ + 3.5, yaw: 2.1 });
-    }
-  });
-
-  // The Pinewatch Summit Lookout (Top city block at x: FAR-1, z: FAR)
-  const summitCity = BUILDINGS.find(b => b.style === 'city' && b.x > 0 && b.z > 0);
-  if (summitCity) {
-    const f = buildingFootprint(summitCity);
-    const roofY = (summitCity.base + summitCity.floors) * TILE;
-    out.push({ id: 'scaffold', x: f.x0 + 2.5, y: roofY, z: f.z0 + 2.5, yaw: 0 });
-    out.push({ id: 'signpost', x: f.x1 - 1.5, y: roofY, z: f.z0 + 1.5, yaw: -0.8 });
-    out.push({ id: 'chest', x: f.x1 - 1.5, y: roofY, z: f.z1 - 1.5, yaw: -Math.PI / 4 });
-    out.push({ id: 'radio', x: f.x0 + 2.5, y: roofY + 2.0, z: f.z0 + 2.5, yaw: 0 });
-    out.push({ id: 'street_bench', x: (f.x0 + f.x1) / 2, y: roofY, z: f.z1 - 1.2, yaw: Math.PI });
-  }
-}
-
-/**
- * The Citadel: Central Mesa arena plaza, tactical military barricades,
- * formal clock plaza, and intense combat cover.
- */
-function dressTheCitadel(out: Placement[]): void {
-  const mesaY = TILE * 2; // 12m height of central mesa
-
-  // --- Formal Plaza around the Central Clock Tower (x:0, z:0) ---
-  for (const [dx, dz, yaw] of [
-    [-6, -6, 0.78], [6, -6, -0.78], [-6, 6, 2.35], [6, 6, -2.35]
-  ]) {
-    out.push({ id: 'street_bench', x: dx, y: mesaY, z: dz, yaw });
-    out.push({ id: 'street_light_double', x: dx * 1.5, y: mesaY, z: dz * 1.5, yaw });
-    out.push({ id: 'potted_plant', x: dx * 0.6, y: mesaY, z: dz * 0.6, yaw: 0 });
-  }
-
-  // --- Tactical Combat Barricades & Fortifications in the Central Courtyards ---
-  const barriers: Array<[number, number, number, ModelId]> = [
-    [-14, 0, Math.PI / 2, 'barrier_strong'],
-    [14, 0, Math.PI / 2, 'barrier_strong'],
-    [0, -14, 0, 'barrier_strong'],
-    [0, 14, 0, 'barrier_strong'],
-    [-12, -12, 0.78, 'barrier'],
-    [12, -12, -0.78, 'barrier'],
-    [-12, 12, 2.35, 'barrier'],
-    [12, 12, -2.35, 'barrier'],
-    [-18, -4, 0, 'crate_large'],
-    [-18, -4, 0, 'crate_wood'],
-    [18, 4, 0, 'crate_large'],
-    [4, 18, 0, 'crate_wood'],
-    [-4, -18, 0, 'crate_large'],
-    [16, -16, 0, 'dumpster'],
-    [-16, 16, 0, 'dumpster_open'],
-    [8, -8, 0, 'chest'],
-    [-8, 8, 0, 'chest'],
-  ];
-
-  for (const [x, z, yaw, id] of barriers) {
-    if (!insideBuilding(x, z, 1.5) && !nearDoorway(x, z, 2.5)) {
-      out.push({ id, x, y: mesaY, z, yaw });
-    }
-  }
-
-  // Pavilion rooftops get vantage points and tactical sandbags
-  BUILDINGS.filter(b => b.style === 'city' && Math.abs(b.x) <= 6 && Math.abs(b.z) <= 6).forEach((b) => {
-    const f = buildingFootprint(b);
-    const roofY = (b.base + b.floors) * TILE;
-    out.push({ id: 'barrier', x: f.x0 + 1.5, y: roofY, z: f.z0 + 1.5, yaw: 0.78 });
-    out.push({ id: 'crate_wood', x: f.x1 - 1.5, y: roofY, z: f.z1 - 1.5, yaw: 0 });
-    out.push({ id: 'chest', x: (f.x0 + f.x1) / 2, y: roofY, z: f.z1 - 1.2, yaw: Math.PI });
-  });
-}
-
-/**
- * The 12 Intermediate Outposts between districts:
- * Each one is given a distinct theme, backstory, and exploration atmosphere!
- */
-function dressIntermediateOutposts(out: Placement[]): void {
-  const intermediateCabins = BUILDINGS.filter(b => b.style === 'cabin' && (Math.abs(b.x) > 6 || Math.abs(b.z) > 6) && (Math.abs(b.x) < 40 || Math.abs(b.z) < 40));
-
-  intermediateCabins.forEach((b) => {
-    const mx = (b.x + 1) * TILE;
-    const mz = (b.z + 1) * TILE;
-    const y = b.base * TILE;
-    const f = buildingFootprint(b);
-
-    // 1. Abandoned Construction Site (near [-58, -16])
-    if (Math.hypot(mx - (-58), mz - (-16)) < 15) {
-      out.push({ id: 'scaffold', x: f.x0 - 3.5, y, z: f.z0 - 2.0, yaw: 0 });
-      out.push({ id: 'planks', x: f.x0 - 3.5, y: y + 0.1, z: f.z1 + 1.5, yaw: 0.4 });
-      out.push({ id: 'pallet', x: f.x0 - 3.5, y, z: f.z1 + 1.5, yaw: 0 });
-      out.push({ id: 'barrier', x: f.x1 + 2.5, y, z: f.z0, yaw: Math.PI / 2 });
-      out.push({ id: 'dumpster_open', x: f.x1 + 2.8, y, z: f.z1, yaw: 0 });
-      out.push({ id: 'barrel', x: f.x0 - 1.5, y, z: f.z1 + 3.0, yaw: 0 });
-    }
-    // 2. Whispering Grove / Glade (near [54, -18])
-    else if (Math.hypot(mx - 54, mz - (-18)) < 15) {
-      out.push({ id: 'rock_a', x: f.x0 - 4.2, y, z: f.z0 - 2.0, yaw: 1.1 });
-      out.push({ id: 'rock_b', x: f.x1 + 3.5, y, z: f.z1 + 2.0, yaw: 2.3 });
-      out.push({ id: 'pumpkin', x: f.x0 - 2.0, y, z: f.z0 - 1.5, yaw: 0.5 });
-      out.push({ id: 'bench_cushion', x: f.x1 + 2.2, y, z: f.z0 - 1.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'chest', x: f.x0 - 2.8, y, z: f.z1 + 2.0, yaw: 0.4 });
-    }
-    // 3. Citadel Forward Military Checkpoint (near [-16, -56])
-    else if (Math.hypot(mx - (-16), mz - (-56)) < 15) {
-      out.push({ id: 'barrier_strong', x: f.x0 - 3.2, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'barrier', x: f.x1 + 3.2, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'traffic_light', x: f.x0 - 4.5, y, z: f.z0 - 2.5, yaw: 0.8 });
-      out.push({ id: 'crate_large', x: f.x1 + 2.5, y, z: f.z1 + 1.5, yaw: 0 });
-      out.push({ id: 'crate_wood', x: f.x1 + 2.5, y: y + 1.0, z: f.z1 + 1.5, yaw: 0.1 });
-      out.push({ id: 'signpost', x: f.x0 - 2.2, y, z: f.z0 - 3.2, yaw: 0 });
-    }
-    // 4. Ranger Waystation & Trailhead (near [-18, 52])
-    else if (Math.hypot(mx - (-18), mz - 52) < 15) {
-      out.push({ id: 'signpost', x: f.x0 - 3.0, y, z: f.z0 - 2.5, yaw: 0.3 });
-      out.push({ id: 'bench_cushion', x: f.x1 + 2.5, y, z: f.z0 - 1.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'log', x: f.x0 - 3.5, y, z: f.z1 + 2.0, yaw: 0 });
-      out.push({ id: 'stump', x: f.x0 - 3.5, y, z: f.z1 + 3.5, yaw: 0 });
-      out.push({ id: 'bucket', x: f.x0 - 2.2, y, z: f.z1 + 2.0, yaw: 0 });
-    }
-    // 5. Ancient Archeological Ruin Dig Site (near [-62, -62])
-    else if (Math.hypot(mx - (-62), mz - (-62)) < 15) {
-      out.push({ id: 'rock_a', x: f.x0 - 4.5, y, z: f.z0 - 3.0, yaw: 0.5 });
-      out.push({ id: 'rock_b', x: f.x0 - 5.5, y, z: f.z1 + 2.0, yaw: 1.8 });
-      out.push({ id: 'rock_c', x: f.x1 + 4.0, y, z: f.z0 - 2.0, yaw: 2.7 });
-      out.push({ id: 'gravestone_cross', x: f.x1 + 3.2, y, z: f.z1 + 2.5, yaw: Math.PI });
-      out.push({ id: 'lamp_post', x: f.x0 - 2.5, y, z: f.z0 - 3.0, yaw: 0 });
-      out.push({ id: 'chest', x: f.x0 - 3.2, y, z: f.z1 + 1.0, yaw: 0.6 });
-      out.push({ id: 'workbench', x: f.x1 + 2.5, y, z: f.z0 - 1.5, yaw: Math.PI / 2 });
-    }
-    // 6. Survivalist Prepper Bunker (near [58, -60])
-    else if (Math.hypot(mx - 58, mz - (-60)) < 15) {
-      out.push({ id: 'tent', x: f.x0 - 4.5, y, z: f.z0 + 2.0, yaw: 0.6 });
-      out.push({ id: 'campfire', x: f.x0 - 3.2, y, z: f.z0 - 2.0, yaw: 0 });
-      out.push({ id: 'crate_large', x: f.x1 + 3.0, y, z: f.z1 + 1.5, yaw: 0 });
-      out.push({ id: 'barrel', x: f.x1 + 3.0, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'barrel_open', x: f.x1 + 3.8, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'box_closed', x: f.x1 + 2.2, y, z: f.z1 + 1.5, yaw: 0.3 });
-    }
-    // 7. Hermit's Lakeside Haven (near [-60, 58])
-    else if (Math.hypot(mx - (-60), mz - 58) < 15) {
-      out.push({ id: 'round_table', x: f.x0 - 3.5, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'chair', x: f.x0 - 4.5, y, z: f.z0 - 1.5, yaw: Math.PI / 2 });
-      out.push({ id: 'armchair_relax', x: f.x1 + 2.5, y, z: f.z0 - 1.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'log', x: f.x0 - 3.5, y, z: f.z1 + 2.5, yaw: 0 });
-      out.push({ id: 'bucket', x: f.x0 - 2.2, y, z: f.z1 + 2.5, yaw: 0 });
-      out.push({ id: 'flower', x: f.x1 + 3.0, y, z: f.z1 + 2.0, yaw: 0 });
-    }
-    // 8. The Lumberjack Sawmill (near [60, 62])
-    else if (Math.hypot(mx - 60, mz - 62) < 15) {
-      out.push({ id: 'log', x: f.x0 - 3.5, y, z: f.z0 - 2.0, yaw: 0 });
-      out.push({ id: 'log', x: f.x0 - 3.5, y: y + 0.5, z: f.z0 - 2.0, yaw: 0.1 });
-      out.push({ id: 'log', x: f.x0 - 3.5, y, z: f.z1 + 2.0, yaw: Math.PI / 2 });
-      out.push({ id: 'stump', x: f.x0 - 2.2, y, z: f.z0 - 3.5, yaw: 0 });
-      out.push({ id: 'stump', x: f.x0 - 4.8, y, z: f.z0 - 3.5, yaw: 0 });
-      out.push({ id: 'workbench', x: f.x1 + 2.5, y, z: f.z0 - 1.0, yaw: Math.PI / 2 });
-      out.push({ id: 'planks', x: f.x1 + 3.0, y: y + 0.1, z: f.z1 + 1.5, yaw: 0 });
-      out.push({ id: 'pallet', x: f.x1 + 3.0, y, z: f.z1 + 1.5, yaw: 0 });
-      out.push({ id: 'crate_wood', x: f.x1 + 1.8, y, z: f.z1 + 3.0, yaw: 0.2 });
-      out.push({ id: 'bucket', x: f.x1 + 1.8, y, z: f.z0 - 2.5, yaw: 0 });
-    }
-    // 9. North Highway Gas & Repair Depot (near [0, -92])
-    else if (Math.hypot(mx - 0, mz - (-92)) < 15) {
-      out.push({ id: 'traffic_light', x: f.x0 - 4.5, y, z: f.z0 - 3.0, yaw: 0.7 });
-      out.push({ id: 'barrier_strong', x: f.x0 - 3.5, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'barrel', x: f.x1 + 2.8, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'barrel_open', x: f.x1 + 3.6, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'workbench', x: f.x1 + 2.5, y, z: f.z1 + 1.5, yaw: Math.PI / 2 });
-      out.push({ id: 'dumpster', x: f.x0 - 3.5, y, z: f.z1 + 2.0, yaw: 0 });
-      out.push({ id: 'trashcan', x: f.x1 + 1.5, y, z: f.z0 - 3.0, yaw: 0 });
-      out.push({ id: 'signpost', x: f.x0 - 2.0, y, z: f.z0 - 3.5, yaw: 0 });
-    }
-    // 10. South Highway Scenic Valley Overlook (near [0, 92])
-    else if (Math.hypot(mx - 0, mz - 92) < 15) {
-      out.push({ id: 'round_table', x: f.x0 - 3.5, y, z: f.z0 - 2.0, yaw: 0 });
-      out.push({ id: 'parasol', x: f.x0 - 3.5, y, z: f.z0 - 2.0, yaw: 0 });
-      out.push({ id: 'chair_cushion', x: f.x0 - 4.5, y, z: f.z0 - 2.0, yaw: Math.PI / 2 });
-      out.push({ id: 'chair_cushion', x: f.x0 - 2.5, y, z: f.z0 - 2.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'street_bench', x: f.x1 + 2.5, y, z: f.z0 - 1.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'trashcan', x: f.x1 + 2.5, y, z: f.z0 - 2.5, yaw: 0 });
-      out.push({ id: 'potted_plant', x: f.x1 + 2.5, y, z: f.z1 + 1.5, yaw: 0 });
-    }
-    // 11. West Highway Lakeside Fishery (near [-92, 0])
-    else if (Math.hypot(mx - (-92), mz - 0) < 15) {
-      out.push({ id: 'tent', x: f.x0 - 4.2, y, z: f.z0 + 2.0, yaw: 0.9 });
-      out.push({ id: 'campfire', x: f.x0 - 3.5, y, z: f.z0 - 1.5, yaw: 0 });
-      out.push({ id: 'chair', x: f.x1 + 2.5, y, z: f.z0 - 1.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'bucket', x: f.x1 + 2.5, y, z: f.z0 - 2.0, yaw: 0 });
-      out.push({ id: 'barrel', x: f.x1 + 3.2, y, z: f.z1 + 1.5, yaw: 0 });
-      out.push({ id: 'workbench', x: f.x0 - 3.5, y, z: f.z1 + 2.5, yaw: 0 });
-      out.push({ id: 'chest', x: f.x1 + 2.0, y, z: f.z1 + 3.0, yaw: 0.5 });
-      out.push({ id: 'signpost', x: f.x0 - 2.0, y, z: f.z0 - 3.5, yaw: 0 });
-    }
-    // 12. East Highway Hilltop Comms Relay (near [92, 0])
-    else if (Math.hypot(mx - 92, mz - 0) < 15) {
-      out.push({ id: 'scaffold', x: f.x0 - 3.5, y, z: f.z0 - 2.0, yaw: 0 });
-      out.push({ id: 'desk', x: f.x1 + 2.5, y, z: f.z0 - 1.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'desk_chair', x: f.x1 + 3.2, y, z: f.z0 - 1.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'monitor', x: f.x1 + 2.5, y: y + 0.77, z: f.z0 - 1.0, yaw: -Math.PI / 2 });
-      out.push({ id: 'laptop', x: f.x1 + 2.5, y: y + 0.77, z: f.z0 - 0.5, yaw: -Math.PI / 2 });
-      out.push({ id: 'radio', x: f.x0 - 3.5, y: y + 2.0, z: f.z0 - 2.0, yaw: 0 });
-      out.push({ id: 'speaker', x: f.x1 + 2.5, y, z: f.z1 + 1.5, yaw: 0 });
-      out.push({ id: 'chest', x: f.x0 - 3.0, y, z: f.z1 + 2.0, yaw: 0.2 });
-      out.push({ id: 'barrier', x: f.x0 - 2.0, y, z: f.z0 - 3.5, yaw: 0 });
-    }
-  });
-}
-
-/**
- * The Haunted Whispering Pines Cemetery on the Ridge (x: 52, z: 148).
- * Enhanced with ancient crypt, diverse tombstones, twisted dead trees,
- * glowing pumpkins, iron fence perimeter, and Victorian lamp posts.
- */
-const CEMETERY = { x: 52, z: 148, rows: 4, cols: 5 };
-function buildCemetery(out: Placement[]): void {
-  const stones: ModelId[] = ['gravestone', 'gravestone_cross', 'gravestone_round'];
-  for (let r = 0; r < CEMETERY.rows; r++) {
-    for (let c = 0; c < CEMETERY.cols; c++) {
-      const x = CEMETERY.x + (c - (CEMETERY.cols - 1) / 2) * 3.4;
-      const z = CEMETERY.z + (r - (CEMETERY.rows - 1) / 2) * 4.2;
-      if (insideBuilding(x, z, 3) || onRoad(x, z, 3)) continue;
-      out.push({
-        id: stones[(r * 5 + c) % stones.length],
-        x,
-        y: terrainHeight(x, z),
-        z,
-        yaw: Math.PI + (c % 2 === 0 ? 0.08 : -0.08),
-      });
-
-      // Pumpkins scattered between ancient graves
-      if ((r + c) % 3 === 0) {
-        out.push({
-          id: 'pumpkin',
-          x: x + 0.8,
-          y: terrainHeight(x + 0.8, z + 0.5),
-          z: z + 0.5,
-          yaw: (r * 1.7) % Math.PI,
-        });
-      }
-    }
-  }
-
-  const halfX = (CEMETERY.cols * 3.4) / 2 + 2.6;
-  const halfZ = (CEMETERY.rows * 4.2) / 2 + 2.6;
-
-  // Railings around perimeter
-  for (let s = -halfX; s <= halfX; s += 2.5) {
-    for (const side of [-1, 1]) {
-      const x = CEMETERY.x + s, z = CEMETERY.z + halfZ * side;
-      out.push({ id: 'iron_fence', x, y: terrainHeight(x, z), z, yaw: 0 });
-    }
-  }
-  for (let s = -halfZ; s <= halfZ; s += 2.5) {
-    for (const side of [-1, 1]) {
-      const x = CEMETERY.x + halfX * side, z = CEMETERY.z + s;
-      out.push({ id: 'iron_fence', x, y: terrainHeight(x, z), z, yaw: Math.PI / 2 });
-    }
-  }
-
-  // Ancient Crypt at the head of the cemetery
-  const cryptZ = CEMETERY.z - halfZ - 4.2;
-  out.push({
-    id: 'crypt',
-    x: CEMETERY.x,
-    y: terrainHeight(CEMETERY.x, cryptZ),
-    z: cryptZ,
-    yaw: 0,
-  });
-
-  // Victorian lanterns flanking the crypt entrance
-  out.push({ id: 'lamp_post', x: CEMETERY.x - 3.2, y: terrainHeight(CEMETERY.x - 3.2, cryptZ + 2.5), z: cryptZ + 2.5, yaw: 0 });
-  out.push({ id: 'lamp_post', x: CEMETERY.x + 3.2, y: terrainHeight(CEMETERY.x + 3.2, cryptZ + 2.5), z: cryptZ + 2.5, yaw: 0 });
-
-  // Twisted dead trees at the corners of the graveyard
-  for (const cx of [-halfX - 1.5, halfX + 1.5]) {
-    for (const cz of [-halfZ - 1.5, halfZ + 1.5]) {
-      out.push({ id: 'dead_tree', x: CEMETERY.x + cx, y: terrainHeight(CEMETERY.x + cx, CEMETERY.z + cz), z: CEMETERY.z + cz, yaw: (cx + cz) % Math.PI });
-    }
-  }
-
-  for (let i = SCENERY.length - 1; i >= 0; i--) {
-    const s = SCENERY[i];
-    if (Math.abs(s.x - CEMETERY.x) < halfX + 2 && Math.abs(s.z - CEMETERY.z) < halfZ + 7) {
-      SCENERY.splice(i, 1);
-    }
-  }
-}
-
-/**
- * Natural wilderness landmarks across the rolling hills:
- * Scenic boulder formations, fallen timber, tree stumps, and secret explorer camps.
- */
-function dressWildernessLandmarks(out: Placement[]): void {
-  // Deterministic seed for wilderness landmarks
-  let seed = 48291;
-  const rand = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed / 4294967296;
+/** The named landmarks that are made of props rather than of walls. */
+function dressLandmarks(ctx: Ctx): void {
+  const r = ctx.rand;
+  const put = (id: ModelId, x: number, z: number, yaw = 0, scale?: number): void => {
+    ctx.out.push({ id, x, y: terrainHeight(x, z), z, yaw, scale });
   };
 
-  // 1. Natural Boulders & Rock Clusters on hilltops and ridges
-  for (let i = 0; i < 48; i++) {
-    const x = (rand() - 0.5) * 400;
-    const z = (rand() - 0.5) * 400;
-    if (insideBuilding(x, z, 10) || onRoad(x, z, 8) || inLake(x, z, 6) || Math.hypot(x, z) < 40) continue;
-    const y = terrainHeight(x, z);
-    if (y < 1.0) continue;
+  // The graveyard behind Greenwood Chapel: rows of stones and one crypt.
+  for (let i = 0; i < 26; i++) {
+    const x = -78 - (i % 6) * 3.4 + r() * 0.8;
+    const z = 162 + Math.floor(i / 6) * 3.6 + r() * 0.8;
+    if (!open(x, z, 0.8)) continue;
+    const roll = r();
+    put(roll < 0.5 ? 'gravestone' : roll < 0.8 ? 'gravestone_round' : 'gravestone_cross', x, z, (r() - 0.5) * 0.4);
+  }
+  put('crypt', -92, 176, 0.2);
+  for (let i = 0; i < 10; i++) put('iron_fence', -100 + i * 4, 156, 0);
 
-    const rockType: ModelId = i % 3 === 0 ? 'rock_a' : i % 3 === 1 ? 'rock_b' : 'rock_c';
-    out.push({ id: rockType, x, y, z, yaw: rand() * Math.PI * 2 });
+  // Camp Kindling, in the trees above the lake.
+  for (const [x, z] of [[-112, 158], [-106, 163], [-116, 166]] as const) {
+    put('tent', x, z, r() * 6.28);
+  }
+  put('campfire', -111, 163);
+  for (let i = 0; i < 5; i++) put('log', -111 + Math.cos(i) * 3.2, 163 + Math.sin(i) * 3.2, i);
+  put('chest', -104, 168, 0.6);
 
-    // Cluster with a fallen log or stump
-    if (rand() > 0.4) {
-      const lx = x + (rand() - 0.5) * 4;
-      const lz = z + (rand() - 0.5) * 4;
-      out.push({ id: rand() > 0.5 ? 'log' : 'stump', x: lx, y: terrainHeight(lx, lz), z: lz, yaw: rand() * Math.PI });
+  // The angler's pier on Misty Lake.
+  const pier = DECKS[1];
+  if (pier) {
+    const px = (pier.x0 + pier.x1) / 2;
+    for (const z of [pier.z0 + 4, pier.z1 - 6]) {
+      ctx.out.push({ id: 'crate_wood', x: px + 1.2, y: pier.y, z, yaw: r() * 6.28 });
+      ctx.out.push({ id: 'bucket', x: px - 1.2, y: pier.y, z: z + 1.4, yaw: 0 });
+    }
+    ctx.out.push({ id: 'barrel', x: px, y: pier.y, z: pier.z1 - 2, yaw: 0 });
+  }
+
+  // The harbour pier at Saltwood: crab pots, barrels, coils of rope.
+  const quay = DECKS[0];
+  if (quay) {
+    const qx = (quay.x0 + quay.x1) / 2;
+    for (let i = 0; i < 7; i++) {
+      const z = quay.z0 + 3 + i * ((quay.z1 - quay.z0 - 6) / 7);
+      ctx.out.push({ id: i % 3 === 0 ? 'barrel' : i % 3 === 1 ? 'crate_wood' : 'box_closed', x: qx + (i % 2 ? 1.6 : -1.6), y: quay.y, z, yaw: r() * 6.28 });
     }
   }
 
-  // 2. Secret Explorer Campsites hidden in the hills
-  const secretCamps = [
-    { x: -140, z: -40 },
-    { x: 140, z: 40 },
-    { x: -40, z: 140 },
-    { x: 40, z: -140 },
-    { x: -130, z: 50 },
-    { x: 130, z: -50 },
+  // Orchard Row: fruit crates and a pumpkin patch at the far end.
+  scatter(ctx, 30, 162, 20, 18, roll => (roll < 0.5 ? 'crate_wood' : roll < 0.8 ? 'box_open' : 'bucket'));
+  scatter(ctx, 20, 178, 12, 22, () => 'pumpkin');
+
+  // Beekeepers Row: the hives, which are boxes at a distance and boxes up close.
+  for (let i = 0; i < 8; i++) {
+    const x = 128 + (i % 4) * 3.2, z = 112 + Math.floor(i / 4) * 4;
+    put('box_closed', x, z, 0.1 * i, 1.4);
+  }
+
+  // The drive-in: speaker posts in rows facing the screen.
+  for (let i = 0; i < 12; i++) {
+    const x = 118 + (i % 4) * 6, z = -34 + Math.floor(i / 4) * 7;
+    if (!open(x, z, 1)) continue;
+    put('signpost', x, z, Math.PI, 0.7);
+  }
+
+  // The foundry yard: pallets, spoil and a scaffold tower.
+  scatter(ctx, -164, -70, 22, 26, roll => (roll < 0.3 ? 'pallet' : roll < 0.55 ? 'barrel' : roll < 0.75 ? 'crate_large' : roll < 0.9 ? 'planks' : 'dumpster'));
+  put('scaffold', -150, -84, 0.2);
+  put('scaffold', -150, -80, 0.2);
+
+  // Hayseed: straw, sacks and a water butt round the farmyard.
+  scatter(ctx, 74, 126, 24, 24, roll => (roll < 0.35 ? 'crate_wood' : roll < 0.55 ? 'barrel' : roll < 0.75 ? 'bucket' : roll < 0.9 ? 'pallet' : 'box_open'));
+
+  // Behind the waterfall: the island's best-hidden cache.
+  ctx.out.push({ id: 'chest', x: WATERFALL.x - 3.4, y: WATERFALL.pool - 0.6, z: WATERFALL.z + 1.2, yaw: 1.2 });
+  ctx.out.push({ id: 'campfire', x: WATERFALL.x - 4.2, y: WATERFALL.pool - 0.6, z: WATERFALL.z + 3.4, yaw: 0 });
+
+  // A few more caches, out where only somebody exploring will find them.
+  const secrets: Array<[number, number]> = [
+    [-196, -176], [208, -116], [-208, 100], [196, 146], [-34, 176],
+    [154, -76], [-124, 100], [44, -96], [-30, 206], [214, 60],
   ];
-
-  for (const { x, z } of secretCamps) {
-    if (insideBuilding(x, z, 8) || onRoad(x, z, 8) || inLake(x, z, 5)) continue;
-    const y = terrainHeight(x, z);
-    if (y < 0.5) continue;
-
-    out.push({ id: 'tent', x: x - 2.5, y, z: z + 1.2, yaw: 0.6 });
-    out.push({ id: 'campfire', x, y, z, yaw: 0 });
-    out.push({ id: 'log', x: x + 1.6, y, z, yaw: Math.PI / 2 });
-    out.push({ id: 'log', x: x - 1.6, y, z, yaw: -Math.PI / 2 });
-    out.push({ id: 'chest', x: x + 1.8, y, z: z + 1.8, yaw: 0.3 });
-    out.push({ id: 'bucket', x: x - 1.8, y, z: z - 1.8, yaw: 0 });
+  for (const [x, z] of secrets) {
+    if (!open(x, z, 1)) continue;
+    put('chest', x, z, r() * 6.28);
+    put('barrel', x + 2.2, z + 1.4, r() * 6.28);
   }
 
-  // 3. Lakeside Shoreline Driftwood & Fishing Stashes
-  for (let a = 0; a < Math.PI * 2; a += 0.45) {
-    const rx = LAKE_SHAPE.rx + 2.5 + rand() * 4;
-    const rz = LAKE_SHAPE.rz + 2.5 + rand() * 4;
-    const x = LAKE_SHAPE.x + Math.cos(a) * rx;
-    const z = LAKE_SHAPE.z + Math.sin(a) * rz;
-    if (insideBuilding(x, z, 8) || onRoad(x, z, 6)) continue;
-    const y = terrainHeight(x, z);
-    if (y < -0.2) continue;
-
-    if (rand() > 0.4) {
-      out.push({ id: rand() > 0.5 ? 'log' : 'stump', x, y, z, yaw: rand() * Math.PI });
-    } else {
-      out.push({ id: 'rock_c', x, y, z, yaw: rand() * Math.PI });
-    }
+  // Under each bridge, where people shelter from the rain.
+  for (const bridge of BRIDGES) {
+    const ax = Math.sin(bridge.yaw), az = Math.cos(bridge.yaw);
+    const x = bridge.x + ax * (bridge.length / 2 - 3) + az * (bridge.width / 2 + 2);
+    const z = bridge.z + az * (bridge.length / 2 - 3) - ax * (bridge.width / 2 + 2);
+    if (!open(x, z, 1)) continue;
+    put('campfire', x, z);
+    put('log', x + 1.8, z + 1.2, r() * 6.28);
+    put('crate_wood', x - 1.6, z + 1.0, r() * 6.28);
   }
+
+  // Driftwood and rock pools along the shore, wherever the beach is wide.
+  for (let i = 0; i < 90; i++) {
+    const a = (i / 90) * Math.PI * 2;
+    const rad = 218 + r() * 12;
+    const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
+    const y = terrainHeight(x, z);
+    if (y < 0.2 || y > 2.6) continue;
+    if (!open(x, z, 1)) continue;
+    const roll = r();
+    ctx.out.push({ id: roll < 0.45 ? 'log' : roll < 0.7 ? 'stump' : roll < 0.85 ? 'rock_a' : 'rock_c', x, y, z, yaw: r() * 6.28 });
+  }
+
+  // Fishing spots along the river.
+  for (let i = 0; i < 26; i++) {
+    const t = (i + 0.5) / 26;
+    const s = SCENERY[Math.floor(r() * SCENERY.length)];
+    void s;
+    const angle = r() * Math.PI * 2;
+    const x = -150 + t * 300 + Math.cos(angle) * 6;
+    const z = 40 + Math.sin(angle) * 30;
+    const river = riverDistance(x, z);
+    if (river.d < riverWidth(river.t) + 2 || river.d > riverWidth(river.t) + 12) continue;
+    if (!open(x, z, 1)) continue;
+    put(r() < 0.5 ? 'log' : 'bucket', x, z, r() * 6.28);
+  }
+  void LAKE;
+  void BUILDINGS;
 }
 
-/**
- * Dynamic biome-based natural flora & ground cover:
- * Plants lush ferns, wildflowers, 3D grass clumps, mountain rocks, pumpkins,
- * and fallen logs across the island, giving every area a distinct, lively feel.
- */
-function dressNaturalFoliage(out: Placement[]): void {
-  let seed = 739182;
-  const rand = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
+// ---------------------------------------------------------------------------
 
-  // 1. Lush 3D Grass Clumps and Wildflowers along roads, meadows, and clearings
-  for (let i = 0; i < 320; i++) {
-    const x = (rand() - 0.5) * 440;
-    const z = (rand() - 0.5) * 440;
-    if (insideBuilding(x, z, 5) || onRoad(x, z, 2.5) || inLake(x, z, 4)) continue;
-    const y = terrainHeight(x, z);
-    if (y < 0.2) continue;
-
-    // Grass clumps everywhere, flowers concentrated in Sunny Meadows & lowlands
-    const inMeadows = Math.hypot(x - 108, z - (-108)) < 70;
-    const id: ModelId = inMeadows && rand() > 0.4 ? 'flower' : rand() > 0.65 ? 'fern' : 'grass';
-    out.push({
-      id,
-      x,
-      y,
-      z,
-      yaw: rand() * Math.PI * 2,
-      scale: 0.8 + rand() * 0.4,
-    });
+export function createFurnishings(scene: THREE.Scene, models: ModelLibrary): number {
+  const ctx: Ctx = { out: [], models, rand: seeded(20260922) };
+  for (const bp of BLUEPRINTS) {
+    for (const room of bp.rooms) furnishRoom(ctx, bp, room);
   }
-
-  // 2. Bushes and Hedges along path borders and residential perimeters
-  for (let i = 0; i < 180; i++) {
-    const x = (rand() - 0.5) * 420;
-    const z = (rand() - 0.5) * 420;
-    if (insideBuilding(x, z, 4) || onRoad(x, z, 3) || inLake(x, z, 4)) continue;
-    const y = terrainHeight(x, z);
-    if (y < 0.2) continue;
-
-    out.push({
-      id: rand() > 0.3 ? 'bush' : 'plant_small',
-      x,
-      y,
-      z,
-      yaw: rand() * Math.PI * 2,
-      scale: 0.85 + rand() * 0.45,
-    });
-  }
-
-  // 3. Dense Highland Ferns & Mossy Timber in Pinewatch Ridge
-  for (let i = 0; i < 140; i++) {
-    const r = rand() * 75;
-    const theta = rand() * Math.PI * 2;
-    const x = 108 + Math.cos(theta) * r;
-    const z = 108 + Math.sin(theta) * r;
-    if (insideBuilding(x, z, 5) || onRoad(x, z, 3) || inLake(x, z, 4)) continue;
-    const y = terrainHeight(x, z);
-    if (y < 15) continue;
-
-    const fernOrLog: ModelId = rand() > 0.6 ? 'fern' : rand() > 0.3 ? 'log' : 'stump';
-    out.push({
-      id: fernOrLog,
-      x,
-      y,
-      z,
-      yaw: rand() * Math.PI * 2,
-      scale: 0.9 + rand() * 0.35,
-    });
-  }
-
-  // 4. Rugged Boulder Formations on Mountain Slopes & Ridge Shoulders
-  for (let i = 0; i < 110; i++) {
-    const x = (rand() - 0.5) * 440;
-    const z = (rand() - 0.5) * 440;
-    if (insideBuilding(x, z, 8) || onRoad(x, z, 5) || inLake(x, z, 6)) continue;
-    const y = terrainHeight(x, z);
-    if (y < 6) continue;
-
-    const rockId: ModelId = rand() > 0.66 ? 'rock_a' : rand() > 0.33 ? 'rock_b' : 'rock_c';
-    out.push({
-      id: rockId,
-      x,
-      y,
-      z,
-      yaw: rand() * Math.PI * 2,
-      scale: 0.8 + rand() * 0.6,
-    });
-  }
-
-  // 5. Pumpkin Patches near cabins and suburban yards
-  for (let p = 0; p < 45; p++) {
-    const x = (rand() - 0.5) * 380;
-    const z = (rand() - 0.5) * 380;
-    if (insideBuilding(x, z, 4) || onRoad(x, z, 3) || inLake(x, z, 4)) continue;
-    const y = terrainHeight(x, z);
-    if (y < 1.0) continue;
-
-    out.push({
-      id: 'pumpkin',
-      x,
-      y,
-      z,
-      yaw: rand() * Math.PI * 2,
-      scale: 0.8 + rand() * 0.5,
-    });
-  }
+  dressYards(ctx);
+  dressStreets(ctx);
+  dressLandmarks(ctx);
+  return instance(scene, models, ctx.out);
 }
 
-/**
- * 12 Secret Exploration Caches:
- * Rewarding exploration hotspots with golden supply chests hidden across high
- * towers, deep crypts, crane scaffolds, and hidden cave clearings!
- */
-function dressExplorationSecrets(out: Placement[]): void {
-  // 1. Skyline Penthouse Rooftop Vault (Tallest skyscraper in the city)
-  const skyTower = BUILDINGS.find(b => b.style === 'city' && b.floors >= 4);
-  if (skyTower) {
-    const f = buildingFootprint(skyTower);
-    const roofY = (skyTower.base + skyTower.floors) * TILE;
-    out.push({ id: 'chest', x: (f.x0 + f.x1) / 2, y: roofY, z: (f.z0 + f.z1) / 2, yaw: 0 });
-    out.push({ id: 'scaffold', x: f.x0 + 1.8, y: roofY, z: f.z0 + 1.8, yaw: 0 });
-    out.push({ id: 'radio', x: f.x0 + 1.8, y: roofY + 1.8, z: f.z0 + 1.8, yaw: 0.4 });
-    out.push({ id: 'barrier', x: f.x1 - 1.2, y: roofY, z: f.z0 + 1.2, yaw: Math.PI / 4 });
-  }
-
-  // 2. Whispering Pines Crypt Secret Inner Chamber (x: 52, z: 125)
-  out.push({ id: 'chest', x: 52, y: terrainHeight(52, 125), z: 125, yaw: 0 });
-  out.push({ id: 'books', x: 52.8, y: terrainHeight(52.8, 125) + 0.1, z: 125.4, yaw: 0.3 });
-  out.push({ id: 'pumpkin', x: 51.2, y: terrainHeight(51.2, 125.6), z: 125.6, yaw: 0.8 });
-
-  // 3. Tidal Works Harbor Crane Scaffold (x: -188, z: 108)
-  out.push({ id: 'chest', x: -188, y: 3.6, z: 108, yaw: Math.PI / 2 });
-  out.push({ id: 'scaffold', x: -188, y: 0, z: 108, yaw: 0 });
-  out.push({ id: 'scaffold', x: -188, y: 1.8, z: 108, yaw: 0 });
-  out.push({ id: 'barrel_open', x: -188, y: 3.6, z: 109.5, yaw: 0 });
-
-  // 4. Pinewatch Summit Peak Lookout (x: 135, z: 135)
-  const summitY = terrainHeight(135, 135);
-  out.push({ id: 'chest', x: 135, y: summitY, z: 135, yaw: -Math.PI / 4 });
-  out.push({ id: 'signpost', x: 133.5, y: summitY, z: 136.5, yaw: 0.8 });
-  out.push({ id: 'street_bench', x: 136.5, y: summitY, z: 133.5, yaw: -Math.PI / 4 });
-  out.push({ id: 'campfire', x: 133, y: summitY, z: 133, yaw: 0 });
-
-  // 5. Shattered Quarry Cave Cache (x: -56, z: -14)
-  const quarryY = terrainHeight(-56, -14);
-  out.push({ id: 'chest', x: -56, y: quarryY, z: -14, yaw: 1.2 });
-  out.push({ id: 'rock_c', x: -54.5, y: quarryY, z: -14, yaw: 0 });
-  out.push({ id: 'rock_a', x: -57.5, y: quarryY, z: -13.5, yaw: 1.5 });
-  out.push({ id: 'workbench', x: -56, y: quarryY, z: -16, yaw: 0 });
-
-  // 6. Survivor's Hidden Bunker Cache (x: 60, z: -58)
-  const bunkerY = terrainHeight(60, -58);
-  out.push({ id: 'chest', x: 60, y: bunkerY, z: -58, yaw: 0.5 });
-  out.push({ id: 'box_closed', x: 61, y: bunkerY, z: -57.5, yaw: 0.2 });
-  out.push({ id: 'crate_wood', x: 59.2, y: bunkerY, z: -58.5, yaw: 0 });
-
-  // 7. Hermit's Island Stash (x: -62, z: 60)
-  const hermitY = terrainHeight(-62, 60);
-  out.push({ id: 'chest', x: -62, y: hermitY, z: 60, yaw: -0.8 });
-  out.push({ id: 'barrel', x: -61, y: hermitY, z: 61, yaw: 0 });
-  out.push({ id: 'bucket', x: -62.5, y: hermitY, z: 61.2, yaw: 0 });
-
-  // 8. Forgotten Ruins Altar (x: -60, z: -64)
-  const ruinY = terrainHeight(-60, -64);
-  out.push({ id: 'chest', x: -60, y: ruinY, z: -64, yaw: 0 });
-  out.push({ id: 'gravestone_cross', x: -58.5, y: ruinY, z: -64, yaw: Math.PI });
-  out.push({ id: 'rock_b', x: -61.5, y: ruinY, z: -64, yaw: 2.1 });
-
-  // 9. Scenic Valley Overlook (x: 2, z: 94)
-  const overlookY = terrainHeight(2, 94);
-  out.push({ id: 'chest', x: 2, y: overlookY, z: 94, yaw: Math.PI });
-  out.push({ id: 'parasol', x: 0.5, y: overlookY, z: 94, yaw: 0 });
-  out.push({ id: 'chair_cushion', x: 0.5, y: overlookY, z: 93, yaw: Math.PI / 2 });
-
-  // 10. Sunny Meadows Attic Treasure (In northeastern residential manor)
-  const manor = BUILDINGS.find(b => b.style === 'house' && b.floors >= 2);
-  if (manor) {
-    const f = buildingFootprint(manor);
-    const atticY = (manor.base + manor.floors) * TILE;
-    out.push({ id: 'chest', x: f.x0 + 2.5, y: atticY, z: f.z0 + 2.5, yaw: 0.5 });
-    out.push({ id: 'box_closed', x: f.x0 + 1.5, y: atticY, z: f.z0 + 2.5, yaw: 0 });
-    out.push({ id: 'books', x: f.x0 + 2.5, y: atticY + 0.5, z: f.z0 + 1.8, yaw: 0.2 });
-  }
-
-  // 11. Docks Cargo Sea Container Rafters (x: -180, z: 116)
-  out.push({ id: 'chest', x: -180, y: 5.0, z: 116, yaw: 0 });
-  out.push({ id: 'pallet', x: -180, y: 5.0, z: 116, yaw: 0 });
-  out.push({ id: 'barrel_open', x: -181.5, y: 5.0, z: 116, yaw: 0 });
-
-  // 12. Deep Mountain Woods Hidden Stump (x: 125, z: 85)
-  const forestY = terrainHeight(125, 85);
-  out.push({ id: 'chest', x: 125, y: forestY, z: 85, yaw: 0.3 });
-  out.push({ id: 'stump', x: 125, y: forestY, z: 86.5, yaw: 0 });
-  out.push({ id: 'fern', x: 124, y: forestY, z: 84.5, yaw: 0.6 });
-}
-
-/**
- * Mountain trails, scenic lookout points, and street lighting:
- * Connects the map with recognizable guide lanterns, benches, and trail markers.
- */
-function dressMountainTrails(out: Placement[]): void {
-  // Roadside street lights along central highways
-  for (let z = -160; z <= 160; z += 40) {
-    if (Math.abs(z) < 25) continue; // Leave central plaza open
-    out.push({ id: 'street_light_double', x: 7.5, y: terrainHeight(7.5, z), z, yaw: Math.PI / 2 });
-    out.push({ id: 'street_light_double', x: -7.5, y: terrainHeight(-7.5, z), z, yaw: -Math.PI / 2 });
-  }
-  for (let x = -160; x <= 160; x += 40) {
-    if (Math.abs(x) < 25) continue;
-    out.push({ id: 'street_light_double', x, y: terrainHeight(x, 7.5), z: 7.5, yaw: 0 });
-    out.push({ id: 'street_light_double', x, y: terrainHeight(x, -7.5), z: -7.5, yaw: Math.PI });
-  }
-
-  // Trail signposts and rest benches along hill ascents
-  const trailStops = [
-    { x: -50, z: -50, yaw: 0.78 },
-    { x: 50, z: -50, yaw: -0.78 },
-    { x: -50, z: 50, yaw: 2.35 },
-    { x: 50, z: 50, yaw: -2.35 },
-  ];
-  for (const { x, z, yaw } of trailStops) {
-    const y = terrainHeight(x, z);
-    out.push({ id: 'signpost', x, y, z, yaw });
-    out.push({ id: 'street_bench', x: x + Math.cos(yaw) * 3, y: terrainHeight(x + Math.cos(yaw) * 3, z + Math.sin(yaw) * 3), z: z + Math.sin(yaw) * 3, yaw: yaw + Math.PI / 2 });
-    out.push({ id: 'trashcan', x: x - Math.sin(yaw) * 2, y, z: z + Math.cos(yaw) * 2, yaw });
-  }
-}
-
-/**
- * Detailed lived-in furnishings for iconic rural and countryside POIs:
- * Anarchy Red Barn, Retail Gas & Go Mini-Mart, Haunted Chapel, River Covered Bridge,
- * and the Summit Fire Lookout Tower.
- */
-function dressLandmarkPoiInteriors(out: Placement[]): void {
-  // 1. Anarchy Acres Red Barn
-  const barn = BUILDINGS.find(b => b.theme === 'red_barn');
-  if (barn) {
-    const bx = barn.x * TILE, bz = barn.z * TILE, by = barn.base * TILE;
-    const bw = barn.w * TILE, bd = barn.d * TILE;
-    // Ground floor stables & workshop
-    out.push({ id: 'workbench', x: bx + bw - 2.0, y: by, z: bz + 2.0, yaw: -Math.PI / 2 });
-    out.push({ id: 'bucket', x: bx + bw - 1.2, y: by, z: bz + 3.0, yaw: 0 });
-    out.push({ id: 'pallet', x: bx + 2.2, y: by, z: bz + bd - 2.2, yaw: 0 });
-    out.push({ id: 'crate_wood', x: bx + 2.2, y: by + 0.2, z: bz + bd - 2.2, yaw: 0.1 });
-    out.push({ id: 'barrel', x: bx + 3.8, y: by, z: bz + bd - 2.0, yaw: 0 });
-    out.push({ id: 'barrel_open', x: bx + 4.6, y: by, z: bz + bd - 2.0, yaw: 0 });
-    out.push({ id: 'planks', x: bx + bw - 2.5, y: by, z: bz + bd - 2.2, yaw: 0.3 });
-    // Upper Hayloft (Floor 2)
-    const loftY = (barn.base + 1) * TILE;
-    out.push({ id: 'chest', x: bx + bw - 2.2, y: loftY, z: bz + bd - 2.2, yaw: -Math.PI / 4 });
-    out.push({ id: 'bed_single', x: bx + 2.0, y: loftY, z: bz + bd - 2.2, yaw: 0 });
-    out.push({ id: 'box_closed', x: bx + 2.0, y: loftY, z: bz + 2.2, yaw: 0 });
-    out.push({ id: 'crate_large', x: bx + bw - 2.2, y: loftY, z: bz + 2.2, yaw: 0 });
-    // Exterior Farmstead
-    out.push({ id: 'pumpkin', x: bx - 2.5, y: by, z: bz - 2.0, yaw: 0.5 });
-    out.push({ id: 'pumpkin', x: bx - 3.2, y: by, z: bz - 1.2, yaw: 1.2 });
-    out.push({ id: 'log', x: bx - 4.0, y: by, z: bz + 3.0, yaw: Math.PI / 2 });
-  }
-
-  // 2. Retail Gas & Go Mini-Mart
-  const gas = BUILDINGS.find(b => b.theme === 'gas_station');
-  if (gas) {
-    const gx = gas.x * TILE, gz = gas.z * TILE, gy = gas.base * TILE;
-    const gw = gas.w * TILE, gd = gas.d * TILE;
-    // Checkout Counter & Register
-    out.push({ id: 'kitchen_bar', x: gx + 2.2, y: gy, z: gz + gd / 2, yaw: Math.PI / 2 });
-    out.push({ id: 'monitor', x: gx + 2.2, y: gy + 0.85, z: gz + gd / 2, yaw: Math.PI / 2 });
-    out.push({ id: 'coffee_machine', x: gx + 2.2, y: gy + 0.85, z: gz + gd / 2 + 0.6, yaw: Math.PI / 2 });
-    out.push({ id: 'bar_stool', x: gx + 1.2, y: gy, z: gz + gd / 2, yaw: Math.PI / 2 });
-    // Beverage Coolers & Snack Aisles
-    out.push({ id: 'fridge_large', x: gx + gw - 1.2, y: gy, z: gz + gd - 1.0, yaw: 0 });
-    out.push({ id: 'bookcase_closed', x: gx + gw - 1.2, y: gy, z: gz + 2.0, yaw: -Math.PI / 2 });
-    out.push({ id: 'microwave', x: gx + 3.4, y: gy + 0.85, z: gz + gd - 1.0, yaw: 0 });
-    out.push({ id: 'trashcan', x: gx + 1.0, y: gy, z: gz + 1.2, yaw: 0 });
-    // Gas station restroom
-    out.push({ id: 'toilet', x: gx + gw - 1.2, y: gy, z: gz + gd - 3.2, yaw: Math.PI / 2 });
-    out.push({ id: 'bath_sink', x: gx + gw - 1.2, y: gy, z: gz + gd - 4.4, yaw: Math.PI / 2 });
-    // Secret Safe Chest
-    out.push({ id: 'chest', x: gx + 1.2, y: gy, z: gz + gd - 1.2, yaw: Math.PI / 4 });
-  }
-
-  // 3. Haunted Chapel & Cemetery
-  const church = BUILDINGS.find(b => b.theme === 'church');
-  if (church) {
-    const cx = church.x * TILE, cz = church.z * TILE, cy = church.base * TILE;
-    const cw = church.w * TILE, cd = church.d * TILE;
-    // Pews along the nave
-    for (let pz = cz + 3.0; pz <= cz + cd - 4.0; pz += 2.8) {
-      out.push({ id: 'street_bench', x: cx + 3.2, y: cy, z: pz, yaw: 0 });
-      out.push({ id: 'street_bench', x: cx + cw - 3.2, y: cy, z: pz, yaw: 0 });
-    }
-    // Altar in front
-    out.push({ id: 'dining_table', x: cx + cw / 2, y: cy, z: cz + cd - 2.2, yaw: 0 });
-    out.push({ id: 'table_lamp', x: cx + cw / 2 - 0.6, y: cy + 0.68, z: cz + cd - 2.2, yaw: 0 });
-    out.push({ id: 'table_lamp', x: cx + cw / 2 + 0.6, y: cy + 0.68, z: cz + cd - 2.2, yaw: 0 });
-    // Belfry upper secret chest
-    const belfryY = (church.base + church.floors) * TILE;
-    out.push({ id: 'chest', x: cx + cw / 2, y: belfryY, z: cz + 2.5, yaw: 0 });
-    out.push({ id: 'radio', x: cx + cw / 2 + 1.0, y: belfryY, z: cz + 2.5, yaw: 0.2 });
-    // Cemetery surrounding grounds
-    for (const [gx, gz, id] of [
-      [cx - 5.0, cz + 2.0, 'gravestone'],
-      [cx - 7.5, cz + 4.5, 'gravestone_cross'],
-      [cx - 5.5, cz + 7.5, 'gravestone_round'],
-      [cx - 8.0, cz + 9.0, 'crypt'],
-      [cx - 5.2, cz + 13.0, 'gravestone'],
-      [cx - 7.2, cz + 15.5, 'gravestone_cross'],
-    ] as const) {
-      const gy = terrainHeight(gx, gz);
-      out.push({ id, x: gx, y: gy, z: gz, yaw: Math.PI / 2 });
-    }
-    out.push({ id: 'dead_tree', x: cx - 11.0, y: terrainHeight(cx - 11.0, cz + 8.0), z: cz + 8.0, yaw: 0.8 });
-  }
-
-  // 4. Summit Fire Lookout Tower
-  const lookout = BUILDINGS.find(b => b.theme === 'lookout_tower');
-  if (lookout) {
-    const lx = lookout.x * TILE, lz = lookout.z * TILE;
-    const lw = lookout.w * TILE, ld = lookout.d * TILE;
-    const topY = (lookout.base + lookout.floors - 1) * TILE;
-    out.push({ id: 'desk', x: lx + lw / 2, y: topY, z: lz + ld - 1.5, yaw: Math.PI });
-    out.push({ id: 'chair', x: lx + lw / 2, y: topY, z: lz + ld - 2.4, yaw: 0 });
-    out.push({ id: 'radio', x: lx + lw / 2 - 0.5, y: topY + 0.77, z: lz + ld - 1.5, yaw: Math.PI });
-    out.push({ id: 'laptop', x: lx + lw / 2 + 0.4, y: topY + 0.77, z: lz + ld - 1.5, yaw: Math.PI });
-    out.push({ id: 'chest', x: lx + 1.2, y: topY, z: lz + 1.2, yaw: Math.PI / 4 });
-  }
-
-  // 5. River Covered Bridge Secret Cache
-  const bridgeX = -25, bridgeZ = 40;
-  const brY = terrainHeight(bridgeX, bridgeZ) + 0.5;
-  out.push({ id: 'chest', x: bridgeX, y: brY, z: bridgeZ, yaw: 0.8 });
-  out.push({ id: 'barrel_open', x: bridgeX + 1.4, y: brY, z: bridgeZ + 1.2, yaw: 0 });
-  out.push({ id: 'lamp_post', x: bridgeX - 4.5, y: brY, z: bridgeZ - 3.5, yaw: 0.8 });
-  out.push({ id: 'lamp_post', x: bridgeX + 4.5, y: brY, z: bridgeZ + 3.5, yaw: 0.8 });
-}
-
-/**
- * GPU Instanced batching:
- * Efficiently aggregates hundreds of placed assets by model ID into single-draw-call
- * InstancedMesh batches for maximum 60fps+ rendering performance.
- */
 function instance(scene: THREE.Scene, models: ModelLibrary, placements: Placement[]): number {
   const byId = new Map<ModelId, Placement[]>();
   for (const p of placements) {
@@ -1158,6 +657,7 @@ function instance(scene: THREE.Scene, models: ModelLibrary, placements: Placemen
   const quaternion = new THREE.Quaternion();
   const position = new THREE.Vector3();
   const scaleVec = new THREE.Vector3(1, 1, 1);
+  const up = new THREE.Vector3(0, 1, 0);
   let placed = 0;
 
   for (const [id, list] of byId) {
@@ -1166,7 +666,7 @@ function instance(scene: THREE.Scene, models: ModelLibrary, placements: Placemen
     const batch = new InstancedModel(source, list.length);
     if (!batch.valid) continue;
     list.forEach((p, i) => {
-      quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.yaw);
+      quaternion.setFromAxisAngle(up, p.yaw);
       const s = p.scale ?? 1;
       scaleVec.set(s, s, s);
       batch.setMatrixAt(i, matrix.compose(position.set(p.x, p.y, p.z), quaternion, scaleVec));

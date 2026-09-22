@@ -1107,7 +1107,7 @@ function forestAt(x: number, z: number): { density: number; species: TreeSpecies
     : orchard > 0.3
       ? 'autumn'
       : gallery > 0.25 || lake > 0.2
-        ? (random() < 0.4 ? 'autumn' : 'oak')
+        ? (random() < 0.22 ? 'autumn' : 'oak')
         : 'oak';
   return { density, species };
 }
@@ -1121,7 +1121,7 @@ function forestAt(x: number, z: number): { density: number; species: TreeSpecies
     if (ground < SHORE_HEIGHT + 0.4) continue;              // no trees on the beach or in the water
     if (onRoad(x, z, 4)) continue;
     if (insideAnyBuilding(x, z, 8) || blocksEntrance(x, z, 2, 2)) continue;
-    const rock = random() < 0.13;
+    const rock = random() < 0.07;
     if (rock) {
       // Rocks cluster on steep and high ground, where they read as outcrops.
       const steep = Math.abs(rawTerrain(x + 2, z) - rawTerrain(x - 2, z)) / 4

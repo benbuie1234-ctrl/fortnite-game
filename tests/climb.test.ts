@@ -13,7 +13,7 @@ import {
   SPRINT_MIN_TO_START,
 } from "../shared/src/constants";
 import { buildArena, treeIndexFromKey } from "../shared/src/arena";
-import { SCENERY } from "../shared/src/map";
+import { SCENERY, terrainHeight } from "../shared/src/map";
 
 let failures = 0;
 function check(name: string, cond: boolean, detail = ""): void {
@@ -240,7 +240,11 @@ console.log("trees");
     && SCENERY.every((q, j) => j === i || Math.hypot(q.x - p.x, q.z - p.z) > 4))!;
   const p = { ...newMovementState(), x: tree.x + 1.3, y: tree.y + 5, z: tree.z };
   for (let i = 0; i < 150; i++) stepPlayer(p, input(0, 0), w, TICK_DT);
-  check('no floating tree platform remains', p.grounded && p.y < tree.y + 1);
+  // Against the ground UNDER the landing point, not the tree's own base: the
+  // island is not flat, and a metre and a half away is a different height.
+  const under = terrainHeight(p.x, p.z);
+  check('no floating tree platform remains', p.grounded && p.y < under + 0.6,
+    `y=${p.y.toFixed(2)} ground=${under.toFixed(2)}`);
 }
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
