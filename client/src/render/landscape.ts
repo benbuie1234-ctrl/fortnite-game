@@ -133,25 +133,30 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
   const ny=normals?normals.getY(i):1.0;
   const noise=(Math.sin(x*.13)*Math.cos(z*.17)+Math.sin(x*.31+z*.27)*.5)*.04;
   const color=new THREE.Color();
+  const inPineRidge = (x > 35 && z > 35);
+  const nearLake = Math.hypot((x - (-168)) / 46, (z - 150) / 60) < 1.18;
   if(ny<0.72) {
-   color.setHex(y>15?0x6e7880:0x5a6369);
+   color.setHex(y>16?0x6e7880:0x5a6369);
    color.offsetHSL(0,0,noise*1.5);
   } else if(ny<0.82) {
    const t=(ny-0.72)/0.10;
    const rock=new THREE.Color(0x626c72);
-   const grass=new THREE.Color(y>14?0x567b48:0x6e9f52);
+   const grass=new THREE.Color(inPineRidge ? 0x486b3e : y>14?0x567b48:0x6ea54e);
    color.copy(rock).lerp(grass,t);
-  } else if(y<0.6) {
+  } else if(y<0.6 || (nearLake && y < 1.4)) {
    color.setHex(y<-0.4?0xa8996e:0xd8c698);
    color.multiplyScalar(0.96+noise);
+  } else if(inPineRidge && y > 16) {
+   color.setHex(0x426338);
+   color.multiplyScalar(0.95+noise);
   } else if(y>20) {
-   color.setHex(0x526e46);
+   color.setHex(0x56784a);
    color.multiplyScalar(0.95+noise);
   } else if(y>10) {
-   color.setHex(0x5c884c);
+   color.setHex(0x5f8f4e);
    color.multiplyScalar(0.97+noise);
   } else {
-   color.setHex(0x73a857);
+   color.setHex(0x74ad56);
    color.multiplyScalar(0.96+noise);
   }
   colors.push(color.r,color.g,color.b);

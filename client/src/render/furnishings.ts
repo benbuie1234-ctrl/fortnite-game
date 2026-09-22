@@ -27,6 +27,7 @@ export function createFurnishings(scene: THREE.Scene, models: ModelLibrary): num
   dressNaturalFoliage(placements);
   dressExplorationSecrets(placements);
   dressMountainTrails(placements);
+  dressLandmarkPoiInteriors(placements);
   return instance(scene, models, placements);
 }
 
@@ -1032,6 +1033,114 @@ function dressMountainTrails(out: Placement[]): void {
     out.push({ id: 'street_bench', x: x + Math.cos(yaw) * 3, y: terrainHeight(x + Math.cos(yaw) * 3, z + Math.sin(yaw) * 3), z: z + Math.sin(yaw) * 3, yaw: yaw + Math.PI / 2 });
     out.push({ id: 'trashcan', x: x - Math.sin(yaw) * 2, y, z: z + Math.cos(yaw) * 2, yaw });
   }
+}
+
+/**
+ * Detailed lived-in furnishings for iconic rural and countryside POIs:
+ * Anarchy Red Barn, Retail Gas & Go Mini-Mart, Haunted Chapel, River Covered Bridge,
+ * and the Summit Fire Lookout Tower.
+ */
+function dressLandmarkPoiInteriors(out: Placement[]): void {
+  // 1. Anarchy Acres Red Barn
+  const barn = BUILDINGS.find(b => b.theme === 'red_barn');
+  if (barn) {
+    const bx = barn.x * TILE, bz = barn.z * TILE, by = barn.base * TILE;
+    const bw = barn.w * TILE, bd = barn.d * TILE;
+    // Ground floor stables & workshop
+    out.push({ id: 'workbench', x: bx + bw - 2.0, y: by, z: bz + 2.0, yaw: -Math.PI / 2 });
+    out.push({ id: 'bucket', x: bx + bw - 1.2, y: by, z: bz + 3.0, yaw: 0 });
+    out.push({ id: 'pallet', x: bx + 2.2, y: by, z: bz + bd - 2.2, yaw: 0 });
+    out.push({ id: 'crate_wood', x: bx + 2.2, y: by + 0.2, z: bz + bd - 2.2, yaw: 0.1 });
+    out.push({ id: 'barrel', x: bx + 3.8, y: by, z: bz + bd - 2.0, yaw: 0 });
+    out.push({ id: 'barrel_open', x: bx + 4.6, y: by, z: bz + bd - 2.0, yaw: 0 });
+    out.push({ id: 'planks', x: bx + bw - 2.5, y: by, z: bz + bd - 2.2, yaw: 0.3 });
+    // Upper Hayloft (Floor 2)
+    const loftY = (barn.base + 1) * TILE;
+    out.push({ id: 'chest', x: bx + bw - 2.2, y: loftY, z: bz + bd - 2.2, yaw: -Math.PI / 4 });
+    out.push({ id: 'bed_single', x: bx + 2.0, y: loftY, z: bz + bd - 2.2, yaw: 0 });
+    out.push({ id: 'box_closed', x: bx + 2.0, y: loftY, z: bz + 2.2, yaw: 0 });
+    out.push({ id: 'crate_large', x: bx + bw - 2.2, y: loftY, z: bz + 2.2, yaw: 0 });
+    // Exterior Farmstead
+    out.push({ id: 'pumpkin', x: bx - 2.5, y: by, z: bz - 2.0, yaw: 0.5 });
+    out.push({ id: 'pumpkin', x: bx - 3.2, y: by, z: bz - 1.2, yaw: 1.2 });
+    out.push({ id: 'log', x: bx - 4.0, y: by, z: bz + 3.0, yaw: Math.PI / 2 });
+  }
+
+  // 2. Retail Gas & Go Mini-Mart
+  const gas = BUILDINGS.find(b => b.theme === 'gas_station');
+  if (gas) {
+    const gx = gas.x * TILE, gz = gas.z * TILE, gy = gas.base * TILE;
+    const gw = gas.w * TILE, gd = gas.d * TILE;
+    // Checkout Counter & Register
+    out.push({ id: 'kitchen_bar', x: gx + 2.2, y: gy, z: gz + gd / 2, yaw: Math.PI / 2 });
+    out.push({ id: 'monitor', x: gx + 2.2, y: gy + 0.85, z: gz + gd / 2, yaw: Math.PI / 2 });
+    out.push({ id: 'coffee_machine', x: gx + 2.2, y: gy + 0.85, z: gz + gd / 2 + 0.6, yaw: Math.PI / 2 });
+    out.push({ id: 'bar_stool', x: gx + 1.2, y: gy, z: gz + gd / 2, yaw: Math.PI / 2 });
+    // Beverage Coolers & Snack Aisles
+    out.push({ id: 'fridge_large', x: gx + gw - 1.2, y: gy, z: gz + gd - 1.0, yaw: 0 });
+    out.push({ id: 'bookcase_closed', x: gx + gw - 1.2, y: gy, z: gz + 2.0, yaw: -Math.PI / 2 });
+    out.push({ id: 'microwave', x: gx + 3.4, y: gy + 0.85, z: gz + gd - 1.0, yaw: 0 });
+    out.push({ id: 'trashcan', x: gx + 1.0, y: gy, z: gz + 1.2, yaw: 0 });
+    // Gas station restroom
+    out.push({ id: 'toilet', x: gx + gw - 1.2, y: gy, z: gz + gd - 3.2, yaw: Math.PI / 2 });
+    out.push({ id: 'bath_sink', x: gx + gw - 1.2, y: gy, z: gz + gd - 4.4, yaw: Math.PI / 2 });
+    // Secret Safe Chest
+    out.push({ id: 'chest', x: gx + 1.2, y: gy, z: gz + gd - 1.2, yaw: Math.PI / 4 });
+  }
+
+  // 3. Haunted Chapel & Cemetery
+  const church = BUILDINGS.find(b => b.theme === 'church');
+  if (church) {
+    const cx = church.x * TILE, cz = church.z * TILE, cy = church.base * TILE;
+    const cw = church.w * TILE, cd = church.d * TILE;
+    // Pews along the nave
+    for (let pz = cz + 3.0; pz <= cz + cd - 4.0; pz += 2.8) {
+      out.push({ id: 'street_bench', x: cx + 3.2, y: cy, z: pz, yaw: 0 });
+      out.push({ id: 'street_bench', x: cx + cw - 3.2, y: cy, z: pz, yaw: 0 });
+    }
+    // Altar in front
+    out.push({ id: 'dining_table', x: cx + cw / 2, y: cy, z: cz + cd - 2.2, yaw: 0 });
+    out.push({ id: 'table_lamp', x: cx + cw / 2 - 0.6, y: cy + 0.68, z: cz + cd - 2.2, yaw: 0 });
+    out.push({ id: 'table_lamp', x: cx + cw / 2 + 0.6, y: cy + 0.68, z: cz + cd - 2.2, yaw: 0 });
+    // Belfry upper secret chest
+    const belfryY = (church.base + church.floors) * TILE;
+    out.push({ id: 'chest', x: cx + cw / 2, y: belfryY, z: cz + 2.5, yaw: 0 });
+    out.push({ id: 'radio', x: cx + cw / 2 + 1.0, y: belfryY, z: cz + 2.5, yaw: 0.2 });
+    // Cemetery surrounding grounds
+    for (const [gx, gz, id] of [
+      [cx - 5.0, cz + 2.0, 'gravestone'],
+      [cx - 7.5, cz + 4.5, 'gravestone_cross'],
+      [cx - 5.5, cz + 7.5, 'gravestone_round'],
+      [cx - 8.0, cz + 9.0, 'crypt'],
+      [cx - 5.2, cz + 13.0, 'gravestone'],
+      [cx - 7.2, cz + 15.5, 'gravestone_cross'],
+    ] as const) {
+      const gy = terrainHeight(gx, gz);
+      out.push({ id, x: gx, y: gy, z: gz, yaw: Math.PI / 2 });
+    }
+    out.push({ id: 'dead_tree', x: cx - 11.0, y: terrainHeight(cx - 11.0, cz + 8.0), z: cz + 8.0, yaw: 0.8 });
+  }
+
+  // 4. Summit Fire Lookout Tower
+  const lookout = BUILDINGS.find(b => b.theme === 'lookout_tower');
+  if (lookout) {
+    const lx = lookout.x * TILE, lz = lookout.z * TILE;
+    const lw = lookout.w * TILE, ld = lookout.d * TILE;
+    const topY = (lookout.base + lookout.floors - 1) * TILE;
+    out.push({ id: 'desk', x: lx + lw / 2, y: topY, z: lz + ld - 1.5, yaw: Math.PI });
+    out.push({ id: 'chair', x: lx + lw / 2, y: topY, z: lz + ld - 2.4, yaw: 0 });
+    out.push({ id: 'radio', x: lx + lw / 2 - 0.5, y: topY + 0.77, z: lz + ld - 1.5, yaw: Math.PI });
+    out.push({ id: 'laptop', x: lx + lw / 2 + 0.4, y: topY + 0.77, z: lz + ld - 1.5, yaw: Math.PI });
+    out.push({ id: 'chest', x: lx + 1.2, y: topY, z: lz + 1.2, yaw: Math.PI / 4 });
+  }
+
+  // 5. River Covered Bridge Secret Cache
+  const bridgeX = -25, bridgeZ = 40;
+  const brY = terrainHeight(bridgeX, bridgeZ) + 0.5;
+  out.push({ id: 'chest', x: bridgeX, y: brY, z: bridgeZ, yaw: 0.8 });
+  out.push({ id: 'barrel_open', x: bridgeX + 1.4, y: brY, z: bridgeZ + 1.2, yaw: 0 });
+  out.push({ id: 'lamp_post', x: bridgeX - 4.5, y: brY, z: bridgeZ - 3.5, yaw: 0.8 });
+  out.push({ id: 'lamp_post', x: bridgeX + 4.5, y: brY, z: bridgeZ + 3.5, yaw: 0.8 });
 }
 
 /**
