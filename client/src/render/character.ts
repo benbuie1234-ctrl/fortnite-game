@@ -70,8 +70,8 @@ type BoneOffsets = ReadonlyArray<readonly [name: string, x: number, y: number, z
  * mantle because it is the shorter event of the two; a mantle up a full wall
  * already runs for a third of a second on its own.
  */
-const VAULT_HOLD_S = 0.30;
-const MANTLE_HOLD_S = 0.14;
+const VAULT_HOLD_S = 0.65;
+const MANTLE_HOLD_S = 0.75;
 /** How long the landing take runs for. Matches the trimmed clip's length. */
 const LAND_HOLD_S = 0.68;
 
@@ -114,7 +114,7 @@ const VAULT_POSE: BoneOffsets = [
 ];
 
 /** Clips that play once and hold their last frame rather than looping. */
-const ONE_SHOT_CLIPS = new Set(["slide", "land", "death"]);
+const ONE_SHOT_CLIPS = new Set(["slide", "land", "death", "climb"]);
 
 /**
  * Seconds of a take that are actually usable, for the ones that are not.
@@ -545,18 +545,20 @@ export class Character {
     this.vaultHold = vaulting ? VAULT_HOLD_S : Math.max(0, this.vaultHold - dt);
     this.mantleHold = mantling ? MANTLE_HOLD_S : Math.max(0, this.mantleHold - dt);
     const showVault = vaulting || this.vaultHold > 0;
-    const showMantle = (mantling || this.mantleHold > 0) && !showVault;
+    const showMantle = mantling || this.mantleHold > 0;
+    const isClimbing = (showMantle || showVault) && this.actions.has("climb");
     // Only the states without a clip of their own still need a built pose on
     // top of a still one; the rest are animations now.
-    const posed = showVault;
+    const posed = showVault && !isClimbing;
     const clip = this.pickClip(
       speed, grounded, sliding, showMantle, showVault, alive, forward, strafe,
       this.landHold > 0,
     );
     const next = this.actions.get(clip) ?? this.actions.get("idle");
     if (next && next !== this.currentAction) {
-      next.reset().fadeIn(.18).play();
-      this.currentAction?.fadeOut(.18);
+      const fadeInTime = clip === "climb" ? 0.08 : 0.18;
+      next.reset().fadeIn(fadeInTime).play();
+      this.currentAction?.fadeOut(fadeInTime);
       this.currentAction = next;
     }
     if (this.currentAction) {
@@ -566,7 +568,7 @@ export class Character {
       // to that -- which is what stops a sprint (12.25 m/s) reading as a jog
       // with the world sliding underneath it, and stops a crouch-walk (3.6)
       // reading as a scramble.
-      const nominal = posed ? 0 : CLIP_SPEED[clip] ?? 0;
+      const nominal = posed || isClimbing ? 0 : CLIP_SPEED[clip] ?? 0;
       this.currentAction.timeScale = nominal > 0
         ? Math.max(0.6, Math.min(2.0, speed / nominal)) : 1;
     }
@@ -606,14 +608,14 @@ export class Character {
       // Sliding and mantling have clips of their own now, so only crouch and
       // the vault are still built by hand. Crouch is faded out under all three
       // so its knee bend does not fight an animation that has its own.
-      this.applyPose(CROUCH_POSE, crouch * (1 - slide) * (1 - mantle) * (1 - vault));
-      this.applyPose(VAULT_POSE, vault);
+      this.applyPose(CROUCH_POSE, crouch * (1 - slide) * (1 - mantle) * (isClimbing ? 0 : (1 - vault)));
+      this.applyPose(VAULT_POSE, isClimbing ? 0 : vault);
 
       // Spine and head follow the camera, but only as far as the pose leaves
       // room for: a climb is already looking up at the ledge and a slide is
       // already leaning back, and adding the view pitch on top of either is
       // what used to bend the character double.
-      const look = (1 - slide) * (1 - mantle) * (1 - vault);
+      const look = (1 - slide) * (isClimbing ? 0.1 : 1);
       if (look > 0.001) {
         this.bend("mixamorigSpine1", -pitch * 0.65 * look);
         this.bend("mixamorigHead", -pitch * 0.35 * look);
@@ -738,6 +740,7 @@ export class Character {
   ): string {
     const has = (name: string) => this.actions.has(name);
     if (!alive && has("death")) return "death";
+    if ((mantling || vaulting) && has("climb")) return "climb";
     if (mantling && has("climb")) return "climb";
     if (vaulting) return has("jump") ? "jump" : "idle";
     if (sliding && has("slide")) return "slide";

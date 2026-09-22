@@ -31,3 +31,21 @@
 #menuBtn{width:auto;left:auto;margin:0;min-height:34px}#structureHealth{bottom:42%;max-width:160px;font-size:9px;opacity:.8}body.touch #menuBtn{right:12px;top:12px}
 #killTally{position:absolute;right:112px;top:18px;display:flex;align-items:center;gap:6px;background:#112934ad;border:1px solid #ffffff30;border-radius:6px;padding:7px 12px;color:#eaf2ee;font-size:11px;letter-spacing:.5px;font-weight:700;pointer-events:auto;z-index:4;min-height:34px;box-sizing:border-box}#killTally .tally-ico{color:var(--accent);font-size:13px;line-height:1}#killTally .tally-lbl{font-size:9px;letter-spacing:1.5px;color:#93c9ed;font-weight:800}#killTally b{color:#ffffff;font-size:14px;font-weight:900;font-variant-numeric:tabular-nums}#killTally .tally-goal{color:var(--muted);font-size:10px;font-weight:600;font-variant-numeric:tabular-nums}body.touch #killTally{right:76px;top:12px;padding:5px 9px;min-height:30px;gap:4px}body.touch #killTally b{font-size:12px}
 
+#winScreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at center,rgba(16,36,61,.82) 0%,rgba(8,20,32,.95) 100%);backdrop-filter:blur(8px);z-index:25;pointer-events:none;opacity:0;transform:scale(1.05);transition:opacity .35s ease,transform .35s ease}
+#winScreen.active{opacity:1;transform:scale(1);pointer-events:auto}
+#winScreen.hidden{display:none}
+.win-card{width:min(520px,calc(100vw - 40px));background:rgba(18,38,56,.96);border:2px solid var(--accent);box-shadow:0 0 50px rgba(220,255,115,.3),0 20px 80px rgba(0,0,0,.8);border-radius:16px;padding:36px 32px;text-align:center;animation:win-pop .4s cubic-bezier(.18,.89,.32,1.28)}
+@keyframes win-pop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}
+.win-kicker{font-size:11px;letter-spacing:3px;font-weight:800;color:var(--accent);margin-bottom:8px}
+.win-card h1{font-size:clamp(36px,5.5vw,54px);font-weight:950;font-style:italic;letter-spacing:-1.5px;color:#fff;margin:0 0 8px;text-shadow:0 2px 20px rgba(220,255,115,.5)}
+.win-card.victory h1{color:var(--accent)}
+#winSubtitle{font-size:15px;color:#cfe2f2;font-weight:600;margin-bottom:20px}
+.win-stats{background:rgba(10,22,34,.85);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:14px;margin-bottom:20px;max-height:180px;overflow-y:auto}
+.win-stats table{width:100%;border-collapse:collapse;font-size:12px}
+.win-stats th{font-size:9px;letter-spacing:1.2px;color:var(--muted);padding:4px 8px;text-align:left}
+.win-stats td{padding:7px 8px;border-top:1px solid rgba(255,255,255,.08)}
+.win-stats tr.me td{color:var(--accent);font-weight:800}
+.win-countdown{font-size:14px;color:#a8bec7;font-weight:600;letter-spacing:.5px}
+.win-countdown b{color:var(--accent);font-size:22px;margin:0 4px}
+
+

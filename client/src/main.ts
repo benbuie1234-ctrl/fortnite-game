@@ -76,6 +76,53 @@ fpsSelect.addEventListener("change", () => {
   limiter.setTarget(Number(fpsSelect.value) as FpsTarget);
 });
 
+let winTimerInterval: ReturnType<typeof setInterval> | null = null;
+function showWinScreen(winnerId: number, winnerName: string, nextRoundSec = 5): void {
+  const winScreen = document.getElementById("winScreen");
+  const winCard = document.getElementById("winCard");
+  const winKicker = document.getElementById("winKicker");
+  const winTitle = document.getElementById("winTitle");
+  const winSubtitle = document.getElementById("winSubtitle");
+  const winStats = document.getElementById("winStats");
+  const winTimer = document.getElementById("winTimer");
+  if (!winScreen || !winCard || !winKicker || !winTitle || !winSubtitle || !winStats || !winTimer) return;
+
+  const isMe = winnerId === conn.selfId;
+  winCard.className = isMe ? "win-card victory" : "win-card";
+  winKicker.textContent = isMe ? "★ VICTORY ROYALE ★" : "ROUND COMPLETE";
+  winTitle.textContent = isMe ? "VICTORY ROYALE" : `${winnerName.toUpperCase()} WINS`;
+  winSubtitle.textContent = isMe
+    ? `You won the round with ${scoreTarget} eliminations!`
+    : `${winnerName} won the round with ${scoreTarget} eliminations!`;
+
+  winStats.innerHTML = standingsTable(matchPlayers, conn.selfId, scoreTarget);
+
+  let remaining = nextRoundSec;
+  winTimer.textContent = String(remaining);
+
+  winScreen.classList.remove("hidden");
+  requestAnimationFrame(() => winScreen.classList.add("active"));
+
+  if (winTimerInterval) clearInterval(winTimerInterval);
+  winTimerInterval = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      if (winTimerInterval) { clearInterval(winTimerInterval); winTimerInterval = null; }
+      hideWinScreen();
+    } else {
+      winTimer.textContent = String(remaining);
+    }
+  }, 1000);
+}
+
+function hideWinScreen(): void {
+  if (winTimerInterval) { clearInterval(winTimerInterval); winTimerInterval = null; }
+  const winScreen = document.getElementById("winScreen");
+  if (!winScreen) return;
+  winScreen.classList.remove("active");
+  setTimeout(() => winScreen.classList.add("hidden"), 350);
+}
+
 const conn = new Connection({
   onWelcome(id, name) {
     localStorage.setItem("clutch.name", name);
@@ -90,11 +137,10 @@ const conn = new Connection({
     hud.setKills(me ? me.kills : 0, scoreTarget);
     if (msg.roundOver) {
       const winner = String(msg.winnerName ?? "Someone");
+      const winnerId = typeof msg.winnerId === "number" ? msg.winnerId : -1;
+      const nextSec = typeof msg.nextRoundSec === "number" ? msg.nextRoundSec : 5;
       sound.win();
-      hud.setCenterMessage(`${winner} wins!`, `First to ${scoreTarget}`);
-      setTimeout(() => hud.setCenterMessage(""), 3200);
-      // The one moment in a match when everybody wants the table, so they do
-      // not have to go looking for it.
+      showWinScreen(winnerId, winner, nextSec);
       document.getElementById("lastResult")!.textContent = `${winner} won the last round`;
     }
   },
@@ -397,6 +443,7 @@ function enterGame(id: number, name: string): void {
   controls.pitch = 0;
   renderReady=false;
   playing = true;
+  hideWinScreen();
   hud.setKills(0, scoreTarget);
   controls.reset();
   critters.state.reset();
@@ -428,6 +475,7 @@ function leaveGame(reason: string): void {
     return;
   }
   playing = false;
+  hideWinScreen();
   hud.setKills(0, scoreTarget);
   conn.disconnect();
   controls.reset();

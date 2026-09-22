@@ -542,6 +542,16 @@ body.touch .slot:active, body.touch .mat:active { filter:brightness(1.4); }
     <div class="slots" id="slots"></div><div id="buildSlots"></div><div id="roomBadge"></div><div id="helpBadge">G Reload · Ctrl Crouch · Tab Menu · M Sound · Esc Menu</div>
   </div>
 
+  <div id="winScreen" class="hidden">
+    <div class="win-card" id="winCard">
+      <div class="win-kicker" id="winKicker">ROUND COMPLETE</div>
+      <h1 id="winTitle">VICTORY ROYALE</h1>
+      <p id="winSubtitle">Winner: Player</p>
+      <div class="win-stats" id="winStats"></div>
+      <div class="win-countdown">Next round starts in <b id="winTimer">5</b>s</div>
+    </div>
+  </div>
+
   <div id="loading" role="status"><span class="loading-mark">C</span><span id="loadingText">Preparing the arena…</span><div class="loading-track"><i id="loadingProgress"></i></div></div>
   <main id="menu">
     <header class="menu-header"><a class="wordmark" href="/" aria-label="Clutch home">CLUTCH<span>®</span></a><span class="edition">OPEN ARENA <i></i> VOL. 01</span></header>

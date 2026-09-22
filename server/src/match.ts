@@ -63,6 +63,7 @@ export class MatchRoom implements DurableObject {
    *  from EV_CRITTER rather than being told the whole set. */
   private critters = new CritterState();
   private isQuickPlay = true;
+  private intermissionEndAt = 0;
 
   // The room is entirely in-memory and ephemeral: a match that ends leaves
   // nothing to persist, so neither the state store nor the env is retained.
@@ -411,6 +412,11 @@ export class MatchRoom implements DurableObject {
 
     this.expireShields(nowSec);
 
+    if (this.intermissionEndAt > 0 && nowSec >= this.intermissionEndAt) {
+      this.intermissionEndAt = 0;
+      this.broadcastMatchState();
+    }
+
     if (this.tickCount % Math.max(1, Math.round(TICK_HZ / SNAPSHOT_HZ)) === 0) {
       this.broadcastSnapshots(nowMs);
       this.events.length = 0;
@@ -420,6 +426,12 @@ export class MatchRoom implements DurableObject {
   private stepOnePlayer(player: ServerPlayer, nowSec: number, nowMs: number): void {
     finishReloads(player, nowSec);
     player.addMats(MATS_PER_SECOND * TICK_DT);
+
+    if (nowSec < this.intermissionEndAt) {
+      player.wasFiring = false;
+      player.inputQueue.length = 0;
+      return;
+    }
 
     let processed = 0;
     while (player.inputQueue.length > 0 && processed < MAX_INPUTS_PER_TICK) {
@@ -545,8 +557,9 @@ export class MatchRoom implements DurableObject {
 
   private endRound(winner: ServerPlayer, nowSec: number): void {
     winner.wins++;
+    this.intermissionEndAt = nowSec + 5.0;
     this.broadcastJson({
-      t: S_MATCH, roundOver: true, winnerId: winner.id, winnerName: winner.name,
+      t: S_MATCH, roundOver: true, winnerId: winner.id, winnerName: winner.name, nextRoundSec: 5,
     });
     this.resetBuilds();
     for (const p of this.players.values()) {
