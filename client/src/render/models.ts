@@ -24,11 +24,22 @@ import { DRACOLoader } from "three/examples/jsm/loaders/DRACOLoader.js";
  * 404, and the game looks exactly as it does today.
  */
 
-/** Logical slots the game knows how to use. Anything else is ignored. */
-export type ModelId =
+/**
+ * Slots the game knows how to use.
+ *
+ * The named ones are the originals: each is fitted to a size the game picks,
+ * because a tree has to be tree-sized whatever file is behind it. Everything
+ * in the Kenney catalogue is an ordinary string instead, shipped at its real
+ * measured size and listed in the manifest -- which is the point, because
+ * adding a sofa should be a line of data and not an edit to a type.
+ */
+export type FittedModelId =
   | "tree_oak" | "tree_autumn" | "bush" | "flower" | "fern"
   | "tree" | "rock" | "house" | "crate" | "barrel" | "grass" | "character"
   | "weapon_ar" | "weapon_shotgun" | "weapon_sniper" | "weapon_smg" | "weapon_pistol";
+// The intersection keeps autocomplete for the named slots while still
+// accepting a catalogue id, which a plain `string` alias would throw away.
+export type ModelId = FittedModelId | (string & {});
 
 interface Manifest {
   /** Maps a logical slot to a .glb filename inside the models directory. */
@@ -41,6 +52,17 @@ interface Manifest {
   scale?: Partial<Record<ModelId, number>>;
   /** Y offset, for models whose origin is not at their base. */
   offsetY?: Partial<Record<ModelId, number>>;
+  /**
+   * Catalogue models, mapped to the factor that puts them in game metres.
+   *
+   * Presence in here is what marks a model as "shipped at its real size":
+   * it is placed as authored rather than squeezed to fit a height the game
+   * chose, so a sofa, a fridge and a gravestone stay the right size relative
+   * to each other and to the player. Written by scripts/build-assets.mjs.
+   */
+  natural?: Record<string, number>;
+  /** Measured extent of each catalogue model in metres, after its scale. */
+  size?: Record<string, [number, number, number]>;
 }
 
 const MODELS_PATH = "/models";
@@ -73,6 +95,18 @@ export class ModelLibrary {
   /** Count of slots actually filled, for logging and the loading indicator. */
   get size(): number { return this.items.size; }
 
+  /**
+   * Measured size of a catalogue model in metres, or null.
+   *
+   * Placement reads this rather than measuring a clone: the numbers come from
+   * the source art before compression quantised it, so they are the only ones
+   * that are actually right, and a caller spacing chairs around a table needs
+   * them before it has anything to measure.
+   */
+  extent(id: ModelId): [number, number, number] | null {
+    return this.manifest.size?.[id] ?? null;
+  }
+
   set(id: ModelId, object: THREE.Object3D, animations: THREE.AnimationClip[] = []): void {
     this.clips.set(id, animations);
     const scale = this.manifest.scale?.[id] ?? 1;
@@ -81,8 +115,22 @@ export class ModelLibrary {
     // Normalise into a wrapper so callers can scale and position the wrapper
     // without fighting whatever transform the artist baked into the file.
     const wrapper = new THREE.Group();
-    // Normalize art once to the dimensions expected by collision and placement.
-    if (id !== "character") {
+    const naturalScale = this.manifest.natural?.[id];
+    if (naturalScale !== undefined) {
+      // Catalogue art: keep the size it was authored at and only move the
+      // origin to the middle of its footprint at floor level, which is where
+      // placement code wants to put things -- against a wall, on a floor, at
+      // a spot on the terrain.
+      object.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(object);
+      const center = box.getCenter(new THREE.Vector3());
+      object.scale.multiplyScalar(naturalScale);
+      object.position.set(
+        -center.x * naturalScale,
+        -box.min.y * naturalScale,
+        -center.z * naturalScale,
+      );
+    } else if (id !== "character") {
       object.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(object);
       const size = box.getSize(new THREE.Vector3());

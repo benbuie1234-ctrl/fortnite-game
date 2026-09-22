@@ -3,6 +3,7 @@ import { MAP_HALF,terrainHeight,BUILDINGS,SCENERY,PROPS,ROADS,LAKE_SHAPE,LAKE_SU
 import { getTextures, planarUVs } from './textures';
 import { createCars } from './cars';
 import { createEnvironment } from './environment';
+import { createFurnishings } from './furnishings';
 import { InstancedModel, type ModelLibrary, type ModelId } from './models';
 
 export interface Landscape {
@@ -174,6 +175,7 @@ export function createLandscape(scene:THREE.Scene,models?:ModelLibrary):Landscap
  for(const r of ROADS)road(r.x1,r.z1,r.x2,r.z2,r.width,r.color);
  createEnvironment(scene);
  createGroundCover(scene,models);
+ if (models) createFurnishings(scene, models);
  // Layered, irregular silhouettes beyond the arena instead of identical pyramids.
  for(let ring=0;ring<2;ring++)for(let i=0;i<24;i++) {
   const a=i*Math.PI*2/24+ring*.16;

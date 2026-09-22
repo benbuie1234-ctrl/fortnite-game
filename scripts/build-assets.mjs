@@ -10,6 +10,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { dedup, prune, meshopt, flatten, join } from '@gltf-transform/functions';
 import { MeshoptEncoder, MeshoptDecoder } from 'meshoptimizer';
+import { CATALOGUE, KITS, KENNEY_SCALE, MODEL_DIRS } from './asset-catalogue.mjs';
 const source=process.env.ASSET_SOURCE || '../assets';
 const out='client/public/models';await fs.mkdir(out,{recursive:true});
 await MeshoptEncoder.ready;
@@ -96,7 +97,65 @@ for (const autumn of [false,true]) {
  await treeDoc.transform(flatten(),join(),dedup(),prune(),meshopt({encoder:MeshoptEncoder,level:'high'}));
  await io.write(`${out}/${autumn?'tree_autumn':'tree_oak'}.glb`,treeDoc);
 }
-const manifest={models:Object.fromEntries([...Object.keys(files).map(id=>[id,`${id}.glb`]),['character','ranger.glb']])};await fs.writeFile(`${out}/manifest.json`,JSON.stringify(manifest,null,2)+'\n');
-for(const name of ['nature-kit','blaster-kit'])await fs.copyFile(path.join(source,name,'License.txt'),`${out}/${name}-LICENSE.txt`);
+
+// ---------------------------------------------------------------------------
+// The Kenney catalogue.
+//
+// These differ from the models above in one important way: they are shipped at
+// their NATURAL size rather than fitted to a height the game picks. A sofa, a
+// fridge and a gravestone have no single dimension worth normalising -- what
+// matters is that they are all the same size relative to each other and to the
+// player -- so the build records the real metre dimensions of each one and the
+// game places it as authored. `natural` in the manifest is what tells the
+// client to take that path instead of the fit-to-height one.
+// ---------------------------------------------------------------------------
+const natural={},sizes={},missing=[];
+let catalogueBytes=0;
+async function readKit(kit,file){
+ for(const dir of MODEL_DIRS){
+  try{return await io.read(path.join(source,kit,dir,`${file}.glb`));}catch(e){if(e.code!=='ENOENT')throw e;}
+ }
+ return null;
+}
+for(const [id,[kit,file,axis,metres]] of Object.entries(CATALOGUE)){
+ const doc=await readKit(kit,file);
+ if(doc===null){missing.push(`${id} (${kit}/${file})`);continue;}
+ // Measured BEFORE compression, and that ordering is the whole point: meshopt
+ // stores positions as normalised integers, so the same query afterwards
+ // reports a bookcase as 131068 units wide. Measured rather than trusted,
+ // because a model an author left at three times the size of its neighbours
+ // would otherwise tower over a room with nothing to show why.
+ let min=[Infinity,Infinity,Infinity],max=[-Infinity,-Infinity,-Infinity];
+ for(const mesh of doc.getRoot().listMeshes())for(const prim of mesh.listPrimitives()){
+  const pos=prim.getAttribute('POSITION');if(!pos)continue;
+  const lo=pos.getMin([]),hi=pos.getMax([]);
+  for(let i=0;i<3;i++){min[i]=Math.min(min[i],lo[i]);max[i]=Math.max(max[i],hi[i]);}
+ }
+ const raw=max.map((v,i)=>v-min[i]);
+ // A stated real-world dimension wins over the blanket doubling.
+ const scale=axis===undefined?KENNEY_SCALE:metres/raw['xyz'.indexOf(axis)];
+ if(!Number.isFinite(scale)||scale<=0)throw new Error(`${id}: cannot fit ${metres} m on ${axis} of ${raw}`);
+ natural[id]=Number(scale.toFixed(5));
+ sizes[id]=raw.map(v=>Number((v*scale).toFixed(3)));
+ if(!sizes[id].every(v=>v>0&&v<12))throw new Error(`${id} measured ${sizes[id]} m, which is not a prop`);
+
+ await doc.transform(dedup(),prune(),meshopt({encoder:MeshoptEncoder,level:'high'}));
+ await io.write(`${out}/${id}.glb`,doc);
+ const stat=await fs.stat(`${out}/${id}.glb`);catalogueBytes+=stat.size;
+}
+if(missing.length)throw new Error(`Catalogue names that do not exist in the kits:\n  ${missing.join('\n  ')}`);
+console.log('Catalogue:',Object.keys(CATALOGUE).length,'models,',catalogueBytes,'bytes');
+
+const manifest={
+ models:Object.fromEntries([
+  ...Object.keys(files).map(id=>[id,`${id}.glb`]),
+  ...Object.keys(CATALOGUE).map(id=>[id,`${id}.glb`]),
+  ['character','ranger.glb'],
+ ]),
+ natural,
+ size:sizes,
+};
+await fs.writeFile(`${out}/manifest.json`,JSON.stringify(manifest,null,2)+'\n');
+for(const name of ['nature-kit','blaster-kit',...KITS])await fs.copyFile(path.join(source,name,'License.txt'),`${out}/${name}-LICENSE.txt`);
 await fs.writeFile(`${out}/CREDITS.txt`,`CLUTCH ASSET CREDITS\n\nKenney Nature Kit (CC0)\nhttps://kenney.nl/assets/nature-kit\n\nKenney Blaster Kit 2.1 (CC0)\nhttps://kenney.nl/assets/blaster-kit\n\nModels are converted to self-contained, Meshopt-compressed GLB files.\nSee the included original license files.\n\nClutch Ranger and Meadow/Copper Oak: original models created for this game.\nSource and rebuild instructions: scripts/build-assets.mjs.\n`);
 console.log('Environment and weapon bytes:',bytes,'plus ranger',(await fs.stat(`${out}/ranger.glb`)).size);

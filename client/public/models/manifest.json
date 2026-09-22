@@ -13,6 +13,675 @@
     "weapon_smg": "weapon_smg.glb",
     "weapon_sniper": "weapon_sniper.glb",
     "crate": "crate.glb",
+    "sofa": "sofa.glb",
+    "sofa_long": "sofa_long.glb",
+    "sofa_corner": "sofa_corner.glb",
+    "armchair": "armchair.glb",
+    "armchair_relax": "armchair_relax.glb",
+    "coffee_table": "coffee_table.glb",
+    "coffee_table_glass": "coffee_table_glass.glb",
+    "tv": "tv.glb",
+    "tv_vintage": "tv_vintage.glb",
+    "tv_cabinet": "tv_cabinet.glb",
+    "rug": "rug.glb",
+    "rug_round": "rug_round.glb",
+    "floor_lamp": "floor_lamp.glb",
+    "table_lamp": "table_lamp.glb",
+    "bookcase": "bookcase.glb",
+    "bookcase_closed": "bookcase_closed.glb",
+    "books": "books.glb",
+    "potted_plant": "potted_plant.glb",
+    "plant_small": "plant_small.glb",
+    "speaker": "speaker.glb",
+    "radio": "radio.glb",
+    "fridge": "fridge.glb",
+    "fridge_large": "fridge_large.glb",
+    "stove": "stove.glb",
+    "kitchen_sink": "kitchen_sink.glb",
+    "cabinet": "cabinet.glb",
+    "cabinet_drawer": "cabinet_drawer.glb",
+    "cabinet_upper": "cabinet_upper.glb",
+    "kitchen_bar": "kitchen_bar.glb",
+    "microwave": "microwave.glb",
+    "coffee_machine": "coffee_machine.glb",
+    "bar_stool": "bar_stool.glb",
+    "dining_table": "dining_table.glb",
+    "round_table": "round_table.glb",
+    "chair": "chair.glb",
+    "chair_cushion": "chair_cushion.glb",
+    "bench_cushion": "bench_cushion.glb",
+    "bed_double": "bed_double.glb",
+    "bed_single": "bed_single.glb",
+    "bed_bunk": "bed_bunk.glb",
+    "nightstand": "nightstand.glb",
+    "coat_rack": "coat_rack.glb",
+    "bathtub": "bathtub.glb",
+    "toilet": "toilet.glb",
+    "bath_sink": "bath_sink.glb",
+    "shower": "shower.glb",
+    "washer": "washer.glb",
+    "dryer": "dryer.glb",
+    "desk": "desk.glb",
+    "desk_chair": "desk_chair.glb",
+    "monitor": "monitor.glb",
+    "laptop": "laptop.glb",
+    "box_closed": "box_closed.glb",
+    "box_open": "box_open.glb",
+    "trashcan": "trashcan.glb",
+    "ceiling_fan": "ceiling_fan.glb",
+    "ceiling_lamp": "ceiling_lamp.glb",
+    "dumpster": "dumpster.glb",
+    "dumpster_open": "dumpster_open.glb",
+    "street_bench": "street_bench.glb",
+    "street_light": "street_light.glb",
+    "street_light_double": "street_light_double.glb",
+    "traffic_light": "traffic_light.glb",
+    "barrier": "barrier.glb",
+    "barrier_strong": "barrier_strong.glb",
+    "pallet": "pallet.glb",
+    "pallet_small": "pallet_small.glb",
+    "planks": "planks.glb",
+    "awning": "awning.glb",
+    "awning_wide": "awning_wide.glb",
+    "scaffold": "scaffold.glb",
+    "parasol": "parasol.glb",
+    "barrel": "barrel.glb",
+    "barrel_open": "barrel_open.glb",
+    "crate_wood": "crate_wood.glb",
+    "crate_large": "crate_large.glb",
+    "campfire": "campfire.glb",
+    "tent": "tent.glb",
+    "chest": "chest.glb",
+    "workbench": "workbench.glb",
+    "signpost": "signpost.glb",
+    "bucket": "bucket.glb",
+    "log": "log.glb",
+    "stump": "stump.glb",
+    "rock_a": "rock_a.glb",
+    "rock_b": "rock_b.glb",
+    "rock_c": "rock_c.glb",
+    "gravestone": "gravestone.glb",
+    "gravestone_cross": "gravestone_cross.glb",
+    "gravestone_round": "gravestone_round.glb",
+    "crypt": "crypt.glb",
+    "iron_fence": "iron_fence.glb",
+    "lamp_post": "lamp_post.glb",
+    "pumpkin": "pumpkin.glb",
+    "dead_tree": "dead_tree.glb",
     "character": "ranger.glb"
+  },
+  "natural": {
+    "sofa": 2,
+    "sofa_long": 2,
+    "sofa_corner": 2,
+    "armchair": 2,
+    "armchair_relax": 2,
+    "coffee_table": 2,
+    "coffee_table_glass": 2,
+    "tv": 2,
+    "tv_vintage": 2,
+    "tv_cabinet": 2,
+    "rug": 2,
+    "rug_round": 2,
+    "floor_lamp": 2,
+    "table_lamp": 2,
+    "bookcase": 2,
+    "bookcase_closed": 2,
+    "books": 2,
+    "potted_plant": 2,
+    "plant_small": 2,
+    "speaker": 2,
+    "radio": 2,
+    "fridge": 2,
+    "fridge_large": 1.51153,
+    "stove": 2,
+    "kitchen_sink": 2,
+    "cabinet": 2,
+    "cabinet_drawer": 2,
+    "cabinet_upper": 2,
+    "kitchen_bar": 2,
+    "microwave": 2,
+    "coffee_machine": 2,
+    "bar_stool": 2,
+    "dining_table": 2,
+    "round_table": 2,
+    "chair": 2,
+    "chair_cushion": 2,
+    "bench_cushion": 2,
+    "bed_double": 1.07218,
+    "bed_single": 1.05708,
+    "bed_bunk": 1.05708,
+    "nightstand": 2,
+    "coat_rack": 2,
+    "bathtub": 1.47059,
+    "toilet": 0.82157,
+    "bath_sink": 2,
+    "shower": 0.88259,
+    "washer": 2,
+    "dryer": 2,
+    "desk": 2,
+    "desk_chair": 2,
+    "monitor": 1.52793,
+    "laptop": 0.63333,
+    "box_closed": 2,
+    "box_open": 2,
+    "trashcan": 1.10322,
+    "ceiling_fan": 2,
+    "ceiling_lamp": 2,
+    "dumpster": 3,
+    "dumpster_open": 3,
+    "street_bench": 2.98063,
+    "street_light": 5.20833,
+    "street_light_double": 5.20833,
+    "traffic_light": 3.26923,
+    "barrier": 2.77136,
+    "barrier_strong": 2,
+    "pallet": 1.2,
+    "pallet_small": 2,
+    "planks": 2,
+    "awning": 4.18204,
+    "awning_wide": 2,
+    "scaffold": 2,
+    "parasol": 5.77778,
+    "barrel": 2,
+    "barrel_open": 2,
+    "crate_wood": 3.6,
+    "crate_large": 2,
+    "campfire": 4.32014,
+    "tent": 4.45822,
+    "chest": 2,
+    "workbench": 5.41176,
+    "signpost": 4.34707,
+    "bucket": 2,
+    "log": 2,
+    "stump": 2,
+    "rock_a": 2,
+    "rock_b": 2,
+    "rock_c": 2,
+    "gravestone": 2,
+    "gravestone_cross": 2,
+    "gravestone_round": 2,
+    "crypt": 3.2,
+    "iron_fence": 2,
+    "lamp_post": 3.31598,
+    "pumpkin": 2,
+    "dead_tree": 7.77778
+  },
+  "size": {
+    "sofa": [
+      1.96,
+      0.92,
+      0.82
+    ],
+    "sofa_long": [
+      1.96,
+      0.92,
+      1.64
+    ],
+    "sofa_corner": [
+      1.96,
+      0.92,
+      1.96
+    ],
+    "armchair": [
+      0.98,
+      0.92,
+      0.82
+    ],
+    "armchair_relax": [
+      0.98,
+      1.26,
+      1.349
+    ],
+    "coffee_table": [
+      1.322,
+      0.46,
+      0.8
+    ],
+    "coffee_table_glass": [
+      1.322,
+      0.46,
+      0.8
+    ],
+    "tv": [
+      1.37,
+      0.91,
+      0.257
+    ],
+    "tv_vintage": [
+      0.82,
+      0.54,
+      0.54
+    ],
+    "tv_cabinet": [
+      1.6,
+      0.62,
+      0.5
+    ],
+    "rug": [
+      3.14,
+      0.02,
+      1.84
+    ],
+    "rug_round": [
+      1.84,
+      0.02,
+      1.84
+    ],
+    "floor_lamp": [
+      0.304,
+      1.72,
+      0.351
+    ],
+    "table_lamp": [
+      0.24,
+      0.58,
+      0.24
+    ],
+    "bookcase": [
+      0.8,
+      1.76,
+      0.5
+    ],
+    "bookcase_closed": [
+      1.12,
+      1.7,
+      0.54
+    ],
+    "books": [
+      0.301,
+      0.208,
+      0.189
+    ],
+    "potted_plant": [
+      0.51,
+      1.072,
+      0.582
+    ],
+    "plant_small": [
+      0.379,
+      0.56,
+      0.379
+    ],
+    "speaker": [
+      0.296,
+      1.273,
+      0.296
+    ],
+    "radio": [
+      0.63,
+      0.456,
+      0.195
+    ],
+    "fridge": [
+      0.86,
+      1.84,
+      0.634
+    ],
+    "fridge_large": [
+      1.199,
+      2,
+      0.583
+    ],
+    "stove": [
+      0.86,
+      0.9,
+      0.96
+    ],
+    "kitchen_sink": [
+      0.86,
+      0.98,
+      0.96
+    ],
+    "cabinet": [
+      0.86,
+      0.9,
+      0.96
+    ],
+    "cabinet_drawer": [
+      0.86,
+      0.9,
+      0.96
+    ],
+    "cabinet_upper": [
+      0.86,
+      0.78,
+      0.46
+    ],
+    "kitchen_bar": [
+      0.86,
+      0.84,
+      0.42
+    ],
+    "microwave": [
+      0.58,
+      0.36,
+      0.46
+    ],
+    "coffee_machine": [
+      0.548,
+      0.607,
+      0.66
+    ],
+    "bar_stool": [
+      0.531,
+      0.87,
+      0.46
+    ],
+    "dining_table": [
+      1.683,
+      0.653,
+      0.895
+    ],
+    "round_table": [
+      1.386,
+      0.733,
+      1.6
+    ],
+    "chair": [
+      0.4,
+      0.94,
+      0.4
+    ],
+    "chair_cushion": [
+      0.4,
+      0.92,
+      0.4
+    ],
+    "bench_cushion": [
+      0.8,
+      0.92,
+      0.4
+    ],
+    "bed_double": [
+      1.74,
+      0.541,
+      2.05
+    ],
+    "bed_single": [
+      1.716,
+      0.534,
+      2
+    ],
+    "bed_bunk": [
+      1.716,
+      1.036,
+      2
+    ],
+    "nightstand": [
+      1.069,
+      0.769,
+      0.773
+    ],
+    "coat_rack": [
+      0.546,
+      1.54,
+      0.546
+    ],
+    "bathtub": [
+      1.75,
+      0.618,
+      0.824
+    ],
+    "toilet": [
+      0.825,
+      0.78,
+      0.649
+    ],
+    "bath_sink": [
+      0.68,
+      1.12,
+      0.58
+    ],
+    "shower": [
+      1.147,
+      2.2,
+      1.13
+    ],
+    "washer": [
+      0.78,
+      1,
+      0.96
+    ],
+    "dryer": [
+      0.78,
+      1.2,
+      0.76
+    ],
+    "desk": [
+      1.469,
+      0.769,
+      1.113
+    ],
+    "desk_chair": [
+      0.957,
+      0.835,
+      0.886
+    ],
+    "monitor": [
+      0.6,
+      0.45,
+      0.159
+    ],
+    "laptop": [
+      0.38,
+      0.233,
+      0.346
+    ],
+    "box_closed": [
+      0.425,
+      0.562,
+      0.425
+    ],
+    "box_open": [
+      0.744,
+      0.562,
+      0.425
+    ],
+    "trashcan": [
+      0.547,
+      1,
+      0.485
+    ],
+    "ceiling_fan": [
+      0.909,
+      0.267,
+      1.05
+    ],
+    "ceiling_lamp": [
+      0.24,
+      0.46,
+      0.24
+    ],
+    "dumpster": [
+      1.8,
+      1.634,
+      1.361
+    ],
+    "dumpster_open": [
+      1.8,
+      1.649,
+      1.454
+    ],
+    "street_bench": [
+      1.8,
+      1.219,
+      0.96
+    ],
+    "street_light": [
+      0.449,
+      5,
+      1.376
+    ],
+    "street_light_double": [
+      0.449,
+      5,
+      2.303
+    ],
+    "traffic_light": [
+      0.511,
+      3.4,
+      1.91
+    ],
+    "barrier": [
+      1.2,
+      1.109,
+      0.371
+    ],
+    "barrier_strong": [
+      1.328,
+      0.664,
+      0.498
+    ],
+    "pallet": [
+      1.2,
+      0.18,
+      1.2
+    ],
+    "pallet_small": [
+      1,
+      0.3,
+      1.15
+    ],
+    "planks": [
+      2.259,
+      0.2,
+      1.141
+    ],
+    "awning": [
+      2.5,
+      1.174,
+      1.255
+    ],
+    "awning_wide": [
+      2,
+      0.562,
+      0.6
+    ],
+    "scaffold": [
+      2,
+      2,
+      2
+    ],
+    "parasol": [
+      2.001,
+      2.6,
+      2.311
+    ],
+    "barrel": [
+      0.473,
+      0.688,
+      0.473
+    ],
+    "barrel_open": [
+      0.473,
+      0.688,
+      0.473
+    ],
+    "crate_wood": [
+      0.9,
+      0.9,
+      0.9
+    ],
+    "crate_large": [
+      0.5,
+      0.5,
+      1
+    ],
+    "campfire": [
+      1.2,
+      0.404,
+      1.163
+    ],
+    "tent": [
+      2.5,
+      2.191,
+      2.501
+    ],
+    "chest": [
+      0.521,
+      0.425,
+      0.781
+    ],
+    "workbench": [
+      1.6,
+      1.28,
+      1.6
+    ],
+    "signpost": [
+      0.931,
+      2,
+      0.187
+    ],
+    "bucket": [
+      0.288,
+      0.384,
+      0.288
+    ],
+    "log": [
+      0.499,
+      0.554,
+      2
+    ],
+    "stump": [
+      0.4,
+      0.522,
+      0.4
+    ],
+    "rock_a": [
+      1.11,
+      0.785,
+      1.243
+    ],
+    "rock_b": [
+      1.669,
+      0.837,
+      1.449
+    ],
+    "rock_c": [
+      1.567,
+      1.02,
+      1.132
+    ],
+    "gravestone": [
+      0.9,
+      1.059,
+      0.5
+    ],
+    "gravestone_cross": [
+      0.9,
+      1.83,
+      0.66
+    ],
+    "gravestone_round": [
+      0.9,
+      1.15,
+      0.5
+    ],
+    "crypt": [
+      4.32,
+      3.2,
+      4.481
+    ],
+    "iron_fence": [
+      2,
+      1.758,
+      0.22
+    ],
+    "lamp_post": [
+      0.692,
+      4.2,
+      1.541
+    ],
+    "pumpkin": [
+      0.755,
+      0.642,
+      0.755
+    ],
+    "dead_tree": [
+      4.195,
+      3.5,
+      4.311
+    ]
   }
 }
