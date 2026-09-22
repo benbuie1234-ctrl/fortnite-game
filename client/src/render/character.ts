@@ -191,25 +191,43 @@ export class Character {
     const art = models?.get("character");
     if (art) {
       const names = ["hipL", "hipR", "kneeL", "kneeR", "footL", "footR", "torso", "armL", "armR", "head"] as const;
-      if (names.every(n => art.getObjectByName(n))) {
-        for (const node of [this.hipL, this.hipR, this.torso, this.armL, this.armR, this.head]) {
-          this.root.remove(node);
-          node.traverse(n => { if (n instanceof THREE.Mesh) n.geometry.dispose(); });
-        }
-        for (const name of names) (this as unknown as Record<string, THREE.Object3D>)[name] = art.getObjectByName(name)!;
-        art.traverse(node => {
-          if (!(node instanceof THREE.Mesh)) return;
-          for (const mat of Array.isArray(node.material) ? node.material : [node.material]) {
-            if (mat instanceof THREE.MeshStandardMaterial) {
-              if (mat.name === "Armor") mat.color.setHex(skin.colors.primary);
-              if (mat.name === "Accent") mat.color.setHex(skin.colors.accent);
-            }
-          }
-        });
-        this.root.add(art);
-        this.mixer = new THREE.AnimationMixer(art);
-        for (const clip of models!.animations("character")) this.actions.set(clip.name, this.mixer.clipAction(clip));
+      const isBlockRanger = names.every(n => art.getObjectByName(n));
+
+      for (const node of [this.hipL, this.hipR, this.torso, this.armL, this.armR, this.head]) {
+        this.root.remove(node);
+        node.traverse(n => { if (n instanceof THREE.Mesh) n.geometry.dispose(); });
       }
+
+      if (isBlockRanger) {
+        for (const name of names) (this as unknown as Record<string, THREE.Object3D>)[name] = art.getObjectByName(name)!;
+      } else {
+        const rightHand = art.getObjectByName("mixamorigRightHand") || art.getObjectByName("RightHand");
+        if (rightHand) {
+          this.root.remove(this.gun);
+          this.root.remove(this.pickaxe);
+          rightHand.add(this.gun);
+          rightHand.add(this.pickaxe);
+          this.gun.position.set(0.08, 0.12, 0.0);
+          this.gun.rotation.set(0, Math.PI / 2, -Math.PI / 2);
+          this.pickaxe.position.set(0.08, 0.12, 0.0);
+          this.pickaxe.rotation.set(0, Math.PI / 2, -Math.PI / 2);
+        }
+      }
+
+      art.traverse(node => {
+        if (!(node instanceof THREE.Mesh)) return;
+        node.castShadow = true;
+        node.receiveShadow = true;
+        for (const mat of Array.isArray(node.material) ? node.material : [node.material]) {
+          if (mat instanceof THREE.MeshStandardMaterial) {
+            if (mat.name === "Armor") mat.color.setHex(skin.colors.primary);
+            if (mat.name === "Accent" || mat.name === "Suit") mat.color.setHex(skin.colors.accent);
+          }
+        }
+      });
+      this.root.add(art);
+      this.mixer = new THREE.AnimationMixer(art);
+      for (const clip of models!.animations("character")) this.actions.set(clip.name, this.mixer.clipAction(clip));
     }
     this.setNameplate(name);
   }
@@ -236,7 +254,13 @@ export class Character {
     this.gunModel = imported as THREE.Group | null ?? createWeaponModel(id);
     this.gun.add(this.gunModel);
   }
-  fire():void { this.kick=this.weaponId===W_PICKAXE?.35:.09; }
+  fire(): void {
+    this.kick = this.weaponId === W_PICKAXE ? .35 : .09;
+    const fireAction = this.actions.get("fire");
+    if (fireAction) {
+      fireAction.reset().setLoop(THREE.LoopOnce, 1).play();
+    }
+  }
   aimAt(worldPoint:THREE.Vector3):void {
     if(!this.gun.visible)return;
     this.root.updateMatrixWorld(true);
@@ -296,13 +320,29 @@ export class Character {
     speed: number, grounded: boolean, dt: number,
     crouchTarget = 0,
   ): void {
-    const next = this.actions.get(!grounded ? "jump" : speed > .5 ? "run" : "idle");
+    const moveClip = speed > 4.5 ? "run" : speed > 0.4 ? (this.actions.has("walk") ? "walk" : "run") : "idle";
+    const next = this.actions.get(!grounded ? "jump" : moveClip);
     if (next && next !== this.currentAction) {
       next.reset().fadeIn(.18).play();
       this.currentAction?.fadeOut(.18);
       this.currentAction = next;
     }
     this.mixer?.update(dt);
+
+    if (this.mixer) {
+      this.crouch += (crouchTarget - this.crouch) * (1 - Math.exp(-14 * dt));
+      const crouch = this.crouch < 0.001 ? 0 : this.crouch;
+      this.root.position.set(x, y + (CROUCH_HIP_Y - LEG_H) * crouch, z);
+      this.root.rotation.y = -yaw;
+      this.kick = Math.max(0, this.kick - dt);
+      this.muzzle.visible = this.weaponId !== W_PICKAXE && this.kick > 0.045;
+      const spine = this.root.getObjectByName("mixamorigSpine1") || this.root.getObjectByName("mixamorigSpine");
+      if (spine) spine.rotation.x = -pitch * 0.55;
+      const head = this.root.getObjectByName("mixamorigHead");
+      if (head) head.rotation.x = -pitch * 0.35;
+      this.nameplate.position.y = PLAYER_HEIGHT + 0.42;
+      return;
+    }
     // Track the stance. The simulation already shrinks the collision capsule
     // and drops the eye; without this the model stayed bolt upright, so
     // crouching looked like it did nothing at all.
