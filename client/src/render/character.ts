@@ -61,6 +61,17 @@ export const CROUCH_HIP_Y = Math.max(
  */
 type BoneOffsets = ReadonlyArray<readonly [name: string, x: number, y: number, z: number]>;
 
+/**
+ * Seconds a climb pose is held after the simulation has finished with it.
+ *
+ * The solver's vault is one or two ticks -- it only has to move the feet over
+ * the obstacle -- so posing strictly on the flag showed the vault for 33 ms
+ * and the player saw their run cycle stutter. A vault is held longer than a
+ * mantle because it is the shorter event of the two; a mantle up a full wall
+ * already runs for a third of a second on its own.
+ */
+const VAULT_HOLD_S = 0.65;
+const MANTLE_HOLD_S = 0.75;
 /** How long the landing take runs for. Matches the trimmed clip's length. */
 const LAND_HOLD_S = 0.68;
 
@@ -203,6 +214,9 @@ export class Character {
   private slideMix = 0;
   private mantleMix = 0;
   private vaultMix = 0;
+  /** Seconds left of the minimum hold on a climb pose. See VAULT_HOLD_S. */
+  private mantleHold = 0;
+  private vaultHold = 0;
   /** Seconds left of the landing clip, and last frame's stance, so the
    *  touchdown can be spotted here rather than plumbed in from the caller. */
   private landHold = 0;
@@ -528,21 +542,21 @@ export class Character {
       this.landHold = Math.max(0, this.landHold - dt);
     }
     this.wasGrounded = grounded;
-    const isClimbing = (mantling || vaulting) && !grounded && this.actions.has("climb");
-    const showVault = vaulting && !isClimbing;
-    const showMantle = mantling && !isClimbing;
+    this.vaultHold = vaulting ? VAULT_HOLD_S : Math.max(0, this.vaultHold - dt);
+    this.mantleHold = mantling ? MANTLE_HOLD_S : Math.max(0, this.mantleHold - dt);
+    const showVault = vaulting || this.vaultHold > 0;
+    const showMantle = mantling || this.mantleHold > 0;
+    const isClimbing = (showMantle || showVault) && this.actions.has("climb");
     // Only the states without a clip of their own still need a built pose on
     // top of a still one; the rest are animations now.
-    const posed = showVault;
+    const posed = showVault && !isClimbing;
     const clip = this.pickClip(
       speed, grounded, sliding, showMantle, showVault, alive, forward, strafe,
       this.landHold > 0,
     );
     const next = this.actions.get(clip) ?? this.actions.get("idle");
     if (next && next !== this.currentAction) {
-      const isEnteringClimb = clip === "climb";
-      const isLeavingClimb = this.currentAction?.getClip().name === "climb";
-      const fadeInTime = (isEnteringClimb || isLeavingClimb) ? 0.06 : 0.18;
+      const fadeInTime = clip === "climb" ? 0.08 : 0.18;
       next.reset().fadeIn(fadeInTime).play();
       this.currentAction?.fadeOut(fadeInTime);
       this.currentAction = next;
@@ -726,7 +740,8 @@ export class Character {
   ): string {
     const has = (name: string) => this.actions.has(name);
     if (!alive && has("death")) return "death";
-    if ((mantling || vaulting) && !grounded && has("climb")) return "climb";
+    if ((mantling || vaulting) && has("climb")) return "climb";
+    if (mantling && has("climb")) return "climb";
     if (vaulting) return has("jump") ? "jump" : "idle";
     if (sliding && has("slide")) return "slide";
     if (!grounded) return has("jump") ? "jump" : "idle";
