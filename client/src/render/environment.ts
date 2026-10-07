@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BUILDINGS, PROPS, ROADS, DOCK, ARCHITECTURE, terrainHeight, buildingFootprint, Building } from '@shared/map';
+import { BUILDINGS, PROPS, ROADS, DOCK, terrainHeight, buildingFootprint, Building } from '@shared/map';
 import { TILE } from '@shared/constants';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
@@ -76,15 +76,10 @@ const gasRed = 0xd83020;
 export function createEnvironment(scene: THREE.Scene): void {
   const k = new Kit();
 
-  // Solid architecture panels from map data (door/window frames)
-  for (const p of ARCHITECTURE) {
-    k.add(p.x, p.y, p.z, p.w, p.h, p.d, p.color);
-  }
-
   BUILDINGS.forEach((b: Building, index: number) => {
     const x = b.x * TILE, z = b.z * TILE, y = b.base * TILE;
     const w = b.w * TILE, d = b.d * TILE, h = b.floors * TILE;
-    const theme = b.theme ?? b.style;
+    const theme: string = ({ barn: 'red_barn', gas: 'gas_station', chapel: 'church', tower: 'lookout_tower', cabin: 'alpine_cabin', bunker: 'bunker_shelter' } as Record<string, string>)[b.archetype] ?? b.style;
     const doorX = x + (Math.floor(b.w / 2) + 0.5) * TILE;
 
     // --- 1. Sidewalks & Paved Plazas ---
@@ -394,23 +389,24 @@ export function createEnvironment(scene: THREE.Scene): void {
   // --- 11. Props & Furniture Physics Geometry Detailing ---
   for (const p of PROPS) {
     if (!p.kind || p.kind === 'crate') continue;
+    const kind: string = p.kind;
     const { x, y, z, w, h, d } = p;
 
-    if (p.kind === 'fence') {
+    if (kind === 'fence') {
       for (let dz = -d / 2 + 0.18; dz < d / 2; dz += 0.55) {
         k.add(x, y + h / 2, z + dz, w, h, 0.18, trim, 'round');
       }
       for (const v of [0.25, 0.7]) {
         k.add(x, y + h * v, z, w * 0.65, 0.12, d, 0xd0bea0);
       }
-    } else if (p.kind === 'bench') {
+    } else if (kind === 'bench') {
       for (const dx of [-0.32, 0, 0.32]) {
         k.add(x + dx, y + h - 0.12, z, 0.26, 0.18, d, 0x9a7351, 'round');
       }
       for (const dz of [-d * 0.36, d * 0.36]) {
         k.add(x, y + h / 2, z + dz, w * 0.7, h, 0.16, iron);
       }
-    } else if (p.kind === 'clock') {
+    } else if (kind === 'clock') {
       // Citadel Grand Clocktower
       k.add(x, y + h / 2, z, w * 0.88, h, d * 0.88, 0xcdbb9b);
       for (const v of [0.2, 0.6, 8.7, 11.7]) {
@@ -432,13 +428,13 @@ export function createEnvironment(scene: THREE.Scene): void {
       }
       // Steeple roof on clock tower
       k.add(x, y + h + 2.2, z, w * 0.95, 4.4, d * 0.95, 0x5a6870, 'stone');
-    } else if (p.kind === 'cabinet') {
+    } else if (kind === 'cabinet') {
       k.add(x, y + h / 2, z, w, h, d, 0x9a7959, 'round');
       for (let v = 0; v < 3; v++) {
         k.add(x, y + 0.3 + v * 0.6, z - d / 2 - 0.015, w * 0.88, 0.48, 0.035, 0xb89770);
         k.add(x, y + 0.3 + v * 0.6, z - d / 2 - 0.04, w * 0.25, 0.05, 0.04, iron, 'box', 0, 'metal');
       }
-    } else if (p.kind === 'vent') {
+    } else if (kind === 'vent') {
       k.add(x, y + h / 2, z, w, h, d, 0x8b9a98, 'round', 0, 'metal');
       for (let v = 0.2; v < h; v += 0.16) {
         k.add(x, y + v, z - d / 2 - 0.015, w * 0.82, 0.055, 0.04, iron);
@@ -449,7 +445,7 @@ export function createEnvironment(scene: THREE.Scene): void {
           k.add(x + dx, y + h + 0.04, z, 0.72, 0.02, 0.06, 0x9aaba4, 'box', q * Math.PI / 4, 'metal');
         }
       }
-    } else if (p.kind === 'barrel') {
+    } else if (kind === 'barrel') {
       k.add(x, y + h / 2, z, w, h, d, 0x698d91, 'cylinder', 0, 'metal');
       for (const v of [0.08, 0.25, 0.75, 0.92]) {
         k.add(x, y + h * v, z, w * 1.02, 0.055, d * 1.02, iron, 'cylinder');

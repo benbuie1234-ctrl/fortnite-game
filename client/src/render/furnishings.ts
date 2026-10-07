@@ -1042,7 +1042,7 @@ function dressMountainTrails(out: Placement[]): void {
  */
 function dressLandmarkPoiInteriors(out: Placement[]): void {
   // 1. Anarchy Acres Red Barn
-  const barn = BUILDINGS.find(b => b.theme === 'red_barn');
+  const barn = BUILDINGS.find(b => b.archetype === 'barn');
   if (barn) {
     const bx = barn.x * TILE, bz = barn.z * TILE, by = barn.base * TILE;
     const bw = barn.w * TILE, bd = barn.d * TILE;
@@ -1067,7 +1067,7 @@ function dressLandmarkPoiInteriors(out: Placement[]): void {
   }
 
   // 2. Retail Gas & Go Mini-Mart
-  const gas = BUILDINGS.find(b => b.theme === 'gas_station');
+  const gas = BUILDINGS.find(b => b.archetype === 'gas');
   if (gas) {
     const gx = gas.x * TILE, gz = gas.z * TILE, gy = gas.base * TILE;
     const gw = gas.w * TILE, gd = gas.d * TILE;
@@ -1089,7 +1089,7 @@ function dressLandmarkPoiInteriors(out: Placement[]): void {
   }
 
   // 3. Haunted Chapel & Cemetery
-  const church = BUILDINGS.find(b => b.theme === 'church');
+  const church = BUILDINGS.find(b => b.archetype === 'chapel');
   if (church) {
     const cx = church.x * TILE, cz = church.z * TILE, cy = church.base * TILE;
     const cw = church.w * TILE, cd = church.d * TILE;
@@ -1122,7 +1122,7 @@ function dressLandmarkPoiInteriors(out: Placement[]): void {
   }
 
   // 4. Summit Fire Lookout Tower
-  const lookout = BUILDINGS.find(b => b.theme === 'lookout_tower');
+  const lookout = BUILDINGS.find(b => b.archetype === 'tower');
   if (lookout) {
     const lx = lookout.x * TILE, lz = lookout.z * TILE;
     const lw = lookout.w * TILE, ld = lookout.d * TILE;
