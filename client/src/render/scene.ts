@@ -118,7 +118,7 @@ export function createRenderer(mount: HTMLElement, models?: ModelLibrary): Rende
   scene.add(sun.target);
 
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
-  const landscape = createLandscape(scene, models, anisotropy);
+  const landscape = createLandscape(scene, models);
   const atmosphere = createAtmosphere(scene);
 
   // --- bloom ----------------------------------------------------------------
