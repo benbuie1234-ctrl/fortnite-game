@@ -108,7 +108,7 @@
     "lamp_post": "lamp_post.glb",
     "pumpkin": "pumpkin.glb",
     "dead_tree": "dead_tree.glb",
-    "character": "ranger.glb"
+    "character": "player.glb"
   },
   "natural": {
     "sofa": 2,
